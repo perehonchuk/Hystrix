@@ -218,7 +218,8 @@ public class ExecutionResult {
             case SUCCESS: return true;
             case FAILURE: return true;
             case BAD_REQUEST: return true;
-            case TIMEOUT: return true;
+            case TIMEOUT_EXECUTION: return true;
+            case TIMEOUT_FALLBACK: return true;
             case CANCELLED: return true;
             default: return false;
         }

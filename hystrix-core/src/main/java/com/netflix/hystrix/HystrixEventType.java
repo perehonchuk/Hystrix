@@ -29,7 +29,8 @@ public enum HystrixEventType {
     EMIT(false),
     SUCCESS(true),
     FAILURE(false),
-    TIMEOUT(false),
+    TIMEOUT_EXECUTION(false),
+    TIMEOUT_FALLBACK(false),
     BAD_REQUEST(true),
     SHORT_CIRCUITED(false),
     THREAD_POOL_REJECTED(false),
@@ -61,7 +62,8 @@ public enum HystrixEventType {
             case EMIT: return EMIT;
             case SUCCESS: return SUCCESS;
             case FAILURE: return FAILURE;
-            case TIMEOUT: return TIMEOUT;
+            case TIMEOUT_EXECUTION: return TIMEOUT_EXECUTION;
+            case TIMEOUT_FALLBACK: return TIMEOUT_FALLBACK;
             case SHORT_CIRCUITED: return SHORT_CIRCUITED;
             case THREAD_POOL_REJECTED: return THREAD_POOL_REJECTED;
             case SEMAPHORE_REJECTED: return SEMAPHORE_REJECTED;
@@ -121,7 +123,8 @@ public enum HystrixEventType {
             switch (eventType) {
                 case SUCCESS: return EXECUTED;
                 case FAILURE: return EXECUTED;
-                case TIMEOUT: return EXECUTED;
+                case TIMEOUT_EXECUTION: return EXECUTED;
+                case TIMEOUT_FALLBACK: return EXECUTED;
                 case BAD_REQUEST: return EXECUTED;
                 case THREAD_POOL_REJECTED: return REJECTED;
                 default: return null;
