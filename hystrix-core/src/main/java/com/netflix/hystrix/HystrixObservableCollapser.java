@@ -85,27 +85,28 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      * Typically this means that requests within a single user-request (ie. HTTP request) are collapsed. No interaction with other user requests. 1 queue per user request.
      * </li>
      * <li>GLOBAL: Requests from any thread (ie. all HTTP requests) within the JVM will be collapsed. 1 queue for entire app.</li>
+     * <li>THREAD: Requests within the same executing thread will be collapsed. 1 queue per thread.</li>
      * </ul>
      */
     public static enum Scope implements RequestCollapserFactory.Scope {
-        REQUEST, GLOBAL
+        REQUEST, GLOBAL, THREAD
     }
 
     /**
-     * Collapser with default {@link HystrixCollapserKey} derived from the implementing class name and scoped to {@link Scope#REQUEST} and default configuration.
+     * Collapser with default {@link HystrixCollapserKey} derived from the implementing class name and scoped to {@link Scope#GLOBAL} and default configuration.
      */
     protected HystrixObservableCollapser() {
-        this(Setter.withCollapserKey(null).andScope(Scope.REQUEST));
+        this(Setter.withCollapserKey(null).andScope(Scope.GLOBAL));
     }
 
     /**
-     * Collapser scoped to {@link Scope#REQUEST} and default configuration.
-     * 
+     * Collapser scoped to {@link Scope#GLOBAL} and default configuration.
+     *
      * @param collapserKey
      *            {@link HystrixCollapserKey} that identifies this collapser and provides the key used for retrieving properties, request caches, publishing metrics etc.
      */
     protected HystrixObservableCollapser(HystrixCollapserKey collapserKey) {
-        this(Setter.withCollapserKey(collapserKey).andScope(Scope.REQUEST));
+        this(Setter.withCollapserKey(collapserKey).andScope(Scope.GLOBAL));
     }
 
     /**

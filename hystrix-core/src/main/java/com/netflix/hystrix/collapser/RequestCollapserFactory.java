@@ -52,7 +52,7 @@ public class RequestCollapserFactory<BatchReturnType, ResponseType, RequestArgum
     
     // internally expected scopes, dealing with the not-so-fun inheritance issues of enum when shared between classes
     private static enum Scopes implements Scope {
-        REQUEST, GLOBAL
+        REQUEST, GLOBAL, THREAD
     }
     
     public RequestCollapserFactory(HystrixCollapserKey collapserKey, Scope scope, CollapserTimer timer, HystrixCollapserProperties.Setter propertiesBuilder) {
@@ -86,9 +86,11 @@ public class RequestCollapserFactory<BatchReturnType, ResponseType, RequestArgum
             return getCollapserForUserRequest(commandCollapser);
         } else if (Scopes.GLOBAL == Scopes.valueOf(getScope().name())) {
             return getCollapserForGlobalScope(commandCollapser);
+        } else if (Scopes.THREAD == Scopes.valueOf(getScope().name())) {
+            return getCollapserForThreadScope(commandCollapser);
         } else {
-            logger.warn("Invalid Scope: {}  Defaulting to REQUEST scope.", getScope());
-            return getCollapserForUserRequest(commandCollapser);
+            logger.warn("Invalid Scope: {}  Defaulting to GLOBAL scope.", getScope());
+            return getCollapserForGlobalScope(commandCollapser);
         }
     }
 
@@ -163,11 +165,43 @@ public class RequestCollapserFactory<BatchReturnType, ResponseType, RequestArgum
     }
 
     /**
+     * Static thread-local cache of RequestCollapsers for Scope.THREAD
+     */
+    private static ThreadLocal<ConcurrentHashMap<String, RequestCollapser<?, ?, ?>>> threadScopedCollapsers =
+        new ThreadLocal<ConcurrentHashMap<String, RequestCollapser<?, ?, ?>>>() {
+            @Override
+            protected ConcurrentHashMap<String, RequestCollapser<?, ?, ?>> initialValue() {
+                return new ConcurrentHashMap<String, RequestCollapser<?, ?, ?>>();
+            }
+        };
+
+    @SuppressWarnings("unchecked")
+    private RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType> getCollapserForThreadScope(HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser) {
+        ConcurrentHashMap<String, RequestCollapser<?, ?, ?>> threadCollapsers = threadScopedCollapsers.get();
+        RequestCollapser<?, ?, ?> collapser = threadCollapsers.get(collapserKey.name());
+        if (collapser != null) {
+            return (RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType>) collapser;
+        }
+        // create new collapser for this thread
+        RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType> newCollapser = new RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType>(commandCollapser, properties, timer, concurrencyStrategy);
+        RequestCollapser<?, ?, ?> existing = threadCollapsers.putIfAbsent(collapserKey.name(), newCollapser);
+        if (existing == null) {
+            // we won
+            return newCollapser;
+        } else {
+            // we lost ... another thread beat us (unlikely in thread-local context but possible with race conditions)
+            newCollapser.shutdown();
+            return (RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType>) existing;
+        }
+    }
+
+    /**
      * Clears all state. If new requests come in instances will be recreated and metrics started from scratch.
      */
     public static void reset() {
         globalScopedCollapsers.clear();
         requestScopedCollapsers.clear();
+        threadScopedCollapsers.remove();
         HystrixTimer.reset();
     }
 
