@@ -228,6 +228,54 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked when the circuit breaker transitions from CLOSED to OPEN state.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param errorCount The number of errors that triggered the circuit breaker
+     * @param errorPercentage The error percentage at time of opening
+     *
+     * @since 1.6.0
+     */
+    public <T> void onCircuitBreakerOpen(HystrixInvokable<T> commandInstance, long errorCount, int errorPercentage) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the circuit breaker transitions from HALF_OPEN to CLOSED state.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onCircuitBreakerClosed(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the circuit breaker transitions from OPEN to HALF_OPEN state
+     * after the sleep window has elapsed.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onCircuitBreakerHalfOpen(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when execution is rejected by a semaphore (both execution and fallback semaphores).
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param semaphoreType The type of semaphore that rejected ("EXECUTION" or "FALLBACK")
+     *
+     * @since 1.6.0
+     */
+    public <T> void onSemaphoreRejected(HystrixInvokable<T> commandInstance, String semaphoreType) {
+        //do nothing by default
+    }
+
+    /**
      * DEPRECATED: Change usages of this to {@link #onExecutionStart}.
      *
      * Invoked before {@link HystrixCommand#run()} is about to be executed.

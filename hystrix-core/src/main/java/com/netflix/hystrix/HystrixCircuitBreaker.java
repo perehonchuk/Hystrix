@@ -20,6 +20,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.netflix.hystrix.HystrixCommandMetrics.HealthCounts;
+import com.netflix.hystrix.strategy.HystrixPlugins;
+import com.netflix.hystrix.strategy.executionhook.HystrixCommandExecutionHook;
 import rx.Subscriber;
 import rx.Subscription;
 
@@ -138,6 +140,8 @@ public interface HystrixCircuitBreaker {
     /* package */class HystrixCircuitBreakerImpl implements HystrixCircuitBreaker {
         private final HystrixCommandProperties properties;
         private final HystrixCommandMetrics metrics;
+        private final HystrixCommandKey commandKey;
+        private final HystrixCommandExecutionHook executionHook;
 
         enum Status {
             CLOSED, OPEN, HALF_OPEN;
@@ -150,6 +154,8 @@ public interface HystrixCircuitBreaker {
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
             this.metrics = metrics;
+            this.commandKey = key;
+            this.executionHook = HystrixPlugins.getInstance().getCommandExecutionHook();
 
             //On a timer, this will set the circuit between OPEN/CLOSED as command executions occur
             Subscription s = subscribeToStream();
@@ -193,6 +199,11 @@ public interface HystrixCircuitBreaker {
                                     // our failure rate is too high, we need to set the state to OPEN
                                     if (status.compareAndSet(Status.CLOSED, Status.OPEN)) {
                                         circuitOpened.set(System.currentTimeMillis());
+                                        try {
+                                            executionHook.onCircuitBreakerOpen(null, hc.getTotalRequests(), hc.getErrorPercentage());
+                                        } catch (Exception hookException) {
+                                            // Don't let hook exceptions affect circuit breaker logic
+                                        }
                                     }
                                 }
                             }
@@ -212,6 +223,11 @@ public interface HystrixCircuitBreaker {
                 Subscription newSubscription = subscribeToStream();
                 activeSubscription.set(newSubscription);
                 circuitOpened.set(-1L);
+                try {
+                    executionHook.onCircuitBreakerClosed(null);
+                } catch (Exception hookException) {
+                    // Don't let hook exceptions affect circuit breaker logic
+                }
             }
         }
 
@@ -277,6 +293,11 @@ public interface HystrixCircuitBreaker {
                     //if the executing command fails, the status will transition to OPEN
                     //if the executing command gets unsubscribed, the status will transition to OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        try {
+                            executionHook.onCircuitBreakerHalfOpen(null);
+                        } catch (Exception hookException) {
+                            // Don't let hook exceptions affect circuit breaker logic
+                        }
                         return true;
                     } else {
                         return false;
