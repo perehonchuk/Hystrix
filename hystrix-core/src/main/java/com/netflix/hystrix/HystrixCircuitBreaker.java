@@ -146,6 +146,7 @@ public interface HystrixCircuitBreaker {
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicLong halfOpenAttempts = new AtomicLong(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -202,16 +203,23 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            if (status.get().equals(Status.HALF_OPEN)) {
+                long currentAttempts = halfOpenAttempts.decrementAndGet();
+                // Close circuit only when all concurrent half-open attempts have completed successfully
+                if (currentAttempts <= 0) {
+                    if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
+                        //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+                        halfOpenAttempts.set(0);
+                    }
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
             }
         }
 
@@ -220,6 +228,7 @@ public interface HystrixCircuitBreaker {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+                halfOpenAttempts.set(0);
             }
         }
 
@@ -246,7 +255,8 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (status.get().equals(Status.HALF_OPEN)) {
-                    return false;
+                    // In half-open state, allow requests up to the concurrent limit
+                    return halfOpenAttempts.get() > 0;
                 } else {
                     return isAfterSleepWindow();
                 }
@@ -272,12 +282,23 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (isAfterSleepWindow()) {
-                    //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
-                    //if the executing command fails, the status will transition to OPEN
-                    //if the executing command gets unsubscribed, the status will transition to OPEN
+                    // Allow multiple concurrent requests during half-open state
+                    int maxConcurrentRequests = properties.circuitBreakerHalfOpenConcurrentRequests().get();
+
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        // First thread transitions to HALF_OPEN
+                        halfOpenAttempts.set(maxConcurrentRequests);
                         return true;
+                    } else if (status.get().equals(Status.HALF_OPEN)) {
+                        // Already in HALF_OPEN, check if we can allow more concurrent requests
+                        long currentAttempts = halfOpenAttempts.get();
+                        while (currentAttempts > 0) {
+                            if (halfOpenAttempts.compareAndSet(currentAttempts, currentAttempts - 1)) {
+                                return true;
+                            }
+                            currentAttempts = halfOpenAttempts.get();
+                        }
+                        return false;
                     } else {
                         return false;
                     }
