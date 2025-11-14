@@ -52,7 +52,7 @@ public abstract class HystrixCommandProperties {
     private static final Boolean default_executionIsolationThreadInterruptOnTimeout = true;
     private static final Boolean default_executionIsolationThreadInterruptOnFutureCancel = false;
     private static final Boolean default_metricsRollingPercentileEnabled = true;
-    private static final Boolean default_requestCacheEnabled = true;
+    private static final Boolean default_requestCacheEnabled = false;
     private static final Integer default_fallbackIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_fallbackEnabled = true;
     private static final Integer default_executionIsolationSemaphoreMaxConcurrentRequests = 10;
@@ -410,7 +410,9 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand#getCacheKey()} should be used with {@link HystrixRequestCache} to provide de-duplication functionality via request-scoped caching.
-     * 
+     * <p>
+     * Default is false. Request caching must be explicitly enabled by setting this property to true.
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestCacheEnabled() {

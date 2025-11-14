@@ -22,6 +22,7 @@ import org.junit.Test;
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
 import com.netflix.hystrix.HystrixCommandKey;
+import com.netflix.hystrix.HystrixCommandProperties;
 import com.netflix.hystrix.HystrixRequestCache;
 import com.netflix.hystrix.strategy.concurrency.HystrixConcurrencyStrategyDefault;
 import com.netflix.hystrix.strategy.concurrency.HystrixRequestContext;
@@ -29,6 +30,8 @@ import com.netflix.hystrix.strategy.concurrency.HystrixRequestContext;
 /**
  * Example {@link HystrixCommand} implementation for handling the get-set-get use case within
  * a single request context so that the "set" can invalidate the cached "get".
+ * <p>
+ * Request caching must be explicitly enabled by setting requestCacheEnabled to true.
  */
 public class CommandUsingRequestCacheInvalidation {
 
@@ -42,7 +45,9 @@ public class CommandUsingRequestCacheInvalidation {
 
         public GetterCommand(int id) {
             super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("GetSetGet"))
-                    .andCommandKey(GETTER_KEY));
+                    .andCommandKey(GETTER_KEY)
+                    .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
+                            .withRequestCacheEnabled(true)));
             this.id = id;
         }
 

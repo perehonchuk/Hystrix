@@ -1723,6 +1723,12 @@ import java.util.concurrent.atomic.AtomicReference;
         return getCacheKey();
     }
 
+    /**
+     * Check if request caching is enabled for this command.
+     * Request caching is enabled when both conditions are met:
+     * 1. requestCacheEnabled property is explicitly set to true (default is now false)
+     * 2. getCacheKey() returns a non-null value
+     */
     protected boolean isRequestCachingEnabled() {
         return properties.requestCacheEnabled().get() && getCacheKey() != null;
     }

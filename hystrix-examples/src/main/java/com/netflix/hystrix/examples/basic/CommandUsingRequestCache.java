@@ -21,18 +21,23 @@ import org.junit.Test;
 
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
+import com.netflix.hystrix.HystrixCommandProperties;
 import com.netflix.hystrix.strategy.concurrency.HystrixRequestContext;
 
 /**
  * Sample {@link HystrixCommand} showing how implementing the {@link #getCacheKey()} method
- * enables request caching for eliminating duplicate calls within the same request context.
+ * and explicitly enabling request caching allows for eliminating duplicate calls within the same request context.
+ * <p>
+ * Request caching must be explicitly enabled by setting requestCacheEnabled to true.
  */
 public class CommandUsingRequestCache extends HystrixCommand<Boolean> {
 
     private final int value;
 
     protected CommandUsingRequestCache(int value) {
-        super(HystrixCommandGroupKey.Factory.asKey("ExampleGroup"));
+        super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("ExampleGroup"))
+                .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
+                        .withRequestCacheEnabled(true)));
         this.value = value;
     }
 
