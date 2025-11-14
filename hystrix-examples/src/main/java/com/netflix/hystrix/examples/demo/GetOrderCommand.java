@@ -17,6 +17,8 @@ package com.netflix.hystrix.examples.demo;
 
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
+import com.netflix.hystrix.HystrixCommandProperties;
+import com.netflix.hystrix.HystrixCommandProperties.ExecutionIsolationStrategy;
 
 /**
  * Sample HystrixCommand simulating one that would fetch Order objects from a remote service or database.
@@ -28,7 +30,10 @@ public class GetOrderCommand extends HystrixCommand<Order> {
     private final int orderId;
 
     public GetOrderCommand(int orderId) {
-        super(HystrixCommandGroupKey.Factory.asKey("Order"));
+        super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("Order"))
+                // explicitly use THREAD isolation for network calls (since default is now SEMAPHORE)
+                .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
+                        .withExecutionIsolationStrategy(ExecutionIsolationStrategy.THREAD)));
         this.orderId = orderId;
     }
 

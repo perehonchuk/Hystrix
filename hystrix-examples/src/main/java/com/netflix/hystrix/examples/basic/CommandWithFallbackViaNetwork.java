@@ -22,6 +22,8 @@ import org.junit.Test;
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
 import com.netflix.hystrix.HystrixCommandKey;
+import com.netflix.hystrix.HystrixCommandProperties;
+import com.netflix.hystrix.HystrixCommandProperties.ExecutionIsolationStrategy;
 import com.netflix.hystrix.HystrixEventType;
 import com.netflix.hystrix.HystrixInvokableInfo;
 import com.netflix.hystrix.HystrixRequestLog;
@@ -43,7 +45,10 @@ public class CommandWithFallbackViaNetwork extends HystrixCommand<String> {
 
     protected CommandWithFallbackViaNetwork(int id) {
         super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("RemoteServiceX"))
-                .andCommandKey(HystrixCommandKey.Factory.asKey("GetValueCommand")));
+                .andCommandKey(HystrixCommandKey.Factory.asKey("GetValueCommand"))
+                // explicitly use THREAD isolation for network calls (since default is now SEMAPHORE)
+                .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
+                        .withExecutionIsolationStrategy(ExecutionIsolationStrategy.THREAD)));
         this.id = id;
     }
 
@@ -67,7 +72,10 @@ public class CommandWithFallbackViaNetwork extends HystrixCommand<String> {
                     // use a different threadpool for the fallback command
                     // so saturating the RemoteServiceX pool won't prevent
                     // fallbacks from executing
-                    .andThreadPoolKey(HystrixThreadPoolKey.Factory.asKey("RemoteServiceXFallback")));
+                    .andThreadPoolKey(HystrixThreadPoolKey.Factory.asKey("RemoteServiceXFallback"))
+                    // explicitly use THREAD isolation for network calls (since default is now SEMAPHORE)
+                    .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
+                            .withExecutionIsolationStrategy(ExecutionIsolationStrategy.THREAD)));
             this.id = id;
         }
 
