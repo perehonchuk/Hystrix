@@ -55,8 +55,8 @@ public abstract class HystrixThreadPoolProperties {
                                                                                  //turning this on should be a conscious decision by the user, so we default it to false
 
     static int default_queueSizeRejectionThreshold = 5; // number of items in queue
-    static int default_threadPoolRollingNumberStatisticalWindow = 10000; // milliseconds for rolling number
-    static int default_threadPoolRollingNumberStatisticalWindowBuckets = 10; // number of buckets in rolling number (10 1-second buckets)
+    static int default_threadPoolRollingNumberStatisticalWindow = 30000; // milliseconds for rolling number
+    static int default_threadPoolRollingNumberStatisticalWindowBuckets = 15; // number of buckets in rolling number (15 2-second buckets)
 
     private final HystrixProperty<Integer> corePoolSize;
     private final HystrixProperty<Integer> maximumPoolSize;

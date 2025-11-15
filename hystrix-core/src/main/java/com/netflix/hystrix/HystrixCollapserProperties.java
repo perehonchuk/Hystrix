@@ -35,8 +35,8 @@ public abstract class HystrixCollapserProperties {
     private static final Integer default_maxRequestsInBatch = Integer.MAX_VALUE;
     private static final Integer default_timerDelayInMilliseconds = 10;
     private static final Boolean default_requestCacheEnabled = true;
-    /* package */ static final Integer default_metricsRollingStatisticalWindow = 10000;// default => statisticalWindow: 10000 = 10 seconds (and default of 10 buckets so each bucket is 1 second)
-    private static final Integer default_metricsRollingStatisticalWindowBuckets = 10;// default => statisticalWindowBuckets: 10 = 10 buckets in a 10 second window so each bucket is 1 second
+    /* package */ static final Integer default_metricsRollingStatisticalWindow = 30000;// default => statisticalWindow: 30000 = 30 seconds (and default of 15 buckets so each bucket is 2 seconds)
+    private static final Integer default_metricsRollingStatisticalWindowBuckets = 15;// default => statisticalWindowBuckets: 15 = 15 buckets in a 30 second window so each bucket is 2 seconds
     private static final Boolean default_metricsRollingPercentileEnabled = true;
     private static final Integer default_metricsRollingPercentileWindow = 60000; // default to 1 minute for RollingPercentile
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
