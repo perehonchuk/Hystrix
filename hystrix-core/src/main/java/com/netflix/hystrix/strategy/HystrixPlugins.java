@@ -141,7 +141,7 @@ public class HystrixPlugins {
 
     /**
      * Register a {@link HystrixEventNotifier} implementation as a global override of any injected or default implementations.
-     * 
+     *
      * @param impl
      *            {@link HystrixEventNotifier} implementation
      * @throws IllegalStateException
@@ -151,6 +151,18 @@ public class HystrixPlugins {
         if (!notifier.compareAndSet(null, impl)) {
             throw new IllegalStateException("Another strategy was already registered.");
         }
+    }
+
+    /**
+     * Force register a {@link HystrixEventNotifier} implementation, replacing any existing registration.
+     * This method allows re-registration of strategies at runtime, which can be useful for testing
+     * or dynamic plugin replacement scenarios.
+     *
+     * @param impl
+     *            {@link HystrixEventNotifier} implementation
+     */
+    public void forceRegisterEventNotifier(HystrixEventNotifier impl) {
+        notifier.set(impl);
     }
 
     /**
@@ -179,7 +191,7 @@ public class HystrixPlugins {
 
     /**
      * Register a {@link HystrixConcurrencyStrategy} implementation as a global override of any injected or default implementations.
-     * 
+     *
      * @param impl
      *            {@link HystrixConcurrencyStrategy} implementation
      * @throws IllegalStateException
@@ -189,6 +201,18 @@ public class HystrixPlugins {
         if (!concurrencyStrategy.compareAndSet(null, impl)) {
             throw new IllegalStateException("Another strategy was already registered.");
         }
+    }
+
+    /**
+     * Force register a {@link HystrixConcurrencyStrategy} implementation, replacing any existing registration.
+     * This method allows re-registration of strategies at runtime, which can be useful for testing
+     * or dynamic plugin replacement scenarios.
+     *
+     * @param impl
+     *            {@link HystrixConcurrencyStrategy} implementation
+     */
+    public void forceRegisterConcurrencyStrategy(HystrixConcurrencyStrategy impl) {
+        concurrencyStrategy.set(impl);
     }
 
     /**
@@ -217,7 +241,7 @@ public class HystrixPlugins {
 
     /**
      * Register a {@link HystrixMetricsPublisher} implementation as a global override of any injected or default implementations.
-     * 
+     *
      * @param impl
      *            {@link HystrixMetricsPublisher} implementation
      * @throws IllegalStateException
@@ -227,6 +251,18 @@ public class HystrixPlugins {
         if (!metricsPublisher.compareAndSet(null, impl)) {
             throw new IllegalStateException("Another strategy was already registered.");
         }
+    }
+
+    /**
+     * Force register a {@link HystrixMetricsPublisher} implementation, replacing any existing registration.
+     * This method allows re-registration of strategies at runtime, which can be useful for testing
+     * or dynamic plugin replacement scenarios.
+     *
+     * @param impl
+     *            {@link HystrixMetricsPublisher} implementation
+     */
+    public void forceRegisterMetricsPublisher(HystrixMetricsPublisher impl) {
+        metricsPublisher.set(impl);
     }
 
     /**
@@ -274,7 +310,7 @@ public class HystrixPlugins {
 
     /**
      * Register a {@link HystrixPropertiesStrategy} implementation as a global override of any injected or default implementations.
-     * 
+     *
      * @param impl
      *            {@link HystrixPropertiesStrategy} implementation
      * @throws IllegalStateException
@@ -284,6 +320,18 @@ public class HystrixPlugins {
         if (!propertiesFactory.compareAndSet(null, impl)) {
             throw new IllegalStateException("Another strategy was already registered.");
         }
+    }
+
+    /**
+     * Force register a {@link HystrixPropertiesStrategy} implementation, replacing any existing registration.
+     * This method allows re-registration of strategies at runtime, which can be useful for testing
+     * or dynamic plugin replacement scenarios.
+     *
+     * @param impl
+     *            {@link HystrixPropertiesStrategy} implementation
+     */
+    public void forceRegisterPropertiesStrategy(HystrixPropertiesStrategy impl) {
+        propertiesFactory.set(impl);
     }
 
     /**
@@ -315,18 +363,31 @@ public class HystrixPlugins {
 
     /**
      * Register a {@link HystrixCommandExecutionHook} implementation as a global override of any injected or default implementations.
-     * 
+     *
      * @param impl
      *            {@link HystrixCommandExecutionHook} implementation
      * @throws IllegalStateException
      *             if called more than once or after the default was initialized (if usage occurs before trying to register)
-     * 
+     *
      * @since 1.2
      */
     public void registerCommandExecutionHook(HystrixCommandExecutionHook impl) {
         if (!commandExecutionHook.compareAndSet(null, impl)) {
             throw new IllegalStateException("Another strategy was already registered.");
         }
+    }
+
+    /**
+     * Force register a {@link HystrixCommandExecutionHook} implementation, replacing any existing registration.
+     * This method allows re-registration of strategies at runtime, which can be useful for testing
+     * or dynamic plugin replacement scenarios.
+     *
+     * @param impl
+     *            {@link HystrixCommandExecutionHook} implementation
+     * @since 1.2
+     */
+    public void forceRegisterCommandExecutionHook(HystrixCommandExecutionHook impl) {
+        commandExecutionHook.set(impl);
     }
 
     
