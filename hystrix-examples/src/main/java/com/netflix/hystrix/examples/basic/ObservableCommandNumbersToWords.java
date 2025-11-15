@@ -70,6 +70,17 @@ class ObservableCommandNumbersToWords extends HystrixObservableCommand<NumberWor
 		});
 	}
 
+	/**
+	 * Override to enable tracking of each emission event.
+	 * By default, HystrixObservableCommand does not track individual emissions
+	 * for performance reasons, but this example demonstrates how to enable it.
+	 */
+	@Override
+	protected boolean shouldOutputOnNextEvents()
+	{
+		return true;
+	}
+
 	static class NumberWord
 	{
 		private final Integer number;

@@ -52,14 +52,19 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
 
     /**
      *
-     * Overridden to true so that all onNext emissions are captured
+     * Determines if onNext emissions should be captured and reported.
+     *
+     * By default, onNext event tracking is disabled for performance reasons.
+     * Observable commands that emit many values can generate significant overhead
+     * if every emission is logged and tracked. Applications that need detailed
+     * emission tracking should override this method to return true.
      *
      * @return if onNext events should be reported on
      * This affects {@link HystrixRequestLog}, and {@link HystrixEventNotifier} currently.  Metrics/Hooks later
      */
     @Override
     protected boolean shouldOutputOnNextEvents() {
-        return true;
+        return false;
     }
 
     @Override
