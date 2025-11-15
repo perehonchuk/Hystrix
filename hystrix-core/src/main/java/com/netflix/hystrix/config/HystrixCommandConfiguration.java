@@ -53,6 +53,8 @@ public class HystrixCommandConfiguration {
                 commandProperties.executionTimeoutInMilliseconds().get(),
                 commandProperties.fallbackEnabled().get(),
                 commandProperties.fallbackIsolationSemaphoreMaxConcurrentRequests().get(),
+                commandProperties.fallbackExecutionTimeoutEnabled().get(),
+                commandProperties.fallbackExecutionTimeoutInMilliseconds().get(),
                 commandProperties.requestCacheEnabled().get(),
                 commandProperties.requestLogEnabled().get()
         );
@@ -151,12 +153,15 @@ public class HystrixCommandConfiguration {
         private final int timeoutInMilliseconds;
         private final boolean fallbackEnabled;
         private final int fallbackMaxConcurrentRequest;
+        private final boolean fallbackExecutionTimeoutEnabled;
+        private final int fallbackExecutionTimeoutInMilliseconds;
         private final boolean requestCacheEnabled;
         private final boolean requestLogEnabled;
 
         public HystrixCommandExecutionConfig(int semaphoreMaxConcurrentRequests, HystrixCommandProperties.ExecutionIsolationStrategy isolationStrategy,
                                              boolean threadInterruptOnTimeout, String threadPoolKeyOverride, boolean timeoutEnabled,
                                              int timeoutInMilliseconds, boolean fallbackEnabled, int fallbackMaxConcurrentRequests,
+                                             boolean fallbackExecutionTimeoutEnabled, int fallbackExecutionTimeoutInMilliseconds,
                                              boolean requestCacheEnabled, boolean requestLogEnabled) {
             this.semaphoreMaxConcurrentRequests = semaphoreMaxConcurrentRequests;
             this.isolationStrategy = isolationStrategy;
@@ -166,6 +171,8 @@ public class HystrixCommandConfiguration {
             this.timeoutInMilliseconds = timeoutInMilliseconds;
             this.fallbackEnabled = fallbackEnabled;
             this.fallbackMaxConcurrentRequest = fallbackMaxConcurrentRequests;
+            this.fallbackExecutionTimeoutEnabled = fallbackExecutionTimeoutEnabled;
+            this.fallbackExecutionTimeoutInMilliseconds = fallbackExecutionTimeoutInMilliseconds;
             this.requestCacheEnabled = requestCacheEnabled;
             this.requestLogEnabled = requestLogEnabled;
 
@@ -201,6 +208,14 @@ public class HystrixCommandConfiguration {
 
         public int getFallbackMaxConcurrentRequest() {
             return fallbackMaxConcurrentRequest;
+        }
+
+        public boolean isFallbackExecutionTimeoutEnabled() {
+            return fallbackExecutionTimeoutEnabled;
+        }
+
+        public int getFallbackExecutionTimeoutInMilliseconds() {
+            return fallbackExecutionTimeoutInMilliseconds;
         }
 
         public boolean isRequestCacheEnabled() {

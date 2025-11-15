@@ -55,6 +55,8 @@ public abstract class HystrixCommandProperties {
     private static final Boolean default_requestCacheEnabled = true;
     private static final Integer default_fallbackIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_fallbackEnabled = true;
+    private static final Integer default_fallbackExecutionTimeoutInMilliseconds = 500; // default => fallback execution timeout: 500ms
+    private static final Boolean default_fallbackExecutionTimeoutEnabled = true;
     private static final Integer default_executionIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_requestLogEnabled = true;
     private static final Boolean default_circuitBreakerEnabled = true;
@@ -77,6 +79,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> executionIsolationSemaphoreMaxConcurrentRequests; // Number of permits for execution semaphore
     private final HystrixProperty<Integer> fallbackIsolationSemaphoreMaxConcurrentRequests; // Number of permits for fallback semaphore
     private final HystrixProperty<Boolean> fallbackEnabled; // Whether fallback should be attempted.
+    private final HystrixProperty<Integer> fallbackExecutionTimeoutInMilliseconds; // Timeout value in milliseconds for fallback execution
+    private final HystrixProperty<Boolean> fallbackExecutionTimeoutEnabled; // Whether timeout should be triggered for fallback execution
     private final HystrixProperty<Boolean> executionIsolationThreadInterruptOnTimeout; // Whether an underlying Future/Thread (when runInSeparateThread == true) should be interrupted after a timeout
     private final HystrixProperty<Boolean> executionIsolationThreadInterruptOnFutureCancel; // Whether canceling an underlying Future/Thread (when runInSeparateThread == true) should interrupt the execution thread
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
@@ -127,6 +131,8 @@ public abstract class HystrixCommandProperties {
         this.executionIsolationSemaphoreMaxConcurrentRequests = getProperty(propertyPrefix, key, "execution.isolation.semaphore.maxConcurrentRequests", builder.getExecutionIsolationSemaphoreMaxConcurrentRequests(), default_executionIsolationSemaphoreMaxConcurrentRequests);
         this.fallbackIsolationSemaphoreMaxConcurrentRequests = getProperty(propertyPrefix, key, "fallback.isolation.semaphore.maxConcurrentRequests", builder.getFallbackIsolationSemaphoreMaxConcurrentRequests(), default_fallbackIsolationSemaphoreMaxConcurrentRequests);
         this.fallbackEnabled = getProperty(propertyPrefix, key, "fallback.enabled", builder.getFallbackEnabled(), default_fallbackEnabled);
+        this.fallbackExecutionTimeoutInMilliseconds = getProperty(propertyPrefix, key, "fallback.execution.timeout.timeoutInMilliseconds", builder.getFallbackExecutionTimeoutInMilliseconds(), default_fallbackExecutionTimeoutInMilliseconds);
+        this.fallbackExecutionTimeoutEnabled = getProperty(propertyPrefix, key, "fallback.execution.timeout.enabled", builder.getFallbackExecutionTimeoutEnabled(), default_fallbackExecutionTimeoutEnabled);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -324,13 +330,34 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand#getFallback()} should be attempted when failure occurs.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
-     * 
+     *
      * @since 1.2
      */
     public HystrixProperty<Boolean> fallbackEnabled() {
         return fallbackEnabled;
+    }
+
+    /**
+     * Timeout in milliseconds for fallback execution.
+     * <p>
+     * This property sets the maximum time allowed for fallback method execution.
+     * If the fallback takes longer than this timeout, it will be interrupted and fail.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> fallbackExecutionTimeoutInMilliseconds() {
+        return fallbackExecutionTimeoutInMilliseconds;
+    }
+
+    /**
+     * Whether timeout should be triggered for fallback execution.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> fallbackExecutionTimeoutEnabled() {
+        return fallbackExecutionTimeoutEnabled;
     }
 
     /**
@@ -550,6 +577,8 @@ public abstract class HystrixCommandProperties {
         private Boolean executionTimeoutEnabled = null;
         private Integer fallbackIsolationSemaphoreMaxConcurrentRequests = null;
         private Boolean fallbackEnabled = null;
+        private Integer fallbackExecutionTimeoutInMilliseconds = null;
+        private Boolean fallbackExecutionTimeoutEnabled = null;
         private Integer metricsHealthSnapshotIntervalInMilliseconds = null;
         private Integer metricsRollingPercentileBucketSize = null;
         private Boolean metricsRollingPercentileEnabled = null;
@@ -626,6 +655,14 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getFallbackEnabled() {
             return fallbackEnabled;
+        }
+
+        public Integer getFallbackExecutionTimeoutInMilliseconds() {
+            return fallbackExecutionTimeoutInMilliseconds;
+        }
+
+        public Boolean getFallbackExecutionTimeoutEnabled() {
+            return fallbackExecutionTimeoutEnabled;
         }
 
         public Integer getMetricsHealthSnapshotIntervalInMilliseconds() {
@@ -740,6 +777,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withFallbackEnabled(boolean value) {
             this.fallbackEnabled = value;
+            return this;
+        }
+
+        public Setter withFallbackExecutionTimeoutInMilliseconds(int value) {
+            this.fallbackExecutionTimeoutInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withFallbackExecutionTimeoutEnabled(boolean value) {
+            this.fallbackExecutionTimeoutEnabled = value;
             return this;
         }
 

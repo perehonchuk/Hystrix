@@ -52,6 +52,7 @@ import java.lang.ref.Reference;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -863,7 +864,15 @@ import java.util.concurrent.atomic.AtomicReference;
                         fallbackExecutionChain = Observable.error(ex);
                     }
 
-                    return fallbackExecutionChain
+                    Observable<R> fallbackWithTimeout = fallbackExecutionChain;
+
+                    // Apply timeout to fallback execution if enabled
+                    if (properties.fallbackExecutionTimeoutEnabled().get()) {
+                        fallbackWithTimeout = fallbackExecutionChain
+                                .timeout(properties.fallbackExecutionTimeoutInMilliseconds().get(), TimeUnit.MILLISECONDS);
+                    }
+
+                    return fallbackWithTimeout
                             .doOnEach(setRequestContext)
                             .lift(new FallbackHookApplication(_cmd))
                             .lift(new DeprecatedOnFallbackHookApplication(_cmd))
