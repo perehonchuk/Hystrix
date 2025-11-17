@@ -20,9 +20,11 @@ import com.netflix.hystrix.HystrixCommand;
 /**
  * An exception representing an error with provided arguments or state rather than an execution failure.
  * <p>
- * Unlike all other exceptions thrown by a {@link HystrixCommand} this will not trigger fallback, not count against failure metrics and thus not trigger the circuit breaker.
+ * This exception now triggers fallback logic and counts against failure metrics, potentially triggering the circuit breaker.
+ * The fallback will be invoked to provide a graceful degradation path even for bad requests.
  * <p>
- * NOTE: This should <b>only</b> be used when an error is due to user input such as {@link IllegalArgumentException} otherwise it defeats the purpose of fault-tolerance and fallback behavior.
+ * NOTE: This should be used when an error is due to user input such as {@link IllegalArgumentException}.
+ * The fallback logic can provide appropriate error responses or default behavior for invalid requests.
  */
 public class HystrixBadRequestException extends RuntimeException {
 

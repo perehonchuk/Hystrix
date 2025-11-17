@@ -610,14 +610,13 @@ import java.util.concurrent.atomic.AtomicReference;
                 } else if (t instanceof HystrixTimeoutException) {
                     return handleTimeoutViaFallback();
                 } else if (t instanceof HystrixBadRequestException) {
-                    return handleBadRequestByEmittingError(e);
+                    return handleBadRequestViaFallback(e);
                 } else {
                     /*
-                     * Treat HystrixBadRequestException from ExecutionHook like a plain HystrixBadRequestException.
+                     * Treat HystrixBadRequestException from ExecutionHook and trigger fallback.
                      */
                     if (e instanceof HystrixBadRequestException) {
-                        eventNotifier.markEvent(HystrixEventType.BAD_REQUEST, commandKey);
-                        return Observable.error(e);
+                        return handleBadRequestViaFallback(e);
                     }
 
                     return handleFailureViaFallback(e);
@@ -998,27 +997,18 @@ import java.util.concurrent.atomic.AtomicReference;
         return getFallbackOrThrowException(this, HystrixEventType.TIMEOUT, FailureType.TIMEOUT, "timed-out", new TimeoutException());
     }
 
-    private Observable<R> handleBadRequestByEmittingError(Exception underlying) {
-        Exception toEmit = underlying;
-
-        try {
-            long executionLatency = System.currentTimeMillis() - executionResult.getStartTimestamp();
-            eventNotifier.markEvent(HystrixEventType.BAD_REQUEST, commandKey);
-            executionResult = executionResult.addEvent((int) executionLatency, HystrixEventType.BAD_REQUEST);
-            Exception decorated = executionHook.onError(this, FailureType.BAD_REQUEST_EXCEPTION, underlying);
-
-            if (decorated instanceof HystrixBadRequestException) {
-                toEmit = decorated;
-            } else {
-                logger.warn("ExecutionHook.onError returned an exception that was not an instance of HystrixBadRequestException so will be ignored.", decorated);
-            }
-        } catch (Exception hookEx) {
-            logger.warn("Error calling HystrixCommandExecutionHook.onError", hookEx);
-        }
-        /*
-         * HystrixBadRequestException is treated differently and allowed to propagate without any stats tracking or fallback logic
+    private Observable<R> handleBadRequestViaFallback(Exception underlying) {
+        /**
+         * HystrixBadRequestException now triggers fallback logic and counts toward failure metrics
          */
-        return Observable.error(toEmit);
+        logger.debug("Bad request detected in HystrixCommand.run(). Proceeding to fallback logic ...", underlying);
+
+        // report bad request as failure
+        eventNotifier.markEvent(HystrixEventType.BAD_REQUEST, commandKey);
+
+        // record the exception
+        executionResult = executionResult.setException(underlying);
+        return getFallbackOrThrowException(this, HystrixEventType.BAD_REQUEST, FailureType.BAD_REQUEST_EXCEPTION, "bad request", underlying);
     }
 
     private Observable<R> handleFailureViaFallback(Exception underlying) {

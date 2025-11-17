@@ -30,7 +30,7 @@ public enum HystrixEventType {
     SUCCESS(true),
     FAILURE(false),
     TIMEOUT(false),
-    BAD_REQUEST(true),
+    BAD_REQUEST(false),
     SHORT_CIRCUITED(false),
     THREAD_POOL_REJECTED(false),
     SEMAPHORE_REJECTED(false),
@@ -92,7 +92,6 @@ public enum HystrixEventType {
     public final static List<HystrixEventType> TERMINAL_EVENT_TYPES = new ArrayList<HystrixEventType>();
 
     static {
-        EXCEPTION_PRODUCING_EVENT_TYPES.add(BAD_REQUEST);
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_FAILURE);
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_DISABLED);
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_MISSING);
