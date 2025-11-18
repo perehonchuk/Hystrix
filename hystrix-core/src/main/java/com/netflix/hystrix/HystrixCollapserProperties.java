@@ -40,7 +40,7 @@ public abstract class HystrixCollapserProperties {
     private static final Boolean default_metricsRollingPercentileEnabled = true;
     private static final Integer default_metricsRollingPercentileWindow = 60000; // default to 1 minute for RollingPercentile
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
-    private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
+    private static final Integer default_metricsRollingPercentileBucketSize = 200; // default to 200 values max per bucket
 
     private final HystrixProperty<Integer> maxRequestsInBatch;
     private final HystrixProperty<Integer> timerDelayInMilliseconds;

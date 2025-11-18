@@ -60,7 +60,7 @@ public abstract class HystrixCommandProperties {
     private static final Boolean default_circuitBreakerEnabled = true;
     private static final Integer default_metricsRollingPercentileWindow = 60000; // default to 1 minute for RollingPercentile 
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
-    private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
+    private static final Integer default_metricsRollingPercentileBucketSize = 200; // default to 200 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
