@@ -158,7 +158,9 @@ public interface HystrixCircuitBreaker {
 
         private Subscription subscribeToStream() {
             /*
-             * This stream will recalculate the OPEN/CLOSED status on every onNext from the health stream
+             * This stream will recalculate the OPEN/CLOSED status on every onNext from the health stream.
+             * The health stream emits health snapshots at the interval configured by
+             * metricsHealthSnapshotIntervalInMilliseconds (default: 1000ms).
              */
             return metrics.getHealthCountsStream()
                     .observe()

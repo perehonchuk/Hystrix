@@ -31,8 +31,10 @@ import java.util.concurrent.ConcurrentMap;
  * There is a rolling window abstraction on this stream.
  * The HealthCounts object is calculated over a window of t1 milliseconds.  This window has b buckets.
  * Therefore, a new HealthCounts object is produced every t2 (=t1/b) milliseconds
- * t1 = {@link HystrixCommandProperties#metricsHealthSnapshotIntervalInMilliseconds()}
- * b = {@link HystrixCommandProperties#metricsRollingStatisticalWindowBuckets()}
+ * t1 = {@link HystrixCommandProperties#metricsHealthSnapshotIntervalInMilliseconds()} (default: 1000ms)
+ * b = {@link HystrixCommandProperties#metricsRollingStatisticalWindowBuckets()} (default: 10)
+ *
+ * With defaults, a new HealthCounts snapshot is emitted every 100ms (1000ms / 10 buckets = 100ms per bucket).
  *
  * These values are stable - there's no peeking into a bucket until it is emitted
  *

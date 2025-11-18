@@ -61,7 +61,7 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindow = 60000; // default to 1 minute for RollingPercentile 
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
-    private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 1000; // default to 1000ms as max frequency between allowing snapshots of health (error percentage etc)
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -337,7 +337,9 @@ public abstract class HystrixCommandProperties {
      * Time in milliseconds to wait between allowing health snapshots to be taken that calculate success and error percentages and affect {@link HystrixCircuitBreaker#isOpen()} status.
      * <p>
      * On high-volume circuits the continual calculation of error percentage can become CPU intensive thus this controls how often it is calculated.
-     * 
+     * <p>
+     * Default value is 1000ms (1 second) to reduce CPU overhead on high-throughput commands.
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds() {
@@ -743,6 +745,14 @@ public abstract class HystrixCommandProperties {
             return this;
         }
 
+        /**
+         * Set the health snapshot interval in milliseconds.
+         * <p>
+         * Default: 1000ms
+         *
+         * @param value health snapshot interval in milliseconds
+         * @return Setter for method chaining
+         */
         public Setter withMetricsHealthSnapshotIntervalInMilliseconds(int value) {
             this.metricsHealthSnapshotIntervalInMilliseconds = value;
             return this;
