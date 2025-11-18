@@ -34,11 +34,11 @@ import java.util.concurrent.TimeUnit;
 /**
  * ThreadPool used to executed {@link HystrixCommand#run()} on separate threads when configured to do so with {@link HystrixCommandProperties#executionIsolationStrategy()}.
  * <p>
- * Typically each {@link HystrixCommandGroupKey} has its own thread-pool so that any one group of commands can not starve others from being able to run.
+ * Typically each {@link HystrixCommandKey} has its own thread-pool so that any one command can not interfere with others.
  * <p>
  * A {@link HystrixCommand} can be configured with a thread-pool explicitly by injecting a {@link HystrixThreadPoolKey} or via the
  * {@link HystrixCommandProperties#executionIsolationThreadPoolKeyOverride()} otherwise it
- * will derive a {@link HystrixThreadPoolKey} from the injected {@link HystrixCommandGroupKey}.
+ * will derive a {@link HystrixThreadPoolKey} from the injected {@link HystrixCommandKey}.
  * <p>
  * The pool should be sized large enough to handle normal healthy traffic but small enough that it will constrain concurrent execution if backend calls become latent.
  * <p>

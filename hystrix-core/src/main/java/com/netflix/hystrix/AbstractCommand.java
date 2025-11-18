@@ -162,7 +162,7 @@ import java.util.concurrent.atomic.AtomicReference;
         this.commandGroup = initGroupKey(group);
         this.commandKey = initCommandKey(key, getClass());
         this.properties = initCommandProperties(this.commandKey, propertiesStrategy, commandPropertiesDefaults);
-        this.threadPoolKey = initThreadPoolKey(threadPoolKey, this.commandGroup, this.properties.executionIsolationThreadPoolKeyOverride().get());
+        this.threadPoolKey = initThreadPoolKey(threadPoolKey, this.commandGroup, this.commandKey, this.properties.executionIsolationThreadPoolKeyOverride().get());
         this.metrics = initMetrics(metrics, this.commandGroup, this.threadPoolKey, this.commandKey, this.properties);
         this.circuitBreaker = initCircuitBreaker(this.properties.circuitBreakerEnabled().get(), circuitBreaker, this.commandGroup, this.commandKey, this.properties, this.metrics);
         this.threadPool = initThreadPool(threadPool, this.threadPoolKey, threadPoolPropertiesDefaults);
@@ -214,16 +214,16 @@ import java.util.concurrent.atomic.AtomicReference;
      *
      * This defines which thread-pool this command should run on.
      *
-     * It uses the HystrixThreadPoolKey if provided, then defaults to use HystrixCommandGroup.
+     * It uses the HystrixThreadPoolKey if provided, then defaults to use HystrixCommandKey.
      *
      * It can then be overridden by a property if defined so it can be changed at runtime.
      */
-    private static HystrixThreadPoolKey initThreadPoolKey(HystrixThreadPoolKey threadPoolKey, HystrixCommandGroupKey groupKey, String threadPoolKeyOverride) {
+    private static HystrixThreadPoolKey initThreadPoolKey(HystrixThreadPoolKey threadPoolKey, HystrixCommandGroupKey groupKey, HystrixCommandKey commandKey, String threadPoolKeyOverride) {
         if (threadPoolKeyOverride == null) {
-            // we don't have a property overriding the value so use either HystrixThreadPoolKey or HystrixCommandGroup
+            // we don't have a property overriding the value so use either HystrixThreadPoolKey or HystrixCommandKey
             if (threadPoolKey == null) {
-                /* use HystrixCommandGroup if HystrixThreadPoolKey is null */
-                return HystrixThreadPoolKey.Factory.asKey(groupKey.name());
+                /* use HystrixCommandKey if HystrixThreadPoolKey is null */
+                return HystrixThreadPoolKey.Factory.asKey(commandKey.name());
             } else {
                 return threadPoolKey;
             }

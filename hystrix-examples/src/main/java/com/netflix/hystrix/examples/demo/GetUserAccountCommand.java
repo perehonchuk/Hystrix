@@ -24,6 +24,8 @@ import com.netflix.hystrix.HystrixCommandGroupKey;
  * Sample HystrixCommand simulating one that would fetch UserAccount objects from a remote service or database.
  * <p>
  * This uses request caching and fallback behavior.
+ * <p>
+ * This command will use a dedicated thread-pool named "GetUserAccountCommand" by default.
  */
 public class GetUserAccountCommand extends HystrixCommand<UserAccount> {
 

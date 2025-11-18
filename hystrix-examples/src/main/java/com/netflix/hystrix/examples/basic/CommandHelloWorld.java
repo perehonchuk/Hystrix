@@ -30,6 +30,9 @@ import com.netflix.hystrix.HystrixCommandGroupKey;
 
 /**
  * The obligatory "Hello World!" showing a simple implementation of a {@link HystrixCommand}.
+ * <p>
+ * Note: This command will use its own dedicated thread-pool (named "CommandHelloWorld") by default,
+ * as each command gets its own thread-pool based on the command class name.
  */
 public class CommandHelloWorld extends HystrixCommand<String> {
 
