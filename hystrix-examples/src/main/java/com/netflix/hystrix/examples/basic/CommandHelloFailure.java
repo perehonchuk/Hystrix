@@ -23,16 +23,21 @@ import org.junit.Test;
 
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
+import com.netflix.hystrix.HystrixCommandProperties;
 
 /**
  * Sample {@link HystrixCommand} showing a basic fallback implementation.
+ * <p>
+ * Note: Fallback must be explicitly enabled via configuration (default is disabled).
  */
 public class CommandHelloFailure extends HystrixCommand<String> {
 
     private final String name;
 
     public CommandHelloFailure(String name) {
-        super(HystrixCommandGroupKey.Factory.asKey("ExampleGroup"));
+        super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("ExampleGroup"))
+                .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
+                        .withFallbackEnabled(true)));
         this.name = name;
     }
 

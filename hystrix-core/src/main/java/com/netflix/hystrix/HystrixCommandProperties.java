@@ -54,7 +54,7 @@ public abstract class HystrixCommandProperties {
     private static final Boolean default_metricsRollingPercentileEnabled = true;
     private static final Boolean default_requestCacheEnabled = true;
     private static final Integer default_fallbackIsolationSemaphoreMaxConcurrentRequests = 10;
-    private static final Boolean default_fallbackEnabled = true;
+    private static final Boolean default_fallbackEnabled = false;
     private static final Integer default_executionIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_requestLogEnabled = true;
     private static final Boolean default_circuitBreakerEnabled = true;
@@ -324,9 +324,12 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand#getFallback()} should be attempted when failure occurs.
-     * 
+     * <p>
+     * Default is false. Fallback execution must be explicitly enabled by setting this property to true.
+     * When disabled, commands will throw exceptions directly without attempting fallback logic.
+     *
      * @return {@code HystrixProperty<Boolean>}
-     * 
+     *
      * @since 1.2
      */
     public HystrixProperty<Boolean> fallbackEnabled() {
