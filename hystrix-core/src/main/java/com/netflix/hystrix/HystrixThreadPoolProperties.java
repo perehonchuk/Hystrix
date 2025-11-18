@@ -48,7 +48,7 @@ public abstract class HystrixThreadPoolProperties {
     /* defaults */
     static int default_coreSize = 10;            // core size of thread pool
     static int default_maximumSize = 10;         // maximum size of thread pool
-    static int default_keepAliveTimeMinutes = 1; // minutes to keep a thread alive
+    static int default_keepAliveTimeMinutes = 5; // minutes to keep a thread alive (increased from 1 to reduce thread churn)
     static int default_maxQueueSize = -1;        // size of queue (this can't be dynamically changed so we use 'queueSizeRejectionThreshold' to artificially limit and reject)
                                                  // -1 turns it off and makes us use SynchronousQueue
     static boolean default_allow_maximum_size_to_diverge_from_core_size = false; //should the maximumSize config value get read and used in configuring the threadPool
@@ -151,7 +151,10 @@ public abstract class HystrixThreadPoolProperties {
 
     /**
      * Keep-alive time in minutes that gets passed to {@link ThreadPoolExecutor#setKeepAliveTime(long, TimeUnit)}
-     * 
+     * <p>
+     * Default is 5 minutes. This allows idle threads in elastic thread pools (where coreSize < maximumSize)
+     * to remain available longer before being released, reducing thread creation overhead during variable load.
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> keepAliveTimeMinutes() {
