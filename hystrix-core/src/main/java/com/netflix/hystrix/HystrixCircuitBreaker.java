@@ -183,7 +183,12 @@ public interface HystrixCircuitBreaker {
                                 // if it was half-open, we need to wait for a successful command execution
                                 // if it was open, we need to wait for sleep window to elapse
                             } else {
-                                if (hc.getErrorPercentage() < properties.circuitBreakerErrorThresholdPercentage().get()) {
+                                // check if we have minimum execution count before evaluating error percentage
+                                long totalExecutions = hc.getTotalRequests();
+                                if (totalExecutions < properties.circuitBreakerMinimumExecutionCount().get()) {
+                                    // we don't have enough executions to make a reliable decision
+                                    // so no change to circuit status
+                                } else if (hc.getErrorPercentage() < properties.circuitBreakerErrorThresholdPercentage().get()) {
                                     //we are not past the minimum error threshold for the stat window,
                                     // so no change to circuit status.
                                     // if it was CLOSED, it stays CLOSED
