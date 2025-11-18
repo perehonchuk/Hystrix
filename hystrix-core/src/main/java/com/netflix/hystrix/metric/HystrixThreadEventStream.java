@@ -157,6 +157,11 @@ public class HystrixThreadEventStream {
         writeOnlyCollapserSubject.onNext(batchAdditions);
     }
 
+    public void collapserShardSizeTracked(HystrixCollapserKey collapserKey, int shardSize) {
+        HystrixCollapserEvent shardEvent = HystrixCollapserEvent.from(collapserKey, HystrixEventType.Collapser.BATCH_EXECUTED, 1, shardSize);
+        writeOnlyCollapserSubject.onNext(shardEvent);
+    }
+
     @Override
     public String toString() {
         return "HystrixThreadEventStream (" + threadId + " - " + threadName + ")";

@@ -19,6 +19,7 @@ import com.netflix.hystrix.metric.HystrixCollapserEvent;
 import com.netflix.hystrix.metric.HystrixThreadEventStream;
 import com.netflix.hystrix.metric.consumer.CumulativeCollapserEventCounterStream;
 import com.netflix.hystrix.metric.consumer.RollingCollapserBatchSizeDistributionStream;
+import com.netflix.hystrix.metric.consumer.RollingCollapserShardSizeDistributionStream;
 import com.netflix.hystrix.metric.consumer.RollingCollapserEventCounterStream;
 import com.netflix.hystrix.strategy.eventnotifier.HystrixEventNotifier;
 import com.netflix.hystrix.util.HystrixRollingNumberEvent;
@@ -114,6 +115,7 @@ public class HystrixCollapserMetrics extends HystrixMetrics {
     private final RollingCollapserEventCounterStream rollingCollapserEventCounterStream;
     private final CumulativeCollapserEventCounterStream cumulativeCollapserEventCounterStream;
     private final RollingCollapserBatchSizeDistributionStream rollingCollapserBatchSizeDistributionStream;
+    private final RollingCollapserShardSizeDistributionStream rollingCollapserShardSizeDistributionStream;
 
     /* package */HystrixCollapserMetrics(HystrixCollapserKey key, HystrixCollapserProperties properties) {
         super(null);
@@ -123,6 +125,7 @@ public class HystrixCollapserMetrics extends HystrixMetrics {
         rollingCollapserEventCounterStream = RollingCollapserEventCounterStream.getInstance(key, properties);
         cumulativeCollapserEventCounterStream = CumulativeCollapserEventCounterStream.getInstance(key, properties);
         rollingCollapserBatchSizeDistributionStream = RollingCollapserBatchSizeDistributionStream.getInstance(key, properties);
+        rollingCollapserShardSizeDistributionStream = RollingCollapserShardSizeDistributionStream.getInstance(key, properties);
     }
 
     /**
@@ -180,16 +183,14 @@ public class HystrixCollapserMetrics extends HystrixMetrics {
      *
      * @param percentile
      *            Percentile such as 50, 99, or 99.5.
-     * @return batch size
+     * @return shard size
      */
     public int getShardSizePercentile(double percentile) {
-        return 0;
-        //return rollingCollapserUsageDistributionStream.getLatestBatchSizePercentile(percentile);
+        return rollingCollapserShardSizeDistributionStream.getLatestPercentile(percentile);
     }
 
     public int getShardSizeMean() {
-        return 0;
-        //return percentileShardSize.getMean();
+        return rollingCollapserShardSizeDistributionStream.getLatestMean();
     }
 
     public void markRequestBatched() {
@@ -204,5 +205,6 @@ public class HystrixCollapserMetrics extends HystrixMetrics {
     }
 
     public void markShards(int numShards) {
+        HystrixThreadEventStream.getInstance().collapserShardSizeTracked(collapserKey, numShards);
     }
 }

@@ -32,15 +32,25 @@ public class HystrixCollapserEvent implements HystrixEvent {
     private final HystrixCollapserKey collapserKey;
     private final HystrixEventType.Collapser eventType;
     private final int count;
+    private final int shardSize;
 
     protected HystrixCollapserEvent(HystrixCollapserKey collapserKey, HystrixEventType.Collapser eventType, int count) {
+        this(collapserKey, eventType, count, -1);
+    }
+
+    protected HystrixCollapserEvent(HystrixCollapserKey collapserKey, HystrixEventType.Collapser eventType, int count, int shardSize) {
         this.collapserKey = collapserKey;
         this.eventType = eventType;
         this.count = count;
+        this.shardSize = shardSize;
     }
 
     public static HystrixCollapserEvent from(HystrixCollapserKey collapserKey, HystrixEventType.Collapser eventType, int count) {
-        return new HystrixCollapserEvent(collapserKey, eventType, count);
+        return new HystrixCollapserEvent(collapserKey, eventType, count, -1);
+    }
+
+    public static HystrixCollapserEvent from(HystrixCollapserKey collapserKey, HystrixEventType.Collapser eventType, int count, int shardSize) {
+        return new HystrixCollapserEvent(collapserKey, eventType, count, shardSize);
     }
 
     public HystrixCollapserKey getCollapserKey() {
@@ -55,8 +65,12 @@ public class HystrixCollapserEvent implements HystrixEvent {
         return count;
     }
 
+    public int getShardSize() {
+        return shardSize;
+    }
+
     @Override
     public String toString() {
-        return "HystrixCollapserEvent[" + collapserKey.name() + "] : " + eventType.name() + " : " + count;
+        return "HystrixCollapserEvent[" + collapserKey.name() + "] : " + eventType.name() + " : " + count + " : shardSize=" + shardSize;
     }
 }
