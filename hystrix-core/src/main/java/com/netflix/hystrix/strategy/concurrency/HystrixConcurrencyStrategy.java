@@ -25,9 +25,9 @@ import com.netflix.hystrix.util.PlatformSpecific;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -141,8 +141,9 @@ public abstract class HystrixConcurrencyStrategy {
      * <p>
      * <b>Default Implementation</b>
      * <p>
-     * Implementation returns {@link SynchronousQueue} when maxQueueSize <= 0 or {@link LinkedBlockingQueue} when maxQueueSize > 0.
-     * 
+     * Implementation returns {@link SynchronousQueue} when maxQueueSize <= 0 or {@link ArrayBlockingQueue} when maxQueueSize > 0.
+     * ArrayBlockingQueue provides bounded, fixed-size capacity with better memory efficiency and cache locality compared to LinkedBlockingQueue.
+     *
      * @param maxQueueSize
      *            The max size of the queue requested via properties (or system default if no properties set).
      * @return instance of {@code BlockingQueue<Runnable>}
@@ -155,11 +156,14 @@ public abstract class HystrixConcurrencyStrategy {
          * <p>
          * Queuing results in added latency and would only occur when the thread-pool is full at which point there are latency issues
          * and rejecting is the preferred solution.
+         * <p>
+         * When maxQueueSize > 0, ArrayBlockingQueue is used instead of LinkedBlockingQueue for improved memory efficiency
+         * and better cache locality due to its fixed-size array-based structure.
          */
         if (maxQueueSize <= 0) {
             return new SynchronousQueue<Runnable>();
         } else {
-            return new LinkedBlockingQueue<Runnable>(maxQueueSize);
+            return new ArrayBlockingQueue<Runnable>(maxQueueSize);
         }
     }
 
