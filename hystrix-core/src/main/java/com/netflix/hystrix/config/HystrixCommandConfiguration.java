@@ -50,6 +50,7 @@ public class HystrixCommandConfiguration {
                 commandProperties.executionIsolationThreadInterruptOnTimeout().get(),
                 commandProperties.executionIsolationThreadPoolKeyOverride().get(),
                 commandProperties.executionTimeoutEnabled().get(),
+                commandProperties.executionTimeoutEnabledForSemaphore().get(),
                 commandProperties.executionTimeoutInMilliseconds().get(),
                 commandProperties.fallbackEnabled().get(),
                 commandProperties.fallbackIsolationSemaphoreMaxConcurrentRequests().get(),
@@ -148,6 +149,7 @@ public class HystrixCommandConfiguration {
         private final boolean threadInterruptOnTimeout;
         private final String threadPoolKeyOverride;
         private final boolean timeoutEnabled;
+        private final boolean timeoutEnabledForSemaphore;
         private final int timeoutInMilliseconds;
         private final boolean fallbackEnabled;
         private final int fallbackMaxConcurrentRequest;
@@ -156,13 +158,14 @@ public class HystrixCommandConfiguration {
 
         public HystrixCommandExecutionConfig(int semaphoreMaxConcurrentRequests, HystrixCommandProperties.ExecutionIsolationStrategy isolationStrategy,
                                              boolean threadInterruptOnTimeout, String threadPoolKeyOverride, boolean timeoutEnabled,
-                                             int timeoutInMilliseconds, boolean fallbackEnabled, int fallbackMaxConcurrentRequests,
+                                             boolean timeoutEnabledForSemaphore, int timeoutInMilliseconds, boolean fallbackEnabled, int fallbackMaxConcurrentRequests,
                                              boolean requestCacheEnabled, boolean requestLogEnabled) {
             this.semaphoreMaxConcurrentRequests = semaphoreMaxConcurrentRequests;
             this.isolationStrategy = isolationStrategy;
             this.threadInterruptOnTimeout = threadInterruptOnTimeout;
             this.threadPoolKeyOverride = threadPoolKeyOverride;
             this.timeoutEnabled = timeoutEnabled;
+            this.timeoutEnabledForSemaphore = timeoutEnabledForSemaphore;
             this.timeoutInMilliseconds = timeoutInMilliseconds;
             this.fallbackEnabled = fallbackEnabled;
             this.fallbackMaxConcurrentRequest = fallbackMaxConcurrentRequests;
@@ -189,6 +192,10 @@ public class HystrixCommandConfiguration {
 
         public boolean isTimeoutEnabled() {
             return timeoutEnabled;
+        }
+
+        public boolean isTimeoutEnabledForSemaphore() {
+            return timeoutEnabledForSemaphore;
         }
 
         public int getTimeoutInMilliseconds() {

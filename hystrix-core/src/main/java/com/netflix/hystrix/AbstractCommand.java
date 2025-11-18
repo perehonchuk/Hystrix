@@ -633,7 +633,14 @@ import java.util.concurrent.atomic.AtomicReference;
         };
 
         Observable<R> execution;
-        if (properties.executionTimeoutEnabled().get()) {
+        boolean timeoutEnabled = properties.executionTimeoutEnabled().get();
+
+        // If using SEMAPHORE isolation, check if timeout is enabled for semaphore
+        if (properties.executionIsolationStrategy().get() == ExecutionIsolationStrategy.SEMAPHORE) {
+            timeoutEnabled = timeoutEnabled && properties.executionTimeoutEnabledForSemaphore().get();
+        }
+
+        if (timeoutEnabled) {
             execution = executeCommandWithSpecifiedIsolation(_cmd)
                     .lift(new HystrixObservableTimeoutOperator<R>(_cmd));
         } else {

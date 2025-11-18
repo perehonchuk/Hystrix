@@ -48,6 +48,7 @@ public abstract class HystrixCommandProperties {
     /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false 
     private static final Integer default_executionTimeoutInMilliseconds = 1000; // default => executionTimeoutInMilliseconds: 1000 = 1 second
     private static final Boolean default_executionTimeoutEnabled = true;
+    private static final Boolean default_executionTimeoutEnabledForSemaphore = false; // default => semaphore-isolated commands do not timeout by default
     private static final ExecutionIsolationStrategy default_executionIsolationStrategy = ExecutionIsolationStrategy.THREAD;
     private static final Boolean default_executionIsolationThreadInterruptOnTimeout = true;
     private static final Boolean default_executionIsolationThreadInterruptOnFutureCancel = false;
@@ -73,6 +74,7 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<ExecutionIsolationStrategy> executionIsolationStrategy; // Whether a command should be executed in a separate thread or not.
     private final HystrixProperty<Integer> executionTimeoutInMilliseconds; // Timeout value in milliseconds for a command
     private final HystrixProperty<Boolean> executionTimeoutEnabled; //Whether timeout should be triggered
+    private final HystrixProperty<Boolean> executionTimeoutEnabledForSemaphore; //Whether timeout should be triggered for SEMAPHORE-isolated commands
     private final HystrixProperty<String> executionIsolationThreadPoolKeyOverride; // What thread-pool this command should run in (if running on a separate thread).
     private final HystrixProperty<Integer> executionIsolationSemaphoreMaxConcurrentRequests; // Number of permits for execution semaphore
     private final HystrixProperty<Integer> fallbackIsolationSemaphoreMaxConcurrentRequests; // Number of permits for fallback semaphore
@@ -122,6 +124,7 @@ public abstract class HystrixCommandProperties {
         //this property name is now misleading.  //TODO figure out a good way to deprecate this property name
         this.executionTimeoutInMilliseconds = getProperty(propertyPrefix, key, "execution.isolation.thread.timeoutInMilliseconds", builder.getExecutionIsolationThreadTimeoutInMilliseconds(), default_executionTimeoutInMilliseconds);
         this.executionTimeoutEnabled = getProperty(propertyPrefix, key, "execution.timeout.enabled", builder.getExecutionTimeoutEnabled(), default_executionTimeoutEnabled);
+        this.executionTimeoutEnabledForSemaphore = getProperty(propertyPrefix, key, "execution.timeout.enabledForSemaphore", builder.getExecutionTimeoutEnabledForSemaphore(), default_executionTimeoutEnabledForSemaphore);
         this.executionIsolationThreadInterruptOnTimeout = getProperty(propertyPrefix, key, "execution.isolation.thread.interruptOnTimeout", builder.getExecutionIsolationThreadInterruptOnTimeout(), default_executionIsolationThreadInterruptOnTimeout);
         this.executionIsolationThreadInterruptOnFutureCancel = getProperty(propertyPrefix, key, "execution.isolation.thread.interruptOnFutureCancel", builder.getExecutionIsolationThreadInterruptOnFutureCancel(), default_executionIsolationThreadInterruptOnFutureCancel);
         this.executionIsolationSemaphoreMaxConcurrentRequests = getProperty(propertyPrefix, key, "execution.isolation.semaphore.maxConcurrentRequests", builder.getExecutionIsolationSemaphoreMaxConcurrentRequests(), default_executionIsolationSemaphoreMaxConcurrentRequests);
@@ -311,6 +314,20 @@ public abstract class HystrixCommandProperties {
      */
     public HystrixProperty<Boolean> executionTimeoutEnabled() {
         return executionTimeoutEnabled;
+    }
+
+    /**
+     * Whether timeout should be triggered for SEMAPHORE-isolated commands.
+     * <p>
+     * When set to false, semaphore-isolated commands will not timeout regardless of the executionTimeoutEnabled setting.
+     * This allows for different timeout behavior between THREAD and SEMAPHORE isolation strategies.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     *
+     * @since 1.5.0
+     */
+    public HystrixProperty<Boolean> executionTimeoutEnabledForSemaphore() {
+        return executionTimeoutEnabledForSemaphore;
     }
 
     /**
@@ -548,6 +565,7 @@ public abstract class HystrixCommandProperties {
         private Boolean executionIsolationThreadInterruptOnFutureCancel = null;
         private Integer executionTimeoutInMilliseconds = null;
         private Boolean executionTimeoutEnabled = null;
+        private Boolean executionTimeoutEnabledForSemaphore = null;
         private Integer fallbackIsolationSemaphoreMaxConcurrentRequests = null;
         private Boolean fallbackEnabled = null;
         private Integer metricsHealthSnapshotIntervalInMilliseconds = null;
@@ -618,6 +636,10 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getExecutionTimeoutEnabled() {
             return executionTimeoutEnabled;
+        }
+
+        public Boolean getExecutionTimeoutEnabledForSemaphore() {
+            return executionTimeoutEnabledForSemaphore;
         }
 
         public Integer getFallbackIsolationSemaphoreMaxConcurrentRequests() {
@@ -730,6 +752,11 @@ public abstract class HystrixCommandProperties {
 
         public Setter withExecutionTimeoutEnabled(boolean value) {
             this.executionTimeoutEnabled = value;
+            return this;
+        }
+
+        public Setter withExecutionTimeoutEnabledForSemaphore(boolean value) {
+            this.executionTimeoutEnabledForSemaphore = value;
             return this;
         }
 
