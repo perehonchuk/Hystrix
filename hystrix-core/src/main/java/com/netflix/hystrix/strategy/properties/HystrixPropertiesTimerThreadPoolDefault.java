@@ -19,7 +19,10 @@ import com.netflix.hystrix.HystrixTimerThreadPoolProperties;
 
 /**
  * Default implementation of {@link HystrixTimerThreadPoolProperties} using Archaius (https://github.com/Netflix/archaius)
- * 
+ * <p>
+ * Uses a fixed default of 4 threads for the timer thread pool, which is used for scheduling timeouts
+ * and collapser batch executions across all Hystrix commands.
+ *
  * @ExcludeFromJavadoc
  */
 public class HystrixPropertiesTimerThreadPoolDefault extends HystrixTimerThreadPoolProperties {

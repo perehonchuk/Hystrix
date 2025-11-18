@@ -8,6 +8,13 @@ import com.netflix.hystrix.strategy.properties.HystrixProperty;
 /**
  * Properties for Hystrix timer thread pool.
  * <p>
+ * The timer thread pool is used internally by Hystrix for scheduling timeouts
+ * and triggering request collapser batch executions.
+ * <p>
+ * Default core pool size is 4 threads. This provides a good balance between
+ * resource efficiency and the ability to handle high numbers of concurrent
+ * timeout operations and collapser triggers across multiple commands.
+ * <p>
  * Default implementation of methods uses Archaius (https://github.com/Netflix/archaius)
  */
 public abstract class HystrixTimerThreadPoolProperties {
@@ -15,7 +22,7 @@ public abstract class HystrixTimerThreadPoolProperties {
     private final HystrixProperty<Integer> corePoolSize;
 
     protected HystrixTimerThreadPoolProperties() {
-        this(new Setter().withCoreSize(Runtime.getRuntime().availableProcessors()));
+        this(new Setter().withCoreSize(4));
     }
 
     protected HystrixTimerThreadPoolProperties(Setter setter) {
@@ -44,6 +51,9 @@ public abstract class HystrixTimerThreadPoolProperties {
      * Fluent interface that allows chained setting of properties.
      * <p>
      * See {@link HystrixPropertiesStrategy} for more information on order of precedence.
+     * <p>
+     * The default core size is 4 threads, which handles timeout scheduling
+     * and request collapser batching across all Hystrix commands in the application.
      * <p>
      * Example:
      * <p>

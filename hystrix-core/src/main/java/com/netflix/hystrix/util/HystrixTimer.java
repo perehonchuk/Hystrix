@@ -33,6 +33,13 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Timer used by {@link HystrixCommand} to timeout async executions and {@link HystrixCollapser} to trigger batch executions.
+ * <p>
+ * This is a global shared resource that uses a fixed-size thread pool (default: 4 threads) for scheduling
+ * timeout operations and collapser batch triggers across all HystrixCommand instances in the application.
+ * <p>
+ * The fixed pool size provides predictable resource usage and is sufficient for handling thousands of
+ * concurrent timeout operations, as the timer threads only schedule work and do not execute the actual
+ * command logic.
  */
 public class HystrixTimer {
 
@@ -150,6 +157,8 @@ public class HystrixTimer {
         public void initialize() {
 
             HystrixPropertiesStrategy propertiesStrategy = HystrixPlugins.getInstance().getPropertiesStrategy();
+            // Default coreSize is 4 threads - sufficient for scheduling timeouts and collapser batching
+            // across all commands in a typical application
             int coreSize = propertiesStrategy.getTimerThreadPoolProperties().getCorePoolSize().get();
 
             ThreadFactory threadFactory = null;
