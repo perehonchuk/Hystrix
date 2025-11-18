@@ -25,6 +25,8 @@ public interface HystrixInvokableInfo<R> {
 
     HystrixThreadPoolKey getThreadPoolKey();
 
+    HystrixOriginKey getOriginKey();
+
     String getPublicCacheKey(); //have to use public in the name, as there's already a protected {@link AbstractCommand#getCacheKey()} method.
 
     HystrixCollapserKey getOriginatingCollapserKey();

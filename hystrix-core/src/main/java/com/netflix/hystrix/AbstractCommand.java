@@ -80,6 +80,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
     protected final HystrixCommandKey commandKey;
     protected final HystrixCommandGroupKey commandGroup;
+    protected final HystrixOriginKey originKey;
 
     /**
      * Plugin implementations
@@ -154,13 +155,14 @@ import java.util.concurrent.atomic.AtomicReference;
         return name;
     }
 
-    protected AbstractCommand(HystrixCommandGroupKey group, HystrixCommandKey key, HystrixThreadPoolKey threadPoolKey, HystrixCircuitBreaker circuitBreaker, HystrixThreadPool threadPool,
+    protected AbstractCommand(HystrixCommandGroupKey group, HystrixCommandKey key, HystrixThreadPoolKey threadPoolKey, HystrixOriginKey originKey, HystrixCircuitBreaker circuitBreaker, HystrixThreadPool threadPool,
             HystrixCommandProperties.Setter commandPropertiesDefaults, HystrixThreadPoolProperties.Setter threadPoolPropertiesDefaults,
             HystrixCommandMetrics metrics, TryableSemaphore fallbackSemaphore, TryableSemaphore executionSemaphore,
             HystrixPropertiesStrategy propertiesStrategy, HystrixCommandExecutionHook executionHook) {
 
         this.commandGroup = initGroupKey(group);
         this.commandKey = initCommandKey(key, getClass());
+        this.originKey = initOriginKey(originKey, this.commandGroup);
         this.properties = initCommandProperties(this.commandKey, propertiesStrategy, commandPropertiesDefaults);
         this.threadPoolKey = initThreadPoolKey(threadPoolKey, this.commandGroup, this.properties.executionIsolationThreadPoolKeyOverride().get());
         this.metrics = initMetrics(metrics, this.commandGroup, this.threadPoolKey, this.commandKey, this.properties);
@@ -195,6 +197,15 @@ import java.util.concurrent.atomic.AtomicReference;
         if (fromConstructor == null || fromConstructor.name().trim().equals("")) {
             final String keyName = getDefaultNameFromClass(clazz);
             return HystrixCommandKey.Factory.asKey(keyName);
+        } else {
+            return fromConstructor;
+        }
+    }
+
+    private static HystrixOriginKey initOriginKey(final HystrixOriginKey fromConstructor, HystrixCommandGroupKey groupKey) {
+        if (fromConstructor == null) {
+            // Default to using the command group name as the origin
+            return HystrixOriginKey.Factory.asKey(groupKey.name());
         } else {
             return fromConstructor;
         }
@@ -1308,6 +1319,13 @@ import java.util.concurrent.atomic.AtomicReference;
      */
     public HystrixThreadPoolKey getThreadPoolKey() {
         return threadPoolKey;
+    }
+
+    /**
+     * @return {@link HystrixOriginKey} identifying the origin/source of this command for monitoring and observability.
+     */
+    public HystrixOriginKey getOriginKey() {
+        return originKey;
     }
 
     /* package */HystrixCircuitBreaker getCircuitBreaker() {

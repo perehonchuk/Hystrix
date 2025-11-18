@@ -59,7 +59,7 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      *            common business purpose etc.
      */
     protected HystrixCommand(HystrixCommandGroupKey group) {
-        super(group, null, null, null, null, null, null, null, null, null, null, null);
+        super(group, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
 
@@ -77,7 +77,7 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      *            {@link HystrixThreadPoolKey} used to identify the thread pool in which a {@link HystrixCommand} executes.
      */
     protected HystrixCommand(HystrixCommandGroupKey group, HystrixThreadPoolKey threadPool) {
-        super(group, null, threadPool, null, null, null, null, null, null, null, null, null);
+        super(group, null, threadPool, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -94,7 +94,7 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      *            Time in milliseconds at which point the calling thread will timeout (using {@link Future#get}) and walk away from the executing thread.
      */
     protected HystrixCommand(HystrixCommandGroupKey group, int executionIsolationThreadTimeoutInMilliseconds) {
-        super(group, null, null, null, null, HystrixCommandProperties.Setter().withExecutionTimeoutInMilliseconds(executionIsolationThreadTimeoutInMilliseconds), null, null, null, null, null, null);
+        super(group, null, null, null, null, null, HystrixCommandProperties.Setter().withExecutionTimeoutInMilliseconds(executionIsolationThreadTimeoutInMilliseconds), null, null, null, null, null, null);
     }
 
     /**
@@ -113,7 +113,7 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      *            Time in milliseconds at which point the calling thread will timeout (using {@link Future#get}) and walk away from the executing thread.
      */
     protected HystrixCommand(HystrixCommandGroupKey group, HystrixThreadPoolKey threadPool, int executionIsolationThreadTimeoutInMilliseconds) {
-        super(group, null, threadPool, null, null, HystrixCommandProperties.Setter().withExecutionTimeoutInMilliseconds(executionIsolationThreadTimeoutInMilliseconds), null, null, null, null, null, null);
+        super(group, null, threadPool, null, null, null, HystrixCommandProperties.Setter().withExecutionTimeoutInMilliseconds(executionIsolationThreadTimeoutInMilliseconds), null, null, null, null, null, null, null);
     }
 
     /**
@@ -131,7 +131,7 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      */
     protected HystrixCommand(Setter setter) {
         // use 'null' to specify use the default
-        this(setter.groupKey, setter.commandKey, setter.threadPoolKey, null, null, setter.commandPropertiesDefaults, setter.threadPoolPropertiesDefaults, null, null, null, null, null);
+        this(setter.groupKey, setter.commandKey, setter.threadPoolKey, setter.originKey, null, null, setter.commandPropertiesDefaults, setter.threadPoolPropertiesDefaults, null, null, null, null, null);
     }
 
     /**
@@ -141,11 +141,11 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * <p>
      * Most of the args will revert to a valid default if 'null' is passed in.
      */
-    /* package for testing */HystrixCommand(HystrixCommandGroupKey group, HystrixCommandKey key, HystrixThreadPoolKey threadPoolKey, HystrixCircuitBreaker circuitBreaker, HystrixThreadPool threadPool,
+    /* package for testing */HystrixCommand(HystrixCommandGroupKey group, HystrixCommandKey key, HystrixThreadPoolKey threadPoolKey, HystrixOriginKey originKey, HystrixCircuitBreaker circuitBreaker, HystrixThreadPool threadPool,
             HystrixCommandProperties.Setter commandPropertiesDefaults, HystrixThreadPoolProperties.Setter threadPoolPropertiesDefaults,
             HystrixCommandMetrics metrics, TryableSemaphore fallbackSemaphore, TryableSemaphore executionSemaphore,
             HystrixPropertiesStrategy propertiesStrategy, HystrixCommandExecutionHook executionHook) {
-        super(group, key, threadPoolKey, circuitBreaker, threadPool, commandPropertiesDefaults, threadPoolPropertiesDefaults, metrics, fallbackSemaphore, executionSemaphore, propertiesStrategy, executionHook);
+        super(group, key, threadPoolKey, originKey, circuitBreaker, threadPool, commandPropertiesDefaults, threadPoolPropertiesDefaults, metrics, fallbackSemaphore, executionSemaphore, propertiesStrategy, executionHook);
     }
 
     /**
@@ -166,6 +166,7 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
         protected final HystrixCommandGroupKey groupKey;
         protected HystrixCommandKey commandKey;
         protected HystrixThreadPoolKey threadPoolKey;
+        protected HystrixOriginKey originKey;
         protected HystrixCommandProperties.Setter commandPropertiesDefaults;
         protected HystrixThreadPoolProperties.Setter threadPoolPropertiesDefaults;
 
@@ -234,8 +235,23 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
         }
 
         /**
+         * @param originKey
+         *            {@link HystrixOriginKey} used to identify the origin/source of this command for monitoring and observability.
+         *            <p>
+         *            By default this is derived from the {@link HystrixCommandGroupKey} to maintain backward compatibility.
+         *            <p>
+         *            The origin key represents the service, subsystem, or team that owns this command and is useful for
+         *            aggregating metrics and monitoring across related commands.
+         * @return Setter for fluent interface via method chaining
+         */
+        public Setter andOriginKey(HystrixOriginKey originKey) {
+            this.originKey = originKey;
+            return this;
+        }
+
+        /**
          * Optional
-         * 
+         *
          * @param commandPropertiesDefaults
          *            {@link HystrixCommandProperties.Setter} with property overrides for this specific instance of {@link HystrixCommand}.
          *            <p>

@@ -105,7 +105,7 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      */
     protected HystrixObservableCommand(Setter setter) {
         // use 'null' to specify use the default
-        this(setter.groupKey, setter.commandKey, setter.threadPoolKey, null, null, setter.commandPropertiesDefaults, setter.threadPoolPropertiesDefaults, null, null, null, null, null);
+        this(setter.groupKey, setter.commandKey, setter.threadPoolKey, setter.originKey, null, null, setter.commandPropertiesDefaults, setter.threadPoolPropertiesDefaults, null, null, null, null, null);
     }
 
     /**
@@ -115,11 +115,11 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      * <p>
      * Most of the args will revert to a valid default if 'null' is passed in.
      */
-    HystrixObservableCommand(HystrixCommandGroupKey group, HystrixCommandKey key, HystrixThreadPoolKey threadPoolKey, HystrixCircuitBreaker circuitBreaker, HystrixThreadPool threadPool,
+    HystrixObservableCommand(HystrixCommandGroupKey group, HystrixCommandKey key, HystrixThreadPoolKey threadPoolKey, HystrixOriginKey originKey, HystrixCircuitBreaker circuitBreaker, HystrixThreadPool threadPool,
             HystrixCommandProperties.Setter commandPropertiesDefaults, HystrixThreadPoolProperties.Setter threadPoolPropertiesDefaults,
             HystrixCommandMetrics metrics, TryableSemaphore fallbackSemaphore, TryableSemaphore executionSemaphore,
             HystrixPropertiesStrategy propertiesStrategy, HystrixCommandExecutionHook executionHook) {
-        super(group, key, threadPoolKey, circuitBreaker, threadPool, commandPropertiesDefaults, threadPoolPropertiesDefaults, metrics, fallbackSemaphore, executionSemaphore, propertiesStrategy, executionHook);
+        super(group, key, threadPoolKey, originKey, circuitBreaker, threadPool, commandPropertiesDefaults, threadPoolPropertiesDefaults, metrics, fallbackSemaphore, executionSemaphore, propertiesStrategy, executionHook);
     }
 
     /**
@@ -141,6 +141,7 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
         protected final HystrixCommandGroupKey groupKey;
         protected HystrixCommandKey commandKey;
         protected HystrixThreadPoolKey threadPoolKey;
+        protected HystrixOriginKey originKey;
         protected HystrixCommandProperties.Setter commandPropertiesDefaults;
         protected HystrixThreadPoolProperties.Setter threadPoolPropertiesDefaults;
 
@@ -198,8 +199,23 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
         }
 
         /**
+         * @param originKey
+         *            {@link HystrixOriginKey} used to identify the origin/source of this command for monitoring and observability.
+         *            <p>
+         *            By default this is derived from the {@link HystrixCommandGroupKey} to maintain backward compatibility.
+         *            <p>
+         *            The origin key represents the service, subsystem, or team that owns this command and is useful for
+         *            aggregating metrics and monitoring across related commands.
+         * @return Setter for fluent interface via method chaining
+         */
+        public Setter andOriginKey(HystrixOriginKey originKey) {
+            this.originKey = originKey;
+            return this;
+        }
+
+        /**
          * Optional
-         * 
+         *
          * @param commandPropertiesDefaults
          *            {@link HystrixCommandProperties.Setter} with property overrides for this specific instance of {@link HystrixObservableCommand}.
          *            <p>
