@@ -57,8 +57,9 @@ public abstract class HystrixCommandProperties {
     private static final Boolean default_fallbackEnabled = true;
     private static final Integer default_executionIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_requestLogEnabled = true;
+    private static final Integer default_requestLogMaxStorage = 5000; // default to 5000 commands stored in request log
     private static final Boolean default_circuitBreakerEnabled = true;
-    private static final Integer default_metricsRollingPercentileWindow = 60000; // default to 1 minute for RollingPercentile 
+    private static final Integer default_metricsRollingPercentileWindow = 60000; // default to 1 minute for RollingPercentile
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
@@ -87,6 +88,7 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsRollingPercentileBucketSize; // how many values will be stored in each percentileWindowBucket
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
+    private final HystrixProperty<Integer> requestLogMaxStorage; // maximum number of commands stored in request log before warnings are logged
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
 
     /**
@@ -136,6 +138,7 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.requestLogMaxStorage = getProperty(propertyPrefix, key, "requestLog.maxStorage", builder.getRequestLogMaxStorage(), default_requestLogMaxStorage);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -419,11 +422,21 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
         return requestLogEnabled;
+    }
+
+    /**
+     * Maximum number of commands that can be stored in {@link HystrixRequestLog} before warnings are logged
+     * and additional commands are ignored to prevent memory leaks.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> requestLogMaxStorage() {
+        return requestLogMaxStorage;
     }
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
@@ -560,6 +573,7 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Integer requestLogMaxStorage = null;
 
         /* package */ Setter() {
         }
@@ -662,6 +676,10 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Integer getRequestLogMaxStorage() {
+            return requestLogMaxStorage;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -785,6 +803,11 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withRequestLogMaxStorage(int value) {
+            this.requestLogMaxStorage = value;
             return this;
         }
     }

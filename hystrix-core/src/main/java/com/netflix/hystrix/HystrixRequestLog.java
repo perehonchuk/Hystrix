@@ -42,13 +42,15 @@ public class HystrixRequestLog {
     /**
      * RequestLog: Reduce Chance of Memory Leak
      * https://github.com/Netflix/Hystrix/issues/53
-     * 
+     *
      * Upper limit on RequestLog before ignoring further additions and logging warnings.
-     * 
+     *
      * Intended to help prevent memory leaks when someone isn't aware of the
      * HystrixRequestContext lifecycle or enabling/disabling RequestLog.
+     *
+     * This default can be overridden per-command via the requestLog.maxStorage property.
      */
-    /* package */static final int MAX_STORAGE = 1000;
+    /* package */static final int MAX_STORAGE = 5000;
 
     private static final HystrixRequestVariableHolder<HystrixRequestLog> currentRequestLog = new HystrixRequestVariableHolder<HystrixRequestLog>(new HystrixRequestVariableLifecycle<HystrixRequestLog>() {
         @Override
@@ -118,14 +120,26 @@ public class HystrixRequestLog {
 
     /**
      * Add {@link HystrixCommand} instance to the request log.
-     * 
+     *
      * @param command
      *            {@code HystrixCommand<?>}
      */
     /* package */void addExecutedCommand(HystrixInvokableInfo<?> command) {
+        addExecutedCommand(command, MAX_STORAGE);
+    }
+
+    /**
+     * Add {@link HystrixCommand} instance to the request log with configurable max storage.
+     *
+     * @param command
+     *            {@code HystrixCommand<?>}
+     * @param maxStorage
+     *            Maximum number of commands to store before logging warnings
+     */
+    /* package */void addExecutedCommand(HystrixInvokableInfo<?> command, int maxStorage) {
         if (!allExecutedCommands.offer(command)) {
             // see RequestLog: Reduce Chance of Memory Leak https://github.com/Netflix/Hystrix/issues/53
-            logger.warn("RequestLog ignoring command after reaching limit of " + MAX_STORAGE + ". See https://github.com/Netflix/Hystrix/issues/53 for more information.");
+            logger.warn("RequestLog ignoring command after reaching limit of " + maxStorage + ". See https://github.com/Netflix/Hystrix/issues/53 for more information.");
         }
 
         // TODO remove this when deprecation completed
@@ -134,7 +148,7 @@ public class HystrixRequestLog {
             HystrixCommand<?> _c = (HystrixCommand) command;
             if (!executedCommands.offer(_c)) {
                 // see RequestLog: Reduce Chance of Memory Leak https://github.com/Netflix/Hystrix/issues/53
-                logger.warn("RequestLog ignoring command after reaching limit of " + MAX_STORAGE + ". See https://github.com/Netflix/Hystrix/issues/53 for more information.");
+                logger.warn("RequestLog ignoring command after reaching limit of " + maxStorage + ". See https://github.com/Netflix/Hystrix/issues/53 for more information.");
             }
         }
     }

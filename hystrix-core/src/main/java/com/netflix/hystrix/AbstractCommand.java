@@ -467,7 +467,7 @@ import java.util.concurrent.atomic.AtomicReference;
                 if (properties.requestLogEnabled().get()) {
                     // log this command execution regardless of what happened
                     if (currentRequestLog != null) {
-                        currentRequestLog.addExecutedCommand(_cmd);
+                        currentRequestLog.addExecutedCommand(_cmd, properties.requestLogMaxStorage().get());
                     }
                 }
 
