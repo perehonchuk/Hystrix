@@ -54,7 +54,7 @@ public abstract class HystrixThreadPoolProperties {
     static boolean default_allow_maximum_size_to_diverge_from_core_size = false; //should the maximumSize config value get read and used in configuring the threadPool
                                                                                  //turning this on should be a conscious decision by the user, so we default it to false
 
-    static int default_queueSizeRejectionThreshold = 5; // number of items in queue
+    static int default_queueSizeRejectionThreshold = 10; // number of items in queue
     static int default_threadPoolRollingNumberStatisticalWindow = 10000; // milliseconds for rolling number
     static int default_threadPoolRollingNumberStatisticalWindowBuckets = 10; // number of buckets in rolling number (10 1-second buckets)
 
@@ -231,7 +231,7 @@ public abstract class HystrixThreadPoolProperties {
      * <pre> {@code
      * HystrixThreadPoolProperties.Setter()
      *           .withCoreSize(10)
-     *           .withQueueSizeRejectionThreshold(10);
+     *           .withQueueSizeRejectionThreshold(15);
      * } </pre>
      * 
      * @NotThreadSafe

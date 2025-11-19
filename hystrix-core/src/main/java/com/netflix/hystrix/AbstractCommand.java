@@ -987,6 +987,14 @@ import java.util.concurrent.atomic.AtomicReference;
         }
     }
 
+    /**
+     * Handles thread pool rejection by attempting to execute the fallback.
+     * Thread pool rejection occurs when either the thread pool is full or when the queue
+     * size exceeds the queueSizeRejectionThreshold (dynamically configurable, defaults to 10).
+     *
+     * @param underlying the RejectedExecutionException that triggered this handler
+     * @return Observable with fallback result or error
+     */
     private Observable<R> handleThreadPoolRejectionViaFallback(Exception underlying) {
         eventNotifier.markEvent(HystrixEventType.THREAD_POOL_REJECTED, commandKey);
         threadPool.markThreadRejection();

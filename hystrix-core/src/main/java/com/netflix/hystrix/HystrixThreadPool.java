@@ -258,6 +258,9 @@ public interface HystrixThreadPool {
          * still get checked on each invocation.
          * <p>
          * If a SynchronousQueue implementation is used (<code>maxQueueSize</code> <= 0), it always returns 0 as the size so this would always return true.
+         * <p>
+         * The default queueSizeRejectionThreshold is 10, allowing up to 10 commands to queue before rejections occur.
+         * This provides a balance between queuing flexibility and preventing excessive request buildup during high load.
          */
         @Override
         public boolean isQueueSpaceAvailable() {
