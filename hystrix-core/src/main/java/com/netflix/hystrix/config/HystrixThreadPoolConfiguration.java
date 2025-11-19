@@ -25,13 +25,13 @@ public class HystrixThreadPoolConfiguration {
     private final int actualMaximumSize;
     private final int maxQueueSize;
     private final int queueRejectionThreshold;
-    private final int keepAliveTimeInMinutes;
+    private final int keepAliveTimeInSeconds;
     private final boolean allowMaximumSizeToDivergeFromCoreSize;
     private final int rollingCounterNumberOfBuckets;
     private final int rollingCounterBucketSizeInMilliseconds;
 
     private HystrixThreadPoolConfiguration(HystrixThreadPoolKey threadPoolKey, int coreSize, int maximumSize, int actualMaximumSize, int maxQueueSize, int queueRejectionThreshold,
-                                           int keepAliveTimeInMinutes, boolean allowMaximumSizeToDivergeFromCoreSize, int rollingCounterNumberOfBuckets,
+                                           int keepAliveTimeInSeconds, boolean allowMaximumSizeToDivergeFromCoreSize, int rollingCounterNumberOfBuckets,
                                            int rollingCounterBucketSizeInMilliseconds) {
         this.threadPoolKey = threadPoolKey;
         this.allowMaximumSizeToDivergeFromCoreSize = allowMaximumSizeToDivergeFromCoreSize;
@@ -40,7 +40,7 @@ public class HystrixThreadPoolConfiguration {
         this.actualMaximumSize = actualMaximumSize;
         this.maxQueueSize = maxQueueSize;
         this.queueRejectionThreshold = queueRejectionThreshold;
-        this.keepAliveTimeInMinutes = keepAliveTimeInMinutes;
+        this.keepAliveTimeInSeconds = keepAliveTimeInSeconds;
         this.rollingCounterNumberOfBuckets = rollingCounterNumberOfBuckets;
         this.rollingCounterBucketSizeInMilliseconds = rollingCounterBucketSizeInMilliseconds;
     }
@@ -49,7 +49,7 @@ public class HystrixThreadPoolConfiguration {
         this(threadPoolKey, threadPoolProperties.coreSize().get(),
                 threadPoolProperties.maximumSize().get(), threadPoolProperties.actualMaximumSize(),
                 threadPoolProperties.maxQueueSize().get(), threadPoolProperties.queueSizeRejectionThreshold().get(),
-                threadPoolProperties.keepAliveTimeMinutes().get(), threadPoolProperties.getAllowMaximumSizeToDivergeFromCoreSize().get(),
+                threadPoolProperties.keepAliveTimeSeconds().get(), threadPoolProperties.getAllowMaximumSizeToDivergeFromCoreSize().get(),
                 threadPoolProperties.metricsRollingStatisticalWindowBuckets().get(),
                 threadPoolProperties.metricsRollingStatisticalWindowInMilliseconds().get());
     }
@@ -95,8 +95,8 @@ public class HystrixThreadPoolConfiguration {
         return queueRejectionThreshold;
     }
 
-    public int getKeepAliveTimeInMinutes() {
-        return keepAliveTimeInMinutes;
+    public int getKeepAliveTimeInSeconds() {
+        return keepAliveTimeInSeconds;
     }
 
     public boolean getAllowMaximumSizeToDivergeFromCoreSize() {

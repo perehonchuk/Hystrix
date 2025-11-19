@@ -48,7 +48,7 @@ public abstract class HystrixThreadPoolProperties {
     /* defaults */
     static int default_coreSize = 10;            // core size of thread pool
     static int default_maximumSize = 10;         // maximum size of thread pool
-    static int default_keepAliveTimeMinutes = 1; // minutes to keep a thread alive
+    static int default_keepAliveTimeSeconds = 60; // seconds to keep a thread alive (changed from 1 minute to 60 seconds)
     static int default_maxQueueSize = -1;        // size of queue (this can't be dynamically changed so we use 'queueSizeRejectionThreshold' to artificially limit and reject)
                                                  // -1 turns it off and makes us use SynchronousQueue
     static boolean default_allow_maximum_size_to_diverge_from_core_size = false; //should the maximumSize config value get read and used in configuring the threadPool
@@ -85,7 +85,7 @@ public abstract class HystrixThreadPoolProperties {
         //it only gets applied if allowMaximumSizeToDivergeFromCoreSize is true
         this.maximumPoolSize = getProperty(propertyPrefix, key, "maximumSize", builder.getMaximumSize(), default_maximumSize);
 
-        this.keepAliveTime = getProperty(propertyPrefix, key, "keepAliveTimeMinutes", builder.getKeepAliveTimeMinutes(), default_keepAliveTimeMinutes);
+        this.keepAliveTime = getProperty(propertyPrefix, key, "keepAliveTimeSeconds", builder.getKeepAliveTimeSeconds(), default_keepAliveTimeSeconds);
         this.maxQueueSize = getProperty(propertyPrefix, key, "maxQueueSize", builder.getMaxQueueSize(), default_maxQueueSize);
         this.queueSizeRejectionThreshold = getProperty(propertyPrefix, key, "queueSizeRejectionThreshold", builder.getQueueSizeRejectionThreshold(), default_queueSizeRejectionThreshold);
         this.threadPoolRollingNumberStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_threadPoolRollingNumberStatisticalWindow);
@@ -150,11 +150,11 @@ public abstract class HystrixThreadPoolProperties {
     }
 
     /**
-     * Keep-alive time in minutes that gets passed to {@link ThreadPoolExecutor#setKeepAliveTime(long, TimeUnit)}
-     * 
+     * Keep-alive time in seconds that gets passed to {@link ThreadPoolExecutor#setKeepAliveTime(long, TimeUnit)}
+     *
      * @return {@code HystrixProperty<Integer>}
      */
-    public HystrixProperty<Integer> keepAliveTimeMinutes() {
+    public HystrixProperty<Integer> keepAliveTimeSeconds() {
         return keepAliveTime;
     }
 
@@ -239,7 +239,7 @@ public abstract class HystrixThreadPoolProperties {
     public static class Setter {
         private Integer coreSize = null;
         private Integer maximumSize = null;
-        private Integer keepAliveTimeMinutes = null;
+        private Integer keepAliveTimeSeconds = null;
         private Integer maxQueueSize = null;
         private Integer queueSizeRejectionThreshold = null;
         private Boolean allowMaximumSizeToDivergeFromCoreSize = null;
@@ -257,8 +257,8 @@ public abstract class HystrixThreadPoolProperties {
             return maximumSize;
         }
 
-        public Integer getKeepAliveTimeMinutes() {
-            return keepAliveTimeMinutes;
+        public Integer getKeepAliveTimeSeconds() {
+            return keepAliveTimeSeconds;
         }
 
         public Integer getMaxQueueSize() {
@@ -291,8 +291,8 @@ public abstract class HystrixThreadPoolProperties {
             return this;
         }
 
-        public Setter withKeepAliveTimeMinutes(int value) {
-            this.keepAliveTimeMinutes = value;
+        public Setter withKeepAliveTimeSeconds(int value) {
+            this.keepAliveTimeSeconds = value;
             return this;
         }
 

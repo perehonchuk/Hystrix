@@ -231,7 +231,7 @@ public interface HystrixThreadPool {
                 threadPool.setMaximumPoolSize(dynamicMaximumSize);
             }
 
-            threadPool.setKeepAliveTime(properties.keepAliveTimeMinutes().get(), TimeUnit.MINUTES);
+            threadPool.setKeepAliveTime(properties.keepAliveTimeSeconds().get(), TimeUnit.SECONDS);
         }
 
         @Override
