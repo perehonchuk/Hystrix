@@ -48,7 +48,7 @@ import java.util.concurrent.Future;
  * <p>
  * This allows an object model to have multiple calls to the command that execute/queue many times in a short period (milliseconds) and have them all get batched into a single backend call.
  * <p>
- * Typically the time window is something like 10ms give or take.
+ * Typically the time window is something like 50ms give or take.
  * <p>
  * NOTE: Do NOT retain any state within instances of this class.
  * <p>
