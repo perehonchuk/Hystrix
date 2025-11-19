@@ -647,6 +647,48 @@ import java.util.concurrent.atomic.AtomicReference;
     }
 
     private Observable<R> executeCommandWithSpecifiedIsolation(final AbstractCommand<R> _cmd) {
+        // Wrap execution with retry logic if enabled
+        if (properties.retryEnabled().get() && properties.retryMaxAttempts().get() > 1) {
+            final AtomicInteger attemptCounter = new AtomicInteger(0);
+            final int maxAttempts = properties.retryMaxAttempts().get();
+            final long retryDelay = properties.retryDelayInMilliseconds().get();
+
+            return Observable.defer(new Func0<Observable<R>>() {
+                @Override
+                public Observable<R> call() {
+                    return executeCommandWithSpecifiedIsolationInternal(_cmd);
+                }
+            }).retryWhen(new Func1<Observable<? extends Throwable>, Observable<?>>() {
+                @Override
+                public Observable<?> call(Observable<? extends Throwable> errors) {
+                    return errors.flatMap(new Func1<Throwable, Observable<?>>() {
+                        @Override
+                        public Observable<?> call(Throwable error) {
+                            int currentAttempt = attemptCounter.incrementAndGet();
+                            // Don't retry HystrixBadRequestException or if max attempts reached
+                            if (error instanceof HystrixBadRequestException || currentAttempt >= maxAttempts - 1) {
+                                return Observable.error(error);
+                            }
+                            // Delay before retry
+                            if (retryDelay > 0) {
+                                try {
+                                    Thread.sleep(retryDelay);
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                    return Observable.error(e);
+                                }
+                            }
+                            return Observable.just(null);
+                        }
+                    });
+                }
+            });
+        } else {
+            return executeCommandWithSpecifiedIsolationInternal(_cmd);
+        }
+    }
+
+    private Observable<R> executeCommandWithSpecifiedIsolationInternal(final AbstractCommand<R> _cmd) {
         if (properties.executionIsolationStrategy().get() == ExecutionIsolationStrategy.THREAD) {
             // mark that we are executing in a thread (even if we end up being rejected we still were a THREAD execution and not SEMAPHORE)
             return Observable.defer(new Func0<Observable<R>>() {
