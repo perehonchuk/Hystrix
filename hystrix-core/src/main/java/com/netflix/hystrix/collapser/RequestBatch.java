@@ -44,6 +44,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private final HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser;
     private final int maxBatchSize;
+    private final int minBatchSize;
     private final AtomicBoolean batchStarted = new AtomicBoolean();
 
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
@@ -56,6 +57,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
         this.maxBatchSize = maxBatchSize;
+        this.minBatchSize = properties.minRequestsInBatch().get();
     }
 
     /**
@@ -285,5 +287,15 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     public int getSize() {
         return argumentMap.size();
+    }
+
+    /**
+     * Check if the current batch size meets the minimum threshold for execution.
+     * Used by the timer to determine if the batch should be executed or if it should wait.
+     *
+     * @return true if batch size >= minBatchSize, false otherwise
+     */
+    public boolean meetsMinimumBatchSize() {
+        return argumentMap.size() >= minBatchSize;
     }
 }
