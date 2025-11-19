@@ -24,6 +24,8 @@ import org.slf4j.LoggerFactory;
 import rx.Observable;
 import rx.internal.operators.CachedObservable;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -42,19 +44,19 @@ public class HystrixRequestCache {
     private final HystrixConcurrencyStrategy concurrencyStrategy;
 
     /**
-     * A ConcurrentHashMap per 'prefix' and per request scope that is used to to dedupe requests in the same request.
+     * A bounded LRU cache per 'prefix' and per request scope that is used to to dedupe requests in the same request.
      * <p>
      * Key => CommandPrefix + CacheKey : Future<?> from queue()
      */
-    private static final HystrixRequestVariableHolder<ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>> requestVariableForCache = new HystrixRequestVariableHolder<ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>>(new HystrixRequestVariableLifecycle<ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>>() {
+    private static final HystrixRequestVariableHolder<BoundedLRUCache<ValueCacheKey, HystrixCachedObservable<?>>> requestVariableForCache = new HystrixRequestVariableHolder<BoundedLRUCache<ValueCacheKey, HystrixCachedObservable<?>>>(new HystrixRequestVariableLifecycle<BoundedLRUCache<ValueCacheKey, HystrixCachedObservable<?>>>() {
 
         @Override
-        public ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> initialValue() {
-            return new ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>();
+        public BoundedLRUCache<ValueCacheKey, HystrixCachedObservable<?>> initialValue() {
+            return new BoundedLRUCache<ValueCacheKey, HystrixCachedObservable<?>>(1000);
         }
 
         @Override
-        public void shutdown(ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> value) {
+        public void shutdown(BoundedLRUCache<ValueCacheKey, HystrixCachedObservable<?>> value) {
             // nothing to shutdown
         }
 
@@ -94,12 +96,12 @@ public class HystrixRequestCache {
      * 
      * @return {@code Future<T>}
      */
-    // suppressing warnings because we are using a raw Future since it's in a heterogeneous ConcurrentHashMap cache
+    // suppressing warnings because we are using a raw Future since it's in a heterogeneous cache
     @SuppressWarnings({ "unchecked" })
     /* package */<T> HystrixCachedObservable<T> get(String cacheKey) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
-            ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+            BoundedLRUCache<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
             if (cacheInstance == null) {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }
@@ -121,13 +123,13 @@ public class HystrixRequestCache {
      * 
      * @return null if nothing else was in the cache (or this {@link HystrixCommand} does not have a cacheKey) or previous value if another thread beat us to adding to the cache
      */
-    // suppressing warnings because we are using a raw Future since it's in a heterogeneous ConcurrentHashMap cache
+    // suppressing warnings because we are using a raw Future since it's in a heterogeneous cache
     @SuppressWarnings({ "unchecked" })
     /* package */<T> HystrixCachedObservable<T> putIfAbsent(String cacheKey, HystrixCachedObservable<T> f) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
             /* look for the stored value */
-            ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+            BoundedLRUCache<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
             if (cacheInstance == null) {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }
@@ -143,14 +145,14 @@ public class HystrixRequestCache {
 
     /**
      * Clear the cache for a given cacheKey.
-     * 
+     *
      * @param cacheKey
      *            key as defined by {@link HystrixCommand#getCacheKey()}
      */
     public void clear(String cacheKey) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
-            ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+            BoundedLRUCache<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
             if (cacheInstance == null) {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }
@@ -277,6 +279,48 @@ public class HystrixRequestCache {
             return true;
         }
 
+    }
+
+    /**
+     * Thread-safe bounded LRU cache implementation using LinkedHashMap with access-order.
+     * Evicts least recently used entries when the cache exceeds the maximum size.
+     */
+    private static class BoundedLRUCache<K, V> extends LinkedHashMap<K, V> {
+        private final int maxSize;
+
+        public BoundedLRUCache(int maxSize) {
+            super(16, 0.75f, true); // access-order mode for LRU
+            this.maxSize = maxSize;
+        }
+
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
+            return size() > maxSize;
+        }
+
+        public synchronized V putIfAbsent(K key, V value) {
+            V existing = get(key);
+            if (existing == null) {
+                put(key, value);
+                return null;
+            }
+            return existing;
+        }
+
+        @Override
+        public synchronized V get(Object key) {
+            return super.get(key);
+        }
+
+        @Override
+        public synchronized V put(K key, V value) {
+            return super.put(key, value);
+        }
+
+        @Override
+        public synchronized V remove(Object key) {
+            return super.remove(key);
+        }
     }
 
 }
