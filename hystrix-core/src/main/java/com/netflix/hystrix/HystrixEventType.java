@@ -34,6 +34,8 @@ public enum HystrixEventType {
     SHORT_CIRCUITED(false),
     THREAD_POOL_REJECTED(false),
     SEMAPHORE_REJECTED(false),
+    RETRY_ATTEMPTED(false),
+    RETRY_EXHAUSTED(false),
     FALLBACK_EMIT(false),
     FALLBACK_SUCCESS(true),
     FALLBACK_FAILURE(true),
@@ -65,6 +67,8 @@ public enum HystrixEventType {
             case SHORT_CIRCUITED: return SHORT_CIRCUITED;
             case THREAD_POOL_REJECTED: return THREAD_POOL_REJECTED;
             case SEMAPHORE_REJECTED: return SEMAPHORE_REJECTED;
+            case RETRY_ATTEMPTED: return RETRY_ATTEMPTED;
+            case RETRY_EXHAUSTED: return RETRY_EXHAUSTED;
             case FALLBACK_EMIT: return FALLBACK_EMIT;
             case FALLBACK_SUCCESS: return FALLBACK_SUCCESS;
             case FALLBACK_FAILURE: return FALLBACK_FAILURE;
