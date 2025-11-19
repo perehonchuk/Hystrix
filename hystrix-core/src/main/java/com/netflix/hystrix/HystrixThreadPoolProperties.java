@@ -46,8 +46,8 @@ import com.netflix.hystrix.util.HystrixRollingNumber;
 public abstract class HystrixThreadPoolProperties {
 
     /* defaults */
-    static int default_coreSize = 10;            // core size of thread pool
-    static int default_maximumSize = 10;         // maximum size of thread pool
+    static int default_coreSize = 5;            // core size of thread pool
+    static int default_maximumSize = 5;         // maximum size of thread pool
     static int default_keepAliveTimeMinutes = 1; // minutes to keep a thread alive
     static int default_maxQueueSize = -1;        // size of queue (this can't be dynamically changed so we use 'queueSizeRejectionThreshold' to artificially limit and reject)
                                                  // -1 turns it off and makes us use SynchronousQueue
