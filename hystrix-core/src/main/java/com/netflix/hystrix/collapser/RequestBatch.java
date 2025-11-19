@@ -41,14 +41,17 @@ import com.netflix.hystrix.HystrixCollapserProperties;
 public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private static final Logger logger = LoggerFactory.getLogger(RequestBatch.class);
+    private static final int DEFAULT_BATCH_SIZE_WARNING_THRESHOLD = 100;
 
     private final HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser;
     private final int maxBatchSize;
     private final AtomicBoolean batchStarted = new AtomicBoolean();
+    private final AtomicBoolean warningLogged = new AtomicBoolean(false);
 
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
             new ConcurrentHashMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>();
     private final HystrixCollapserProperties properties;
+    private final int batchSizeWarningThreshold;
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
 
@@ -56,6 +59,13 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
         this.maxBatchSize = maxBatchSize;
+        this.batchSizeWarningThreshold = properties.batchSizeWarningThreshold().get();
+
+        // Log batch creation for observability
+        if (logger.isDebugEnabled()) {
+            logger.debug("Created new RequestBatch for collapser={}, maxBatchSize={}, warningThreshold={}",
+                commandCollapser.getCollapserKey().name(), maxBatchSize, batchSizeWarningThreshold);
+        }
     }
 
     /**
@@ -83,6 +93,14 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
                             new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
+
+                    // Check if batch size is approaching the configured warning threshold
+                    int currentSize = argumentMap.size();
+                    if (currentSize >= batchSizeWarningThreshold && warningLogged.compareAndSet(false, true)) {
+                        logger.warn("Collapser batch size for {} has reached warning threshold. Current size: {}, Warning threshold: {}, Max size: {}. " +
+                                "Consider reviewing batch sizing configuration or increasing timerDelayInMilliseconds to allow more time for batch accumulation.",
+                                commandCollapser.getCollapserKey().name(), currentSize, batchSizeWarningThreshold, maxBatchSize);
+                    }
                     /**
                      * If the argument already exists in the batch, then there are 2 options:
                      * A) If request caching is ON (the default): only keep 1 argument in the batch and let all responses
@@ -163,6 +181,15 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
+                // Log batch execution for observability
+                int batchSize = argumentMap.size();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Executing batch for collapser={}, batchSize={}",
+                        commandCollapser.getCollapserKey().name(), batchSize);
+                } else if (batchSize >= batchSizeWarningThreshold) {
+                    logger.info("Executing large batch for collapser={}, batchSize={} (threshold={})",
+                        commandCollapser.getCollapserKey().name(), batchSize, batchSizeWarningThreshold);
+                }
                 // shard batches
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
                 // for each shard execute its requests 
