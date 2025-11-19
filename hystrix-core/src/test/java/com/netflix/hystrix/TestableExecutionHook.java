@@ -211,6 +211,18 @@ class TestableExecutionHook extends HystrixCommandExecutionHook {
     }
 
     @Override
+    public <T> void onCacheMiss(HystrixInvokable<T> commandInstance) {
+        super.onCacheMiss(commandInstance);
+        recordHookCall(executionSequence, "onCacheMiss");
+    }
+
+    @Override
+    public <T> void onCircuitBreakerOpen(HystrixInvokable<T> commandInstance) {
+        super.onCircuitBreakerOpen(commandInstance);
+        recordHookCall(executionSequence, "onCircuitBreakerOpen");
+    }
+
+    @Override
     public <T> void onUnsubscribe(HystrixInvokable<T> commandInstance) {
         super.onUnsubscribe(commandInstance);
         recordHookCall(executionSequence, "onUnsubscribe");

@@ -480,6 +480,13 @@ import java.util.concurrent.atomic.AtomicReference;
                     if (fromCache != null) {
                         isResponseFromCache = true;
                         return handleRequestCacheHitAndEmitValues(fromCache, _cmd);
+                    } else {
+                        // cache miss - proceed with normal execution
+                        try {
+                            executionHook.onCacheMiss(this);
+                        } catch (Throwable hookEx) {
+                            logger.warn("Error calling HystrixCommandExecutionHook.onCacheMiss", hookEx);
+                        }
                     }
                 }
 
@@ -976,6 +983,12 @@ import java.util.concurrent.atomic.AtomicReference;
     private Observable<R> handleShortCircuitViaFallback() {
         // record that we are returning a short-circuited fallback
         eventNotifier.markEvent(HystrixEventType.SHORT_CIRCUITED, commandKey);
+        // notify hook that circuit breaker is open
+        try {
+            executionHook.onCircuitBreakerOpen(this);
+        } catch (Throwable hookEx) {
+            logger.warn("Error calling HystrixCommandExecutionHook.onCircuitBreakerOpen", hookEx);
+        }
         // short-circuit and go directly to fallback (or throw an exception if no fallback implemented)
         Exception shortCircuitException = new RuntimeException("Hystrix circuit short-circuited and is OPEN");
         executionResult = executionResult.setExecutionException(shortCircuitException);
@@ -2200,6 +2213,16 @@ import java.util.concurrent.atomic.AtomicReference;
         @Override
         public <T> void onCacheHit(HystrixInvokable<T> commandInstance) {
             actual.onCacheHit(commandInstance);
+        }
+
+        @Override
+        public <T> void onCacheMiss(HystrixInvokable<T> commandInstance) {
+            actual.onCacheMiss(commandInstance);
+        }
+
+        @Override
+        public <T> void onCircuitBreakerOpen(HystrixInvokable<T> commandInstance) {
+            actual.onCircuitBreakerOpen(commandInstance);
         }
 
         @Override

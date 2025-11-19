@@ -217,6 +217,30 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked when the command response is NOT found in the {@link com.netflix.hystrix.HystrixRequestCache}
+     * and execution will proceed normally.
+     *
+     * @param commandInstance The executing HystrixCommand
+     *
+     * @since 1.5.10
+     */
+    public <T> void onCacheMiss(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when execution is short-circuited due to the circuit breaker being open.
+     * This hook is called before the fallback logic is attempted.
+     *
+     * @param commandInstance The executing HystrixCommand
+     *
+     * @since 1.5.10
+     */
+    public <T> void onCircuitBreakerOpen(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
      * Invoked with the command is unsubscribed before a terminal state
      *
      * @param commandInstance The executing HystrixInvokable instance.
