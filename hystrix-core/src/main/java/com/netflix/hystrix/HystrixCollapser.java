@@ -38,8 +38,12 @@ import rx.functions.Func0;
 import rx.schedulers.Schedulers;
 import rx.subjects.ReplaySubject;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 
@@ -227,10 +231,29 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * Typically this means to take the argument(s) provided to the constructor and return it here.
      * <p>
      * If there are multiple arguments that need to be bundled, create a single object to contain them, or use a Tuple.
-     * 
+     *
      * @return RequestArgumentType
      */
     public abstract RequestArgumentType getRequestArgument();
+
+    /**
+     * The priority level for this request used for priority-based batch splitting.
+     * <p>
+     * When priority-based batching is enabled, requests will be grouped by priority
+     * before being collapsed into batches. This ensures that high-priority requests
+     * are batched together and can be executed before lower-priority requests.
+     * <p>
+     * Priority values are arbitrary integers where lower values indicate higher priority.
+     * For example: priority 0 > priority 1 > priority 2
+     * <p>
+     * Default implementation returns 0 (highest priority) for all requests.
+     * Override this method to provide custom priority logic.
+     *
+     * @return int representing the priority level (lower values = higher priority)
+     */
+    public int getRequestPriority() {
+        return 0;
+    }
 
     /**
      * Factory method to create a new {@link HystrixCommand}{@code <BatchReturnType>} command object each time a batch needs to be executed.
@@ -258,7 +281,7 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * executed for them.
      * <p>
      * By default this method does nothing to the Collection and is a pass-thru.
-     * 
+     *
      * @param requests
      *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects containing the arguments of each request collapsed in this batch.
      * @return Collection of {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} objects sharded according to business rules.
@@ -266,6 +289,36 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      */
     protected Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
         return Collections.singletonList(requests);
+    }
+
+    /**
+     * Split requests into priority-based groups for separate batch execution.
+     * <p>
+     * When priority-based batching is enabled, this method groups requests by their priority level
+     * (as returned by {@link #getRequestPriority()}) before batching. Each priority group is executed
+     * as a separate batch, allowing high-priority requests to be processed before lower-priority ones.
+     * <p>
+     * This method is called internally when priority-based batching is enabled. Override this method
+     * to customize the priority grouping logic.
+     * <p>
+     * Default implementation groups all requests with the same priority value together and returns
+     * them sorted by priority (lowest/highest priority first).
+     *
+     * @param requests
+     *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing all collapsed requests
+     * @return Collection of {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} objects grouped by priority
+     */
+    protected Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> splitRequestsByPriority(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        // Group requests by priority level
+        Map<Integer, List<CollapsedRequest<ResponseType, RequestArgumentType>>> priorityGroups = new TreeMap<>();
+
+        for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+            int priority = request.getPriority();
+            priorityGroups.computeIfAbsent(priority, k -> new ArrayList<>()).add(request);
+        }
+
+        // Return groups as collection (TreeMap ensures sorted by priority key)
+        return new ArrayList<>(priorityGroups.values());
     }
 
     /**
@@ -504,10 +557,21 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
     public interface CollapsedRequest<ResponseType, RequestArgumentType> {
         /**
          * The request argument passed into the {@link HystrixCollapser} instance constructor which was then collapsed.
-         * 
+         *
          * @return RequestArgumentType
          */
         RequestArgumentType getArgument();
+
+        /**
+         * The priority level of this request for priority-based batch splitting.
+         * <p>
+         * This value is derived from the {@link HystrixCollapser#getRequestPriority()} method
+         * at the time the request was created and is used to group requests by priority when
+         * priority-based batching is enabled.
+         *
+         * @return int representing the priority level (lower values = higher priority)
+         */
+        int getPriority();
 
         /**
          * This corresponds in a OnNext(Response); OnCompleted pair of emissions.  It represents a single-value usecase.
