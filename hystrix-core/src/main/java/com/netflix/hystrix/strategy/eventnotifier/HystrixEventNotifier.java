@@ -55,7 +55,7 @@ public abstract class HystrixEventNotifier {
      * Will not get called if a command is rejected, short-circuited etc.
      * <p>
      * <b>Default Implementation: </b> Does nothing
-     * 
+     *
      * @param key
      *            {@link HystrixCommandKey} of command instance.
      * @param isolationStrategy
@@ -66,6 +66,58 @@ public abstract class HystrixEventNotifier {
      *            {@code List<HystrixEventType>} of events occurred during execution.
      */
     public void markCommandExecution(HystrixCommandKey key, ExecutionIsolationStrategy isolationStrategy, int duration, List<HystrixEventType> eventsDuringExecution) {
+        // do nothing
+    }
+
+    /**
+     * Called before a batch execution is triggered by a collapser.
+     * <p>
+     * This allows tracking and monitoring when request collapsing results in batch command creation.
+     * <p>
+     * <b>Default Implementation: </b> Does nothing
+     *
+     * @param collapserKey
+     *            the key identifying the collapser instance
+     * @param batchSize
+     *            the number of individual requests being collapsed into this batch
+     */
+    public void markBatchExecutionStart(HystrixCommandKey collapserKey, int batchSize) {
+        // do nothing
+    }
+
+    /**
+     * Called after a batch execution completes successfully.
+     * <p>
+     * This allows tracking batch execution duration and success metrics.
+     * <p>
+     * <b>Default Implementation: </b> Does nothing
+     *
+     * @param collapserKey
+     *            the key identifying the collapser instance
+     * @param batchSize
+     *            the number of individual requests in the batch
+     * @param duration
+     *            time in milliseconds for the batch execution
+     */
+    public void markBatchExecutionComplete(HystrixCommandKey collapserKey, int batchSize, int duration) {
+        // do nothing
+    }
+
+    /**
+     * Called when a batch execution fails.
+     * <p>
+     * This allows tracking batch execution failures separately from individual request failures.
+     * <p>
+     * <b>Default Implementation: </b> Does nothing
+     *
+     * @param collapserKey
+     *            the key identifying the collapser instance
+     * @param batchSize
+     *            the number of individual requests in the failed batch
+     * @param exception
+     *            the exception that caused the batch to fail
+     */
+    public void markBatchExecutionFailure(HystrixCommandKey collapserKey, int batchSize, Throwable exception) {
         // do nothing
     }
 

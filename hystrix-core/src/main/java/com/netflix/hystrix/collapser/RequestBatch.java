@@ -30,6 +30,9 @@ import rx.functions.Action1;
 
 import com.netflix.hystrix.HystrixCollapser.CollapsedRequest;
 import com.netflix.hystrix.HystrixCollapserProperties;
+import com.netflix.hystrix.HystrixCommandKey;
+import com.netflix.hystrix.strategy.HystrixPlugins;
+import com.netflix.hystrix.strategy.eventnotifier.HystrixEventNotifier;
 
 /**
  * A batch of requests collapsed together by a RequestCollapser instance. When full or time has expired it will execute and stop accepting further submissions.
@@ -49,13 +52,16 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
             new ConcurrentHashMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>();
     private final HystrixCollapserProperties properties;
+    private final HystrixEventNotifier eventNotifier;
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
+    private long batchStartTime = -1;
 
     public RequestBatch(HystrixCollapserProperties properties, HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser, int maxBatchSize) {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
         this.maxBatchSize = maxBatchSize;
+        this.eventNotifier = HystrixPlugins.getInstance().getEventNotifier();
     }
 
     /**
@@ -163,9 +169,16 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
+                final int batchSize = argumentMap.size();
+                final HystrixCommandKey collapserKey = HystrixCommandKey.Factory.asKey(commandCollapser.getCollapserKey().name());
+
+                // Notify that batch execution is starting
+                batchStartTime = System.currentTimeMillis();
+                eventNotifier.markBatchExecutionStart(collapserKey, batchSize);
+
                 // shard batches
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
+                // for each shard execute its requests
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests
@@ -178,6 +191,9 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                              */
                             @Override
                             public void call(Throwable e) {
+                                // Notify batch execution failure
+                                eventNotifier.markBatchExecutionFailure(collapserKey, batchSize, e);
+
                                 // handle Throwable in case anything is thrown so we don't block Observers waiting for onError/onCompleted
                                 Exception ee;
                                 if (e instanceof Exception) {
@@ -206,6 +222,10 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                              */
                             @Override
                             public void call() {
+                                // Notify batch execution completion
+                                int duration = (int) (System.currentTimeMillis() - batchStartTime);
+                                eventNotifier.markBatchExecutionComplete(collapserKey, batchSize, duration);
+
                                 // check that all requests had setResponse or setException invoked in case 'mapResponseToRequests' was implemented poorly
                                 Exception e = null;
                                 for (CollapsedRequest<ResponseType, RequestArgumentType> request : shardRequests) {
@@ -221,6 +241,8 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                         
                     } catch (Exception e) {
                         logger.error("Exception while creating and queueing command with batch.", e);
+                        // Notify batch execution failure
+                        eventNotifier.markBatchExecutionFailure(collapserKey, batchSize, e);
                         // if a failure occurs we want to pass that exception to all of the Futures that we've returned
                         for (CollapsedRequest<ResponseType, RequestArgumentType> request : shardRequests) {
                             try {
@@ -234,6 +256,10 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
             } catch (Exception e) {
                 logger.error("Exception while sharding requests.", e);
+                // Notify batch execution failure
+                final int batchSize = argumentMap.size();
+                final HystrixCommandKey collapserKey = HystrixCommandKey.Factory.asKey(commandCollapser.getCollapserKey().name());
+                eventNotifier.markBatchExecutionFailure(collapserKey, batchSize, e);
                 // same error handling as we do around the shards, but this is a wider net in case the shardRequest method fails
                 for (CollapsedRequest<ResponseType, RequestArgumentType> request : argumentMap.values()) {
                     try {
