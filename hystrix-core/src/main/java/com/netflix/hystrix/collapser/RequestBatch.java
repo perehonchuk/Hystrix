@@ -43,6 +43,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
     private static final Logger logger = LoggerFactory.getLogger(RequestBatch.class);
 
     private final HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser;
+    // Maximum number of requests in this batch. Default is 1000 to prevent unbounded growth.
     private final int maxBatchSize;
     private final AtomicBoolean batchStarted = new AtomicBoolean();
 
@@ -52,6 +53,14 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
 
+    /**
+     * Construct a new RequestBatch with the given properties and maximum batch size.
+     * The maxBatchSize parameter prevents unbounded batch growth. Default is 1000 requests.
+     *
+     * @param properties collapser properties
+     * @param commandCollapser the command collapser bridge
+     * @param maxBatchSize maximum number of requests in this batch (default 1000)
+     */
     public RequestBatch(HystrixCollapserProperties properties, HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser, int maxBatchSize) {
         this.properties = properties;
         this.commandCollapser = commandCollapser;

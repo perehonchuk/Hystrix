@@ -32,7 +32,7 @@ import com.netflix.hystrix.util.HystrixRollingPercentile;
 public abstract class HystrixCollapserProperties {
 
     /* defaults */
-    private static final Integer default_maxRequestsInBatch = Integer.MAX_VALUE;
+    private static final Integer default_maxRequestsInBatch = 1000;
     private static final Integer default_timerDelayInMilliseconds = 10;
     private static final Boolean default_requestCacheEnabled = true;
     /* package */ static final Integer default_metricsRollingStatisticalWindow = 10000;// default => statisticalWindow: 10000 = 10 seconds (and default of 10 buckets so each bucket is 1 second)
@@ -111,7 +111,8 @@ public abstract class HystrixCollapserProperties {
 
     /**
      * The maximum number of requests allowed in a batch before triggering a batch execution.
-     * 
+     * Default value is 1000. This prevents unbounded batch growth which could lead to memory issues.
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> maxRequestsInBatch() {
@@ -280,6 +281,13 @@ public abstract class HystrixCollapserProperties {
             return this;
         }
 
+        /**
+         * Set the maximum number of requests allowed in a batch before triggering execution.
+         * Default value is 1000 if not explicitly set.
+         *
+         * @param value maximum batch size
+         * @return Setter for fluent interface
+         */
         public Setter withMaxRequestsInBatch(int value) {
             this.maxRequestsInBatch = value;
             return this;
@@ -330,7 +338,7 @@ public abstract class HystrixCollapserProperties {
          */
         /* package */static Setter getUnitTestPropertiesBuilder() {
             return new Setter()
-                    .withMaxRequestsInBatch(Integer.MAX_VALUE)
+                    .withMaxRequestsInBatch(1000)
                     .withTimerDelayInMilliseconds(10)
                     .withRequestCacheEnabled(true);
         }
