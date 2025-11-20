@@ -48,7 +48,7 @@ public abstract class HystrixCommandProperties {
     /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false 
     private static final Integer default_executionTimeoutInMilliseconds = 1000; // default => executionTimeoutInMilliseconds: 1000 = 1 second
     private static final Boolean default_executionTimeoutEnabled = true;
-    private static final ExecutionIsolationStrategy default_executionIsolationStrategy = ExecutionIsolationStrategy.THREAD;
+    private static final ExecutionIsolationStrategy default_executionIsolationStrategy = ExecutionIsolationStrategy.SEMAPHORE; // default => executionIsolationStrategy: SEMAPHORE for lower overhead
     private static final Boolean default_executionIsolationThreadInterruptOnTimeout = true;
     private static final Boolean default_executionIsolationThreadInterruptOnFutureCancel = false;
     private static final Boolean default_metricsRollingPercentileEnabled = true;
@@ -91,6 +91,8 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
+     * <p>
+     * <b>Default is SEMAPHORE.</b>
      * <p>
      * <ul>
      * <li>THREAD: Execute the {@link HystrixCommand#run()} method on a separate thread and restrict concurrent executions using the thread-pool size.</li>
@@ -225,7 +227,9 @@ public abstract class HystrixCommandProperties {
      * If {@link ExecutionIsolationStrategy#THREAD} then it will be executed on a separate thread and concurrent requests limited by the number of threads in the thread-pool.
      * <p>
      * If {@link ExecutionIsolationStrategy#SEMAPHORE} then it will be executed on the calling thread and concurrent requests limited by the semaphore count.
-     * 
+     * <p>
+     * <b>Default Value:</b> {@link ExecutionIsolationStrategy#SEMAPHORE}
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<ExecutionIsolationStrategy> executionIsolationStrategy() {

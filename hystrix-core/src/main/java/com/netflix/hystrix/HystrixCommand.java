@@ -38,10 +38,14 @@ import rx.functions.Func0;
  * Used to wrap code that will execute potentially risky functionality (typically meaning a service call over the network)
  * with fault and latency tolerance, statistics and performance metrics capture, circuit breaker and bulkhead functionality.
  * This command is essentially a blocking command but provides an Observable facade if used with observe()
- * 
+ * <p>
+ * <b>Execution Isolation:</b> By default, commands execute with {@link HystrixCommandProperties.ExecutionIsolationStrategy#SEMAPHORE SEMAPHORE}
+ * isolation on the calling thread. This can be overridden to use {@link HystrixCommandProperties.ExecutionIsolationStrategy#THREAD THREAD}
+ * isolation which executes commands on a separate thread pool.
+ *
  * @param <R>
  *            the return type
- * 
+ *
  * @ThreadSafe
  */
 public abstract class HystrixCommand<R> extends AbstractCommand<R> implements HystrixExecutable<R>, HystrixInvokableInfo<R>, HystrixObservable<R> {

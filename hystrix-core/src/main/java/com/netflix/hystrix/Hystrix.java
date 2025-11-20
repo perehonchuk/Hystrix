@@ -91,8 +91,8 @@ public class Hystrix {
      * <p>
      * When ExecutionIsolationStrategy is THREAD then this applies to the isolation (child/worker) thread not the calling thread.
      * <p>
-     * When ExecutionIsolationStrategy is SEMAPHORE this applies to the calling thread.
-     * 
+     * When ExecutionIsolationStrategy is SEMAPHORE (the default) this applies to the calling thread.
+     *
      * @return HystrixCommandKey of current command being executed or null if none.
      */
     public static HystrixCommandKey getCurrentThreadExecutingCommand() {
