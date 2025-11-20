@@ -1165,7 +1165,26 @@ import java.util.concurrent.atomic.AtomicReference;
 
                 @Override
                 public int getIntervalTimeInMilliseconds() {
-                    return originalCommand.properties.executionTimeoutInMilliseconds().get();
+                    if (originalCommand.properties.executionTimeoutAdaptiveEnabled().get()) {
+                        // Use adaptive timeout based on recent execution latency percentiles
+                        int percentile = originalCommand.properties.executionTimeoutAdaptivePercentile().get();
+                        double multiplier = originalCommand.properties.executionTimeoutAdaptiveMultiplier().get();
+                        int percentileLatency = originalCommand.metrics.getExecutionTimePercentile(percentile);
+
+                        // If we don't have enough data yet (percentileLatency is 0), fall back to configured timeout
+                        if (percentileLatency <= 0) {
+                            return originalCommand.properties.executionTimeoutInMilliseconds().get();
+                        }
+
+                        // Calculate adaptive timeout as percentile * multiplier
+                        int adaptiveTimeout = (int) (percentileLatency * multiplier);
+
+                        // Ensure adaptive timeout is at least as large as the configured minimum
+                        int configuredTimeout = originalCommand.properties.executionTimeoutInMilliseconds().get();
+                        return Math.max(adaptiveTimeout, configuredTimeout);
+                    } else {
+                        return originalCommand.properties.executionTimeoutInMilliseconds().get();
+                    }
                 }
             };
 

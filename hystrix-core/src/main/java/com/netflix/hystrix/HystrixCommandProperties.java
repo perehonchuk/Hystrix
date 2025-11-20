@@ -62,6 +62,9 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Boolean default_executionTimeoutAdaptiveEnabled = false; // default => adaptiveTimeout: false = use static timeout
+    private static final Integer default_executionTimeoutAdaptivePercentile = 95; // default => adaptivePercentile: 95th percentile of recent latencies
+    private static final Double default_executionTimeoutAdaptiveMultiplier = 1.5; // default => adaptiveMultiplier: 1.5x the percentile latency
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +91,9 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> executionTimeoutAdaptiveEnabled; // Whether adaptive timeout calculation is enabled
+    private final HystrixProperty<Integer> executionTimeoutAdaptivePercentile; // Which percentile of latencies to use for adaptive timeout (e.g., 95)
+    private final HystrixProperty<Double> executionTimeoutAdaptiveMultiplier; // Multiplier to apply to percentile latency for adaptive timeout
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -136,6 +142,9 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.executionTimeoutAdaptiveEnabled = getProperty(propertyPrefix, key, "execution.timeout.adaptive.enabled", builder.getExecutionTimeoutAdaptiveEnabled(), default_executionTimeoutAdaptiveEnabled);
+        this.executionTimeoutAdaptivePercentile = getProperty(propertyPrefix, key, "execution.timeout.adaptive.percentile", builder.getExecutionTimeoutAdaptivePercentile(), default_executionTimeoutAdaptivePercentile);
+        this.executionTimeoutAdaptiveMultiplier = getPropertyDouble(propertyPrefix, key, "execution.timeout.adaptive.multiplier", builder.getExecutionTimeoutAdaptiveMultiplier(), default_executionTimeoutAdaptiveMultiplier);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -426,6 +435,33 @@ public abstract class HystrixCommandProperties {
         return requestLogEnabled;
     }
 
+    /**
+     * Whether adaptive timeout calculation is enabled based on recent execution latencies.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> executionTimeoutAdaptiveEnabled() {
+        return executionTimeoutAdaptiveEnabled;
+    }
+
+    /**
+     * Which percentile of recent execution latencies to use for adaptive timeout calculation (e.g., 95 for 95th percentile).
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> executionTimeoutAdaptivePercentile() {
+        return executionTimeoutAdaptivePercentile;
+    }
+
+    /**
+     * Multiplier to apply to the percentile latency when calculating adaptive timeout (e.g., 1.5 means 150% of p95 latency).
+     *
+     * @return {@code HystrixProperty<Double>}
+     */
+    public HystrixProperty<Double> executionTimeoutAdaptiveMultiplier() {
+        return executionTimeoutAdaptiveMultiplier;
+    }
+
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
         return forBoolean()
                 .add(propertyPrefix + ".command." + key.name() + "." + instanceProperty, builderOverrideValue)
@@ -446,6 +482,10 @@ public abstract class HystrixCommandProperties {
                 .add(propertyPrefix + ".command." + key.name() + "." + instanceProperty, builderOverrideValue)
                 .add(propertyPrefix + ".command.default." + instanceProperty, defaultValue)
                 .build();
+    }
+
+    private static HystrixProperty<Double> getPropertyDouble(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Double builderOverrideValue, Double defaultValue) {
+        return new DoubleHystrixProperty(builderOverrideValue, key, propertyPrefix, defaultValue, instanceProperty);
     }
 
     private static HystrixProperty<ExecutionIsolationStrategy> getProperty(final String propertyPrefix, final HystrixCommandKey key, final String instanceProperty, final ExecutionIsolationStrategy builderOverrideValue, final ExecutionIsolationStrategy defaultValue) {
@@ -497,6 +537,54 @@ public abstract class HystrixCommandProperties {
                 value = ExecutionIsolationStrategy.valueOf(property.get());
             } catch (Exception e) {
                 logger.error("Unable to derive ExecutionIsolationStrategy from property value: " + property.get(), e);
+                // use the default value
+                value = defaultValue;
+            }
+        }
+    }
+
+    /**
+     * HystrixProperty that converts a String to Double so we remain TypeSafe.
+     */
+    private static final class DoubleHystrixProperty implements HystrixProperty<Double> {
+        private final HystrixDynamicProperty<String> property;
+        private volatile Double value;
+        private final Double defaultValue;
+
+        private DoubleHystrixProperty(Double builderOverrideValue, HystrixCommandKey key, String propertyPrefix, Double defaultValue, String instanceProperty) {
+            this.defaultValue = defaultValue;
+            String overrideValue = null;
+            if (builderOverrideValue != null) {
+                overrideValue = builderOverrideValue.toString();
+            }
+            property = forString()
+                    .add(propertyPrefix + ".command." + key.name() + "." + instanceProperty, overrideValue)
+                    .add(propertyPrefix + ".command.default." + instanceProperty, defaultValue.toString())
+                    .build();
+
+            // initialize the value from the property
+            parseProperty();
+
+            // use a callback to handle changes so we only handle the parse cost on updates rather than every fetch
+            property.addCallback(new Runnable() {
+                @Override
+                public void run() {
+                    // when the property value changes we'll update the value
+                    parseProperty();
+                }
+            });
+        }
+
+        @Override
+        public Double get() {
+            return value;
+        }
+
+        private void parseProperty() {
+            try {
+                value = Double.parseDouble(property.get());
+            } catch (Exception e) {
+                logger.error("Unable to derive Double from property value: " + property.get(), e);
                 // use the default value
                 value = defaultValue;
             }
@@ -560,6 +648,9 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Boolean executionTimeoutAdaptiveEnabled = null;
+        private Integer executionTimeoutAdaptivePercentile = null;
+        private Double executionTimeoutAdaptiveMultiplier = null;
 
         /* package */ Setter() {
         }
@@ -662,6 +753,18 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Boolean getExecutionTimeoutAdaptiveEnabled() {
+            return executionTimeoutAdaptiveEnabled;
+        }
+
+        public Integer getExecutionTimeoutAdaptivePercentile() {
+            return executionTimeoutAdaptivePercentile;
+        }
+
+        public Double getExecutionTimeoutAdaptiveMultiplier() {
+            return executionTimeoutAdaptiveMultiplier;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -785,6 +888,21 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withExecutionTimeoutAdaptiveEnabled(boolean value) {
+            this.executionTimeoutAdaptiveEnabled = value;
+            return this;
+        }
+
+        public Setter withExecutionTimeoutAdaptivePercentile(int value) {
+            this.executionTimeoutAdaptivePercentile = value;
+            return this;
+        }
+
+        public Setter withExecutionTimeoutAdaptiveMultiplier(double value) {
+            this.executionTimeoutAdaptiveMultiplier = value;
             return this;
         }
     }
