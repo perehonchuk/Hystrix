@@ -91,12 +91,26 @@ public class HystrixRequestCache {
 
     /**
      * Retrieve a cached Future for this request scope if a matching command has already been executed/queued.
-     * 
+     *
      * @return {@code Future<T>}
      */
     // suppressing warnings because we are using a raw Future since it's in a heterogeneous ConcurrentHashMap cache
     @SuppressWarnings({ "unchecked" })
     /* package */<T> HystrixCachedObservable<T> get(String cacheKey) {
+        return get(cacheKey, false, 0);
+    }
+
+    /**
+     * Retrieve a cached Future for this request scope if a matching command has already been executed/queued.
+     * Supports TTL-based expiration when ttlEnabled is true.
+     *
+     * @param cacheKey the cache key
+     * @param ttlEnabled whether TTL expiration is enabled
+     * @param ttlInMilliseconds the time-to-live in milliseconds
+     * @return {@code HystrixCachedObservable<T>} or null if not found or expired
+     */
+    @SuppressWarnings({ "unchecked" })
+    /* package */<T> HystrixCachedObservable<T> get(String cacheKey, boolean ttlEnabled, int ttlInMilliseconds) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
             ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
@@ -104,7 +118,17 @@ public class HystrixRequestCache {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }
             /* look for the stored value */
-            return (HystrixCachedObservable<T>) cacheInstance.get(key);
+            HystrixCachedObservable<T> cached = (HystrixCachedObservable<T>) cacheInstance.get(key);
+
+            // Check TTL expiration if enabled
+            if (cached != null && ttlEnabled && cached.isExpired(ttlInMilliseconds)) {
+                // Remove expired entry and return null to trigger re-execution
+                cacheInstance.remove(key, cached);
+                logger.debug("Cache entry expired for key: {}", cacheKey);
+                return null;
+            }
+
+            return cached;
         }
         return null;
     }

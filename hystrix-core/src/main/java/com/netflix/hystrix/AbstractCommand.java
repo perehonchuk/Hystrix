@@ -473,10 +473,13 @@ import java.util.concurrent.atomic.AtomicReference;
 
                 final boolean requestCacheEnabled = isRequestCachingEnabled();
                 final String cacheKey = getCacheKey();
+                final boolean cacheTtlEnabled = properties.requestCacheTtlEnabled().get();
+                final int cacheTtlInMilliseconds = properties.requestCacheTtlInMilliseconds().get();
 
                 /* try from cache first */
                 if (requestCacheEnabled) {
-                    HystrixCommandResponseFromCache<R> fromCache = (HystrixCommandResponseFromCache<R>) requestCache.get(cacheKey);
+                    HystrixCommandResponseFromCache<R> fromCache = (HystrixCommandResponseFromCache<R>) requestCache.get(
+                            cacheKey, cacheTtlEnabled, cacheTtlInMilliseconds);
                     if (fromCache != null) {
                         isResponseFromCache = true;
                         return handleRequestCacheHitAndEmitValues(fromCache, _cmd);

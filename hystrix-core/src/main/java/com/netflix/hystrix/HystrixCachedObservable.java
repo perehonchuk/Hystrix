@@ -9,8 +9,10 @@ public class HystrixCachedObservable<R> {
     protected final Subscription originalSubscription;
     protected final Observable<R> cachedObservable;
     private volatile int outstandingSubscriptions = 0;
+    private final long createdTimestamp;
 
     protected HystrixCachedObservable(final Observable<R> originalObservable) {
+        this.createdTimestamp = System.currentTimeMillis();
         ReplaySubject<R> replaySubject = ReplaySubject.create();
         this.originalSubscription = originalObservable
                 .subscribe(replaySubject);
@@ -47,5 +49,28 @@ public class HystrixCachedObservable<R> {
 
     public void unsubscribe() {
         originalSubscription.unsubscribe();
+    }
+
+    /**
+     * Returns the timestamp when this cached observable was created.
+     * Used for TTL-based cache expiration.
+     *
+     * @return creation timestamp in milliseconds since epoch
+     */
+    public long getCreatedTimestamp() {
+        return createdTimestamp;
+    }
+
+    /**
+     * Checks if this cached entry has expired based on the given TTL.
+     *
+     * @param ttlInMilliseconds the time-to-live in milliseconds (0 or negative means never expires)
+     * @return true if the entry has expired, false otherwise
+     */
+    public boolean isExpired(int ttlInMilliseconds) {
+        if (ttlInMilliseconds <= 0) {
+            return false;
+        }
+        return (System.currentTimeMillis() - createdTimestamp) > ttlInMilliseconds;
     }
 }
