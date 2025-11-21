@@ -201,7 +201,7 @@ public class HystrixCommandMetricsTest {
                     .andCommandKey(HystrixCommandKey.Factory.asKey(commandKey))
                     .andCommandPropertiesDefaults(HystrixCommandPropertiesTest.getUnitTestPropertiesSetter()
                             .withExecutionTimeoutInMilliseconds(1000)
-                            .withCircuitBreakerRequestVolumeThreshold(20)));
+                            .withCircuitBreakerRequestVolumeThreshold(10)));
             this.shouldFail = shouldFail;
             this.shouldFailWithBadRequest = shouldFailWithBadRequest;
             this.latencyToAdd = latencyToAdd;
