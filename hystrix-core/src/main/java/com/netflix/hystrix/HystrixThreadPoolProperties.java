@@ -58,6 +58,13 @@ public abstract class HystrixThreadPoolProperties {
     static int default_threadPoolRollingNumberStatisticalWindow = 10000; // milliseconds for rolling number
     static int default_threadPoolRollingNumberStatisticalWindowBuckets = 10; // number of buckets in rolling number (10 1-second buckets)
 
+    // Adaptive thread pool sizing defaults - automatically adjusts pool size based on system load
+    static boolean default_adaptiveSizingEnabled = true; // enable adaptive sizing by default
+    static int default_adaptiveMinimumSize = 5;          // minimum threads when load is low
+    static int default_adaptiveMaximumSize = 20;         // maximum threads when load is high
+    static double default_adaptiveTargetUtilization = 0.7; // target utilization threshold (70%)
+    static int default_adaptiveAdjustmentIntervalMs = 5000; // how often to check and adjust (5 seconds)
+
     private final HystrixProperty<Integer> corePoolSize;
     private final HystrixProperty<Integer> maximumPoolSize;
     private final HystrixProperty<Integer> keepAliveTime;
@@ -67,6 +74,13 @@ public abstract class HystrixThreadPoolProperties {
 
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowInMilliseconds;
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowBuckets;
+
+    // Adaptive sizing properties
+    private final HystrixProperty<Boolean> adaptiveSizingEnabled;
+    private final HystrixProperty<Integer> adaptiveMinimumSize;
+    private final HystrixProperty<Integer> adaptiveMaximumSize;
+    private final HystrixProperty<Integer> adaptiveTargetUtilizationPercentage;
+    private final HystrixProperty<Integer> adaptiveAdjustmentIntervalMs;
 
     protected HystrixThreadPoolProperties(HystrixThreadPoolKey key) {
         this(key, new Setter(), "hystrix");
@@ -90,6 +104,13 @@ public abstract class HystrixThreadPoolProperties {
         this.queueSizeRejectionThreshold = getProperty(propertyPrefix, key, "queueSizeRejectionThreshold", builder.getQueueSizeRejectionThreshold(), default_queueSizeRejectionThreshold);
         this.threadPoolRollingNumberStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_threadPoolRollingNumberStatisticalWindow);
         this.threadPoolRollingNumberStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_threadPoolRollingNumberStatisticalWindowBuckets);
+
+        // Initialize adaptive sizing properties
+        this.adaptiveSizingEnabled = getProperty(propertyPrefix, key, "adaptiveSizing.enabled", builder.getAdaptiveSizingEnabled(), default_adaptiveSizingEnabled);
+        this.adaptiveMinimumSize = getProperty(propertyPrefix, key, "adaptiveSizing.minimumSize", builder.getAdaptiveMinimumSize(), default_adaptiveMinimumSize);
+        this.adaptiveMaximumSize = getProperty(propertyPrefix, key, "adaptiveSizing.maximumSize", builder.getAdaptiveMaximumSize(), default_adaptiveMaximumSize);
+        this.adaptiveTargetUtilizationPercentage = getProperty(propertyPrefix, key, "adaptiveSizing.targetUtilizationPercentage", builder.getAdaptiveTargetUtilizationPercentage(), (int)(default_adaptiveTargetUtilization * 100));
+        this.adaptiveAdjustmentIntervalMs = getProperty(propertyPrefix, key, "adaptiveSizing.adjustmentIntervalMs", builder.getAdaptiveAdjustmentIntervalMs(), default_adaptiveAdjustmentIntervalMs);
     }
 
     private static HystrixProperty<Integer> getProperty(String propertyPrefix, HystrixThreadPoolKey key, String instanceProperty, Integer builderOverrideValue, Integer defaultValue) {
@@ -197,11 +218,71 @@ public abstract class HystrixThreadPoolProperties {
 
     /**
      * Number of buckets the rolling statistical window is broken into. This is passed into {@link HystrixRollingNumber} inside each {@link HystrixThreadPoolMetrics} instance.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> metricsRollingStatisticalWindowBuckets() {
         return threadPoolRollingNumberStatisticalWindowBuckets;
+    }
+
+    /**
+     * Whether adaptive thread pool sizing is enabled. When enabled, the thread pool will automatically
+     * adjust its size based on current utilization metrics, scaling between adaptiveMinimumSize and
+     * adaptiveMaximumSize. This overrides the static coreSize/maximumSize configuration.
+     *
+     * Default: true (enabled by default)
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> adaptiveSizingEnabled() {
+        return adaptiveSizingEnabled;
+    }
+
+    /**
+     * Minimum number of threads when adaptive sizing is enabled and load is low.
+     * The pool will never shrink below this size.
+     *
+     * Default: 5
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> adaptiveMinimumSize() {
+        return adaptiveMinimumSize;
+    }
+
+    /**
+     * Maximum number of threads when adaptive sizing is enabled and load is high.
+     * The pool will never grow beyond this size.
+     *
+     * Default: 20
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> adaptiveMaximumSize() {
+        return adaptiveMaximumSize;
+    }
+
+    /**
+     * Target thread pool utilization percentage for adaptive sizing decisions.
+     * When utilization exceeds this threshold, the pool grows. When below, it shrinks.
+     *
+     * Default: 70 (representing 70%)
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> adaptiveTargetUtilizationPercentage() {
+        return adaptiveTargetUtilizationPercentage;
+    }
+
+    /**
+     * Interval in milliseconds between adaptive sizing adjustment checks.
+     *
+     * Default: 5000 (5 seconds)
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> adaptiveAdjustmentIntervalMs() {
+        return adaptiveAdjustmentIntervalMs;
     }
 
     /**
@@ -245,6 +326,13 @@ public abstract class HystrixThreadPoolProperties {
         private Boolean allowMaximumSizeToDivergeFromCoreSize = null;
         private Integer rollingStatisticalWindowInMilliseconds = null;
         private Integer rollingStatisticalWindowBuckets = null;
+
+        // Adaptive sizing fields
+        private Boolean adaptiveSizingEnabled = null;
+        private Integer adaptiveMinimumSize = null;
+        private Integer adaptiveMaximumSize = null;
+        private Integer adaptiveTargetUtilizationPercentage = null;
+        private Integer adaptiveAdjustmentIntervalMs = null;
 
         private Setter() {
         }
@@ -321,8 +409,50 @@ public abstract class HystrixThreadPoolProperties {
             return this;
         }
 
+        // Adaptive sizing getters and setters
+        public Boolean getAdaptiveSizingEnabled() {
+            return adaptiveSizingEnabled;
+        }
 
+        public Integer getAdaptiveMinimumSize() {
+            return adaptiveMinimumSize;
+        }
 
+        public Integer getAdaptiveMaximumSize() {
+            return adaptiveMaximumSize;
+        }
 
+        public Integer getAdaptiveTargetUtilizationPercentage() {
+            return adaptiveTargetUtilizationPercentage;
+        }
+
+        public Integer getAdaptiveAdjustmentIntervalMs() {
+            return adaptiveAdjustmentIntervalMs;
+        }
+
+        public Setter withAdaptiveSizingEnabled(boolean value) {
+            this.adaptiveSizingEnabled = value;
+            return this;
+        }
+
+        public Setter withAdaptiveMinimumSize(int value) {
+            this.adaptiveMinimumSize = value;
+            return this;
+        }
+
+        public Setter withAdaptiveMaximumSize(int value) {
+            this.adaptiveMaximumSize = value;
+            return this;
+        }
+
+        public Setter withAdaptiveTargetUtilizationPercentage(int value) {
+            this.adaptiveTargetUtilizationPercentage = value;
+            return this;
+        }
+
+        public Setter withAdaptiveAdjustmentIntervalMs(int value) {
+            this.adaptiveAdjustmentIntervalMs = value;
+            return this;
+        }
     }
 }

@@ -167,8 +167,14 @@ public interface HystrixThreadPool {
         private final ThreadPoolExecutor threadPool;
         private final HystrixThreadPoolMetrics metrics;
         private final int queueSize;
+        private final HystrixThreadPoolKey threadPoolKey;
+
+        // Adaptive sizing state
+        private volatile long lastAdaptiveAdjustmentTime = 0;
+        private volatile int currentAdaptiveSize;
 
         public HystrixThreadPoolDefault(HystrixThreadPoolKey threadPoolKey, HystrixThreadPoolProperties.Setter propertiesDefaults) {
+            this.threadPoolKey = threadPoolKey;
             this.properties = HystrixPropertiesFactory.getThreadPoolProperties(threadPoolKey, propertiesDefaults);
             HystrixConcurrencyStrategy concurrencyStrategy = HystrixPlugins.getInstance().getConcurrencyStrategy();
             this.queueSize = properties.maxQueueSize().get();
@@ -178,6 +184,9 @@ public interface HystrixThreadPool {
                     properties);
             this.threadPool = this.metrics.getThreadPool();
             this.queue = this.threadPool.getQueue();
+
+            // Initialize adaptive size to the configured minimum
+            this.currentAdaptiveSize = properties.adaptiveMinimumSize().get();
 
             /* strategy: HystrixMetricsPublisherThreadPool */
             HystrixMetricsPublisherFactory.createOrRetrievePublisherForThreadPool(threadPoolKey, this.metrics, this.properties);
@@ -208,6 +217,21 @@ public interface HystrixThreadPool {
 
         // allow us to change things via fast-properties by setting it each time
         private void touchConfig() {
+            // Check if adaptive sizing is enabled - this takes precedence over static configuration
+            if (properties.adaptiveSizingEnabled().get()) {
+                applyAdaptiveSizing();
+            } else {
+                applyStaticSizing();
+            }
+
+            threadPool.setKeepAliveTime(properties.keepAliveTimeMinutes().get(), TimeUnit.MINUTES);
+        }
+
+        /**
+         * Apply static thread pool sizing based on coreSize/maximumSize configuration.
+         * This is the legacy behavior when adaptive sizing is disabled.
+         */
+        private void applyStaticSizing() {
             final int dynamicCoreSize = properties.coreSize().get();
             final int configuredMaximumSize = properties.maximumSize().get();
             int dynamicMaximumSize = properties.actualMaximumSize();
@@ -215,12 +239,10 @@ public interface HystrixThreadPool {
             boolean maxTooLow = false;
 
             if (allowSizesToDiverge && configuredMaximumSize < dynamicCoreSize) {
-                //if user sets maximum < core (or defaults get us there), we need to maintain invariant of core <= maximum
                 dynamicMaximumSize = dynamicCoreSize;
                 maxTooLow = true;
             }
 
-            // In JDK 6, setCorePoolSize and setMaximumPoolSize will execute a lock operation. Avoid them if the pool size is not changed.
             if (threadPool.getCorePoolSize() != dynamicCoreSize || (allowSizesToDiverge && threadPool.getMaximumPoolSize() != dynamicMaximumSize)) {
                 if (maxTooLow) {
                     logger.error("Hystrix ThreadPool configuration for : " + metrics.getThreadPoolKey().name() + " is trying to set coreSize = " +
@@ -230,8 +252,58 @@ public interface HystrixThreadPool {
                 threadPool.setCorePoolSize(dynamicCoreSize);
                 threadPool.setMaximumPoolSize(dynamicMaximumSize);
             }
+        }
 
-            threadPool.setKeepAliveTime(properties.keepAliveTimeMinutes().get(), TimeUnit.MINUTES);
+        /**
+         * Apply adaptive thread pool sizing based on current utilization metrics.
+         * The pool automatically scales between adaptiveMinimumSize and adaptiveMaximumSize
+         * based on thread utilization relative to the target utilization threshold.
+         */
+        private void applyAdaptiveSizing() {
+            long currentTime = System.currentTimeMillis();
+            int adjustmentInterval = properties.adaptiveAdjustmentIntervalMs().get();
+
+            // Only check for adjustments at the configured interval
+            if (currentTime - lastAdaptiveAdjustmentTime < adjustmentInterval) {
+                return;
+            }
+            lastAdaptiveAdjustmentTime = currentTime;
+
+            int minSize = properties.adaptiveMinimumSize().get();
+            int maxSize = properties.adaptiveMaximumSize().get();
+            int targetUtilizationPct = properties.adaptiveTargetUtilizationPercentage().get();
+
+            // Calculate current utilization based on active threads vs pool size
+            int currentPoolSize = threadPool.getCorePoolSize();
+            int activeCount = threadPool.getActiveCount();
+            double currentUtilization = currentPoolSize > 0 ? (double) activeCount / currentPoolSize : 0.0;
+            double targetUtilization = targetUtilizationPct / 100.0;
+
+            int newSize = currentAdaptiveSize;
+
+            // Scale up if utilization exceeds target
+            if (currentUtilization > targetUtilization && currentAdaptiveSize < maxSize) {
+                // Increase by 25% or at least 1 thread, capped at maxSize
+                int increase = Math.max(1, currentAdaptiveSize / 4);
+                newSize = Math.min(maxSize, currentAdaptiveSize + increase);
+                logger.info("Hystrix ThreadPool {} adaptive sizing: scaling UP from {} to {} threads (utilization: {:.1f}%)",
+                        threadPoolKey.name(), currentAdaptiveSize, newSize, currentUtilization * 100);
+            }
+            // Scale down if utilization is significantly below target
+            else if (currentUtilization < targetUtilization * 0.5 && currentAdaptiveSize > minSize) {
+                // Decrease by 25% or at least 1 thread, floored at minSize
+                int decrease = Math.max(1, currentAdaptiveSize / 4);
+                newSize = Math.max(minSize, currentAdaptiveSize - decrease);
+                logger.info("Hystrix ThreadPool {} adaptive sizing: scaling DOWN from {} to {} threads (utilization: {:.1f}%)",
+                        threadPoolKey.name(), currentAdaptiveSize, newSize, currentUtilization * 100);
+            }
+
+            // Apply the new size if it changed
+            if (newSize != currentAdaptiveSize) {
+                currentAdaptiveSize = newSize;
+                threadPool.setCorePoolSize(newSize);
+                threadPool.setMaximumPoolSize(newSize);
+            }
         }
 
         @Override
