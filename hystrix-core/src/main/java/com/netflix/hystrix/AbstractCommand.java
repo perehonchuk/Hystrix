@@ -633,7 +633,13 @@ import java.util.concurrent.atomic.AtomicReference;
         };
 
         Observable<R> execution;
-        if (properties.executionTimeoutEnabled().get()) {
+        // Use different timeout settings based on isolation strategy
+        boolean isThreadIsolation = properties.executionIsolationStrategy().get() == ExecutionIsolationStrategy.THREAD;
+        boolean timeoutEnabled = isThreadIsolation ?
+                properties.executionTimeoutEnabled().get() :
+                properties.executionIsolationSemaphoreTimeoutEnabled().get();
+
+        if (timeoutEnabled) {
             execution = executeCommandWithSpecifiedIsolation(_cmd)
                     .lift(new HystrixObservableTimeoutOperator<R>(_cmd));
         } else {
@@ -1165,7 +1171,11 @@ import java.util.concurrent.atomic.AtomicReference;
 
                 @Override
                 public int getIntervalTimeInMilliseconds() {
-                    return originalCommand.properties.executionTimeoutInMilliseconds().get();
+                    // Use different timeout based on isolation strategy
+                    boolean isThreadIsolation = originalCommand.properties.executionIsolationStrategy().get() == ExecutionIsolationStrategy.THREAD;
+                    return isThreadIsolation ?
+                            originalCommand.properties.executionTimeoutInMilliseconds().get() :
+                            originalCommand.properties.executionIsolationSemaphoreTimeoutInMilliseconds().get();
                 }
             };
 
