@@ -51,7 +51,9 @@ import com.netflix.hystrix.strategy.properties.HystrixPropertiesStrategyDefault;
  * See the Hystrix GitHub Wiki for more information: <a href="https://github.com/Netflix/Hystrix/wiki/Plugins">https://github.com/Netflix/Hystrix/wiki/Plugins</a>.
  */
 public class HystrixPlugins {
-    
+
+    private static final Logger logger = LoggerFactory.getLogger(HystrixPlugins.class);
+
     //We should not load unless we are requested to. This avoids accidental initialization. @agentgt
     //See https://en.wikipedia.org/wiki/Initialization-on-demand_holder_idiom
     private static class LazyHolder { private static final HystrixPlugins INSTANCE = HystrixPlugins.create(); }
@@ -141,15 +143,19 @@ public class HystrixPlugins {
 
     /**
      * Register a {@link HystrixEventNotifier} implementation as a global override of any injected or default implementations.
-     * 
+     * This method now supports re-registration, allowing dynamic plugin replacement at runtime.
+     *
      * @param impl
      *            {@link HystrixEventNotifier} implementation
-     * @throws IllegalStateException
-     *             if called more than once or after the default was initialized (if usage occurs before trying to register)
      */
     public void registerEventNotifier(HystrixEventNotifier impl) {
-        if (!notifier.compareAndSet(null, impl)) {
-            throw new IllegalStateException("Another strategy was already registered.");
+        if (impl == null) {
+            throw new IllegalArgumentException("HystrixEventNotifier implementation cannot be null");
+        }
+        HystrixEventNotifier previous = notifier.getAndSet(impl);
+        if (previous != null) {
+            logger.info("Replacing existing HystrixEventNotifier {} with {}",
+                    previous.getClass().getSimpleName(), impl.getClass().getSimpleName());
         }
     }
 
@@ -179,15 +185,19 @@ public class HystrixPlugins {
 
     /**
      * Register a {@link HystrixConcurrencyStrategy} implementation as a global override of any injected or default implementations.
-     * 
+     * This method now supports re-registration, allowing dynamic plugin replacement at runtime.
+     *
      * @param impl
      *            {@link HystrixConcurrencyStrategy} implementation
-     * @throws IllegalStateException
-     *             if called more than once or after the default was initialized (if usage occurs before trying to register)
      */
     public void registerConcurrencyStrategy(HystrixConcurrencyStrategy impl) {
-        if (!concurrencyStrategy.compareAndSet(null, impl)) {
-            throw new IllegalStateException("Another strategy was already registered.");
+        if (impl == null) {
+            throw new IllegalArgumentException("HystrixConcurrencyStrategy implementation cannot be null");
+        }
+        HystrixConcurrencyStrategy previous = concurrencyStrategy.getAndSet(impl);
+        if (previous != null) {
+            logger.info("Replacing existing HystrixConcurrencyStrategy {} with {}",
+                    previous.getClass().getSimpleName(), impl.getClass().getSimpleName());
         }
     }
 
@@ -217,15 +227,19 @@ public class HystrixPlugins {
 
     /**
      * Register a {@link HystrixMetricsPublisher} implementation as a global override of any injected or default implementations.
-     * 
+     * This method now supports re-registration, allowing dynamic plugin replacement at runtime.
+     *
      * @param impl
      *            {@link HystrixMetricsPublisher} implementation
-     * @throws IllegalStateException
-     *             if called more than once or after the default was initialized (if usage occurs before trying to register)
      */
     public void registerMetricsPublisher(HystrixMetricsPublisher impl) {
-        if (!metricsPublisher.compareAndSet(null, impl)) {
-            throw new IllegalStateException("Another strategy was already registered.");
+        if (impl == null) {
+            throw new IllegalArgumentException("HystrixMetricsPublisher implementation cannot be null");
+        }
+        HystrixMetricsPublisher previous = metricsPublisher.getAndSet(impl);
+        if (previous != null) {
+            logger.info("Replacing existing HystrixMetricsPublisher {} with {}",
+                    previous.getClass().getSimpleName(), impl.getClass().getSimpleName());
         }
     }
 
@@ -274,15 +288,19 @@ public class HystrixPlugins {
 
     /**
      * Register a {@link HystrixPropertiesStrategy} implementation as a global override of any injected or default implementations.
-     * 
+     * This method now supports re-registration, allowing dynamic plugin replacement at runtime.
+     *
      * @param impl
      *            {@link HystrixPropertiesStrategy} implementation
-     * @throws IllegalStateException
-     *             if called more than once or after the default was initialized (if usage occurs before trying to register)
      */
     public void registerPropertiesStrategy(HystrixPropertiesStrategy impl) {
-        if (!propertiesFactory.compareAndSet(null, impl)) {
-            throw new IllegalStateException("Another strategy was already registered.");
+        if (impl == null) {
+            throw new IllegalArgumentException("HystrixPropertiesStrategy implementation cannot be null");
+        }
+        HystrixPropertiesStrategy previous = propertiesFactory.getAndSet(impl);
+        if (previous != null) {
+            logger.info("Replacing existing HystrixPropertiesStrategy {} with {}",
+                    previous.getClass().getSimpleName(), impl.getClass().getSimpleName());
         }
     }
 
@@ -315,17 +333,21 @@ public class HystrixPlugins {
 
     /**
      * Register a {@link HystrixCommandExecutionHook} implementation as a global override of any injected or default implementations.
-     * 
+     * This method now supports re-registration, allowing dynamic plugin replacement at runtime.
+     *
      * @param impl
      *            {@link HystrixCommandExecutionHook} implementation
-     * @throws IllegalStateException
-     *             if called more than once or after the default was initialized (if usage occurs before trying to register)
-     * 
+     *
      * @since 1.2
      */
     public void registerCommandExecutionHook(HystrixCommandExecutionHook impl) {
-        if (!commandExecutionHook.compareAndSet(null, impl)) {
-            throw new IllegalStateException("Another strategy was already registered.");
+        if (impl == null) {
+            throw new IllegalArgumentException("HystrixCommandExecutionHook implementation cannot be null");
+        }
+        HystrixCommandExecutionHook previous = commandExecutionHook.getAndSet(impl);
+        if (previous != null) {
+            logger.info("Replacing existing HystrixCommandExecutionHook {} with {}",
+                    previous.getClass().getSimpleName(), impl.getClass().getSimpleName());
         }
     }
 

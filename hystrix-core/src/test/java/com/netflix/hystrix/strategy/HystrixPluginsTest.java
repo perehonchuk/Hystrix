@@ -416,7 +416,38 @@ public class HystrixPluginsTest {
     public static class HystrixPropertiesStrategyTestImpl extends HystrixPropertiesStrategy {
         // just use defaults
     }
-    
+
+    @Test
+    public void testPluginReregistration() {
+        // Test that plugins can now be re-registered without throwing IllegalStateException
+        HystrixPlugins plugins = HystrixPlugins.create(HystrixPlugins.class.getClassLoader());
+
+        // Register first implementation
+        HystrixEventNotifier notifier1 = new HystrixEventNotifierTestImpl();
+        plugins.registerEventNotifier(notifier1);
+        assertEquals(notifier1, plugins.getEventNotifier());
+
+        // Re-register with different implementation - should succeed now
+        HystrixEventNotifier notifier2 = new HystrixEventNotifierTestImpl();
+        plugins.registerEventNotifier(notifier2);
+        assertEquals(notifier2, plugins.getEventNotifier());
+
+        // Same test for ConcurrencyStrategy
+        HystrixConcurrencyStrategy strategy1 = new HystrixConcurrencyStrategyTestImpl();
+        plugins.registerConcurrencyStrategy(strategy1);
+        assertEquals(strategy1, plugins.getConcurrencyStrategy());
+
+        HystrixConcurrencyStrategy strategy2 = new HystrixConcurrencyStrategyTestImpl();
+        plugins.registerConcurrencyStrategy(strategy2);
+        assertEquals(strategy2, plugins.getConcurrencyStrategy());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testPluginRegistrationNullNotAllowed() {
+        HystrixPlugins plugins = HystrixPlugins.create(HystrixPlugins.class.getClassLoader());
+        plugins.registerEventNotifier(null);
+    }
+
     /*@Test
     public void testRequestContextViaPluginInTimeout() {
         HystrixPlugins.getInstance().registerConcurrencyStrategy(new HystrixConcurrencyStrategy() {
