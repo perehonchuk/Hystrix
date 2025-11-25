@@ -62,6 +62,8 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Integer default_fallbackMaxRetryAttempts = 3; // default to 3 retry attempts for fallback execution
+    private static final Boolean default_fallbackRetryEnabled = true; // default to enabling fallback retry logic
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +90,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Integer> fallbackMaxRetryAttempts; // maximum number of times to retry fallback execution
+    private final HystrixProperty<Boolean> fallbackRetryEnabled; // whether fallback retry logic is enabled
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -136,6 +140,8 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.fallbackMaxRetryAttempts = getProperty(propertyPrefix, key, "fallback.maxRetryAttempts", builder.getFallbackMaxRetryAttempts(), default_fallbackMaxRetryAttempts);
+        this.fallbackRetryEnabled = getProperty(propertyPrefix, key, "fallback.retry.enabled", builder.getFallbackRetryEnabled(), default_fallbackRetryEnabled);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -324,13 +330,33 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand#getFallback()} should be attempted when failure occurs.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
-     * 
+     *
      * @since 1.2
      */
     public HystrixProperty<Boolean> fallbackEnabled() {
         return fallbackEnabled;
+    }
+
+    /**
+     * Maximum number of retry attempts for fallback execution when it fails.
+     * This allows fallback methods to be retried multiple times before giving up.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> fallbackMaxRetryAttempts() {
+        return fallbackMaxRetryAttempts;
+    }
+
+    /**
+     * Whether fallback retry logic is enabled. When enabled, failed fallback executions
+     * will be retried up to fallbackMaxRetryAttempts times.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> fallbackRetryEnabled() {
+        return fallbackRetryEnabled;
     }
 
     /**
@@ -560,6 +586,8 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Integer fallbackMaxRetryAttempts = null;
+        private Boolean fallbackRetryEnabled = null;
 
         /* package */ Setter() {
         }
@@ -626,6 +654,14 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getFallbackEnabled() {
             return fallbackEnabled;
+        }
+
+        public Integer getFallbackMaxRetryAttempts() {
+            return fallbackMaxRetryAttempts;
+        }
+
+        public Boolean getFallbackRetryEnabled() {
+            return fallbackRetryEnabled;
         }
 
         public Integer getMetricsHealthSnapshotIntervalInMilliseconds() {
@@ -785,6 +821,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withFallbackMaxRetryAttempts(int value) {
+            this.fallbackMaxRetryAttempts = value;
+            return this;
+        }
+
+        public Setter withFallbackRetryEnabled(boolean value) {
+            this.fallbackRetryEnabled = value;
             return this;
         }
     }

@@ -38,6 +38,7 @@ public enum HystrixEventType {
     FALLBACK_SUCCESS(true),
     FALLBACK_FAILURE(true),
     FALLBACK_REJECTION(true),
+    FALLBACK_RETRY(false),
     FALLBACK_DISABLED(true),
     FALLBACK_MISSING(true),
     EXCEPTION_THROWN(false),
@@ -69,6 +70,7 @@ public enum HystrixEventType {
             case FALLBACK_SUCCESS: return FALLBACK_SUCCESS;
             case FALLBACK_FAILURE: return FALLBACK_FAILURE;
             case FALLBACK_REJECTION: return FALLBACK_REJECTION;
+            case FALLBACK_RETRY: return FALLBACK_RETRY;
             case FALLBACK_DISABLED: return FALLBACK_DISABLED;
             case FALLBACK_MISSING: return FALLBACK_MISSING;
             case EXCEPTION_THROWN: return EXCEPTION_THROWN;
