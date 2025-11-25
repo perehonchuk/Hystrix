@@ -610,14 +610,24 @@ import java.util.concurrent.atomic.AtomicReference;
                 } else if (t instanceof HystrixTimeoutException) {
                     return handleTimeoutViaFallback();
                 } else if (t instanceof HystrixBadRequestException) {
-                    return handleBadRequestByEmittingError(e);
+                    // Check if fallback is enabled for bad requests
+                    if (properties.badRequestFallbackEnabled().get()) {
+                        return handleBadRequestViaFallback(e);
+                    } else {
+                        return handleBadRequestByEmittingError(e);
+                    }
                 } else {
                     /*
                      * Treat HystrixBadRequestException from ExecutionHook like a plain HystrixBadRequestException.
                      */
                     if (e instanceof HystrixBadRequestException) {
-                        eventNotifier.markEvent(HystrixEventType.BAD_REQUEST, commandKey);
-                        return Observable.error(e);
+                        // Check if fallback is enabled for bad requests
+                        if (properties.badRequestFallbackEnabled().get()) {
+                            return handleBadRequestViaFallback(e);
+                        } else {
+                            eventNotifier.markEvent(HystrixEventType.BAD_REQUEST, commandKey);
+                            return Observable.error(e);
+                        }
                     }
 
                     return handleFailureViaFallback(e);
@@ -1019,6 +1029,25 @@ import java.util.concurrent.atomic.AtomicReference;
          * HystrixBadRequestException is treated differently and allowed to propagate without any stats tracking or fallback logic
          */
         return Observable.error(toEmit);
+    }
+
+    private Observable<R> handleBadRequestViaFallback(Exception underlying) {
+        /**
+         * Handle HystrixBadRequestException with fallback when badRequestFallbackEnabled is true.
+         * This allows fallback logic to handle client errors, but still does not count against circuit breaker metrics.
+         */
+        logger.debug("HystrixBadRequestException occurred. Proceeding to fallback logic due to badRequestFallbackEnabled=true ...", underlying);
+
+        // Mark the BAD_REQUEST event but also proceed to fallback
+        eventNotifier.markEvent(HystrixEventType.BAD_REQUEST, commandKey);
+        long executionLatency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+        executionResult = executionResult.addEvent((int) executionLatency, HystrixEventType.BAD_REQUEST);
+
+        // Record the exception
+        executionResult = executionResult.setException(underlying);
+
+        // Proceed to fallback - using BAD_REQUEST_EXCEPTION as the failure type
+        return getFallbackOrThrowException(this, HystrixEventType.BAD_REQUEST, FailureType.BAD_REQUEST_EXCEPTION, "bad request with fallback enabled", underlying);
     }
 
     private Observable<R> handleFailureViaFallback(Exception underlying) {
