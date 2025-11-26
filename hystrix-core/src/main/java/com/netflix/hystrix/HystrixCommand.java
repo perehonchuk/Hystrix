@@ -286,11 +286,36 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * Override this method to validate the response returned from {@link #run()}.
+     * <p>
+     * If this method returns false, the response is considered invalid and Hystrix will:
+     * <ul>
+     * <li>Emit a RESPONSE_VALIDATION_FAILED event</li>
+     * <li>Trigger the fallback logic (calling {@link #getFallback()})</li>
+     * <li>Contribute to circuit breaker error statistics</li>
+     * </ul>
+     * <p>
+     * This allows commands to enforce business-level validation rules on responses, ensuring that
+     * technically successful responses that are semantically invalid (e.g., null values, empty collections,
+     * responses indicating errors) can be handled via fallback logic.
+     * <p>
+     * Validation is only performed when {@code execution.validation.enabled} is set to true (default: false).
+     * <p>
+     * DEFAULT BEHAVIOR: Returns true (all responses are considered valid).
+     *
+     * @param response The response value returned from {@link #run()}
+     * @return true if the response is valid, false if it should be rejected and trigger fallback
+     */
+    protected boolean validateResponse(R response) {
+        return true; // by default, all responses are valid
     }
 
     @Override

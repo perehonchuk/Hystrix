@@ -340,6 +340,16 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getFallbackObservable();
 
     /**
+     * Override this method to validate responses from execution.
+     * This method is called by both HystrixCommand and HystrixObservableCommand.
+     * Subclasses must implement this to provide validation logic.
+     *
+     * @param response The response to validate
+     * @return true if valid, false if validation fails
+     */
+    protected abstract boolean validateResponse(R response);
+
+    /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
      * <p>
      * This lazily starts execution of the command once the {@link Observable} is subscribed to.
@@ -638,6 +648,40 @@ import java.util.concurrent.atomic.AtomicReference;
                     .lift(new HystrixObservableTimeoutOperator<R>(_cmd));
         } else {
             execution = executeCommandWithSpecifiedIsolation(_cmd);
+        }
+
+        // Add response validation if enabled
+        if (properties.executionValidationEnabled().get()) {
+            execution = execution.flatMap(new Func1<R, Observable<R>>() {
+                @Override
+                public Observable<R> call(R response) {
+                    try {
+                        if (_cmd.validateResponse(response)) {
+                            return Observable.just(response);
+                        } else {
+                            // Validation failed, emit event and trigger fallback
+                            eventNotifier.markEvent(HystrixEventType.RESPONSE_VALIDATION_FAILED, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.RESPONSE_VALIDATION_FAILED);
+                            return Observable.error(new HystrixRuntimeException(
+                                    HystrixRuntimeException.FailureType.COMMAND_EXCEPTION,
+                                    _cmd.getClass(),
+                                    "Response validation failed",
+                                    new RuntimeException("validateResponse() returned false"),
+                                    null));
+                        }
+                    } catch (Exception e) {
+                        // Validation method threw an exception, treat as validation failure
+                        eventNotifier.markEvent(HystrixEventType.RESPONSE_VALIDATION_FAILED, commandKey);
+                        executionResult = executionResult.addEvent(HystrixEventType.RESPONSE_VALIDATION_FAILED);
+                        return Observable.error(new HystrixRuntimeException(
+                                HystrixRuntimeException.FailureType.COMMAND_EXCEPTION,
+                                _cmd.getClass(),
+                                "Response validation threw exception",
+                                e,
+                                null));
+                    }
+                }
+            });
         }
 
         return execution.doOnNext(markEmits)
