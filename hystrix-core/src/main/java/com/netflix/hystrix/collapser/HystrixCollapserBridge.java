@@ -24,12 +24,14 @@ import com.netflix.hystrix.HystrixCollapserKey;
 
 /**
  * Bridge between HystrixCollapser and RequestCollapser to expose 'protected' and 'private' functionality across packages.
- * 
+ *
  * @param <BatchReturnType>
  * @param <ResponseType>
  * @param <RequestArgumentType>
  */
 public interface HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> {
+
+    int getRequestPriority(RequestArgumentType arg);
 
     Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
 

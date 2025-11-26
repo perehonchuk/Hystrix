@@ -146,6 +146,11 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
         collapserInstanceWrapper = new HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType>() {
 
             @Override
+            public int getRequestPriority(RequestArgumentType arg) {
+                return self.getRequestPriority(arg);
+            }
+
+            @Override
             public Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = self.shardRequests(requests);
                 self.metrics.markShards(shards.size());
@@ -250,6 +255,25 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
     protected abstract HystrixCommand<BatchReturnType> createCommand(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
 
     /**
+     * Override to specify the priority level for this request. Used for priority-based request collapsing.
+     * <p>
+     * Priority-based collapsing groups requests by priority level before batching, allowing high-priority
+     * requests to be processed separately from low-priority requests within the same time window.
+     * <p>
+     * Priority levels: 0 = highest priority, higher numbers = lower priority. Default is 0 (all requests same priority).
+     * <p>
+     * For example, premium user requests could be priority 0, while free user requests could be priority 1,
+     * allowing premium requests to be batched and executed before free tier requests.
+     *
+     * @param requestArgument
+     *            The request argument for this specific request
+     * @return int priority level (0 = highest, higher numbers = lower priority)
+     */
+    protected int getRequestPriority(RequestArgumentType requestArgument) {
+        return 0; // default: all requests have same priority
+    }
+
+    /**
      * Override to split (shard) a batch of requests into multiple batches that will each call <code>createCommand</code> separately.
      * <p>
      * The purpose of this is to allow collapsing to work for services that have sharded backends and batch executions that need to be shard-aware.
@@ -258,7 +282,7 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * executed for them.
      * <p>
      * By default this method does nothing to the Collection and is a pass-thru.
-     * 
+     *
      * @param requests
      *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects containing the arguments of each request collapsed in this batch.
      * @return Collection of {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} objects sharded according to business rules.
@@ -504,10 +528,18 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
     public interface CollapsedRequest<ResponseType, RequestArgumentType> {
         /**
          * The request argument passed into the {@link HystrixCollapser} instance constructor which was then collapsed.
-         * 
+         *
          * @return RequestArgumentType
          */
         RequestArgumentType getArgument();
+
+        /**
+         * The priority level of this request (0 = highest priority, higher numbers = lower priority).
+         * Used for priority-based batching where requests are grouped by priority before execution.
+         *
+         * @return int priority level
+         */
+        int getPriority();
 
         /**
          * This corresponds in a OnNext(Response); OnCompleted pair of emissions.  It represents a single-value usecase.
@@ -529,7 +561,7 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
 
         /**
          * When set, any Observer will be OnErrored this exception
-         * 
+         *
          * @param exception exception to set on response
          * @throws IllegalStateException
          *             if called more than once or after setResponse/setComplete.

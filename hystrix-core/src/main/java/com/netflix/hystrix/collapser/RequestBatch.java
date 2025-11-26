@@ -80,8 +80,9 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 if (argumentMap.size() >= maxBatchSize) {
                     return null;
                 } else {
+                    int priority = commandCollapser.getRequestPriority(arg);
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
-                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
+                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, priority, this);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
                     /**
                      * If the argument already exists in the batch, then there are 2 options:
@@ -163,10 +164,23 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
-                // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
-                for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
+                // first, group requests by priority
+                java.util.Map<Integer, java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>>> requestsByPriority =
+                        new java.util.TreeMap<Integer, java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+                for (CollapsedRequest<ResponseType, RequestArgumentType> request : argumentMap.values()) {
+                    int priority = request.getPriority();
+                    if (!requestsByPriority.containsKey(priority)) {
+                        requestsByPriority.put(priority, new java.util.ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>());
+                    }
+                    requestsByPriority.get(priority).add(request);
+                }
+
+                // process each priority group separately, in priority order (0 = highest priority first)
+                for (java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>> priorityRequests : requestsByPriority.values()) {
+                    // shard batches within each priority level
+                    Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(priorityRequests);
+                    // for each shard execute its requests
+                    for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests
                         Observable<BatchReturnType> o = commandCollapser.createObservableCommand(shardRequests);
@@ -229,6 +243,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                                 logger.debug("Failed trying to setException on CollapsedRequest", e2);
                             }
                         }
+                    }
                     }
                 }
 
