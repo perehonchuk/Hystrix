@@ -285,12 +285,31 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * If network traffic is wanted for fallback (such as going to MemCache) then the fallback implementation should invoke another {@link HystrixCommand} instance that protects against that network
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
+     * If this primary fallback fails, the system will attempt to invoke {@link #getSecondaryFallback()} if implemented.
+     * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * If {@link #getFallback()} fails in any way then this method will be invoked to provide a secondary opportunity to return a fallback response.
+     * <p>
+     * This provides a cascading fallback chain mechanism where you can have multiple levels of degradation.
+     * For example, the primary fallback might try a secondary cache service, and the secondary fallback
+     * might return a hardcoded default value.
+     * <p>
+     * This should do work that does not require network transport to produce.
+     * <p>
+     * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
+     *
+     * @return R or throw UnsupportedOperationException if not implemented
+     */
+    protected R getSecondaryFallback() {
+        throw new UnsupportedOperationException("No secondary fallback available.");
     }
 
     @Override
@@ -320,6 +339,20 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
             public Observable<R> call() {
                 try {
                     return Observable.just(getFallback());
+                } catch (Throwable ex) {
+                    return Observable.error(ex);
+                }
+            }
+        });
+    }
+
+    @Override
+    final protected Observable<R> getSecondaryFallbackObservable() {
+        return Observable.defer(new Func0<Observable<R>>() {
+            @Override
+            public Observable<R> call() {
+                try {
+                    return Observable.just(getSecondaryFallback());
                 } catch (Throwable ex) {
                     return Observable.error(ex);
                 }
@@ -478,6 +511,24 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
                 toInsertIntoMap = false;
             }
             commandContainsFallback.put(commandKey, toInsertIntoMap);
+            return toInsertIntoMap;
+        }
+    }
+
+    @Override
+    protected boolean isSecondaryFallbackUserDefined() {
+        Boolean containsFromMap = commandContainsSecondaryFallback.get(commandKey);
+        if (containsFromMap != null) {
+            return containsFromMap;
+        } else {
+            Boolean toInsertIntoMap;
+            try {
+                getClass().getDeclaredMethod("getSecondaryFallback");
+                toInsertIntoMap = true;
+            } catch (NoSuchMethodException nsme) {
+                toInsertIntoMap = false;
+            }
+            commandContainsSecondaryFallback.put(commandKey, toInsertIntoMap);
             return toInsertIntoMap;
         }
     }

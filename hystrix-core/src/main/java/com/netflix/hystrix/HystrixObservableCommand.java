@@ -239,21 +239,63 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      * that network
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
+     * If this primary fallback fails, the system will attempt to invoke {@link #resumeWithSecondaryFallback()} if implemented.
+     * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or UnsupportedOperationException if not implemented
      */
     protected Observable<R> resumeWithFallback() {
         return Observable.error(new UnsupportedOperationException("No fallback available."));
     }
 
+    /**
+     * If {@link #resumeWithFallback()} fails in any way then this method will be invoked to provide a secondary fallback response.
+     * <p>
+     * This provides a cascading fallback chain mechanism where you can have multiple levels of degradation.
+     * For example, the primary fallback might try a secondary cache service, and the secondary fallback
+     * might return a hardcoded default value.
+     * <p>
+     * This should do work that does not require network transport to produce.
+     * <p>
+     * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
+     *
+     * @return Observable<R> or UnsupportedOperationException if not implemented
+     */
+    protected Observable<R> resumeWithSecondaryFallback() {
+        return Observable.error(new UnsupportedOperationException("No secondary fallback available."));
+    }
+
     @Override
     final protected Observable<R> getExecutionObservable() {
         return construct();
     }
-    
+
     @Override
     final protected Observable<R> getFallbackObservable() {
         return resumeWithFallback();
+    }
+
+    @Override
+    final protected Observable<R> getSecondaryFallbackObservable() {
+        return resumeWithSecondaryFallback();
+    }
+
+    @Override
+    protected boolean isSecondaryFallbackUserDefined() {
+        Boolean containsFromMap = commandContainsSecondaryFallback.get(commandKey);
+        if (containsFromMap != null) {
+            return containsFromMap;
+        } else {
+            Boolean toInsertIntoMap;
+            try {
+                getClass().getDeclaredMethod("resumeWithSecondaryFallback");
+                toInsertIntoMap = true;
+            } catch (NoSuchMethodException nsme) {
+                toInsertIntoMap = false;
+            }
+            commandContainsSecondaryFallback.put(commandKey, toInsertIntoMap);
+            return toInsertIntoMap;
+        }
     }
 }

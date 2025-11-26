@@ -136,6 +136,7 @@ import java.util.concurrent.atomic.AtomicReference;
     private static ConcurrentHashMap<Class<?>, String> defaultNameCache = new ConcurrentHashMap<Class<?>, String>();
 
     protected static ConcurrentHashMap<HystrixCommandKey, Boolean> commandContainsFallback = new ConcurrentHashMap<HystrixCommandKey, Boolean>();
+    protected static ConcurrentHashMap<HystrixCommandKey, Boolean> commandContainsSecondaryFallback = new ConcurrentHashMap<HystrixCommandKey, Boolean>();
 
     /* package */static String getDefaultNameFromClass(Class<?> cls) {
         String fromCache = defaultNameCache.get(cls);
@@ -338,6 +339,8 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getExecutionObservable();
 
     protected abstract Observable<R> getFallbackObservable();
+
+    protected abstract Observable<R> getSecondaryFallbackObservable();
 
     /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
@@ -810,8 +813,56 @@ import java.util.concurrent.atomic.AtomicReference;
                         Exception fe = getExceptionFromThrowable(t);
 
                         long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
-                        Exception toEmit;
 
+                        // Check if primary fallback failed and if secondary fallback is available
+                        if (isSecondaryFallbackUserDefined()) {
+                            logger.debug("Primary fallback failed, attempting secondary fallback. ", fe);
+                            eventNotifier.markEvent(HystrixEventType.FALLBACK_FAILURE, commandKey);
+                            executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_FAILURE);
+
+                            // Try secondary fallback
+                            try {
+                                Observable<R> secondaryFallbackChain = getSecondaryFallbackObservable();
+                                return secondaryFallbackChain
+                                    .doOnNext(new Action1<R>() {
+                                        @Override
+                                        public void call(R r) {
+                                            long secondaryLatency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+                                            eventNotifier.markEvent(HystrixEventType.FALLBACK_SUCCESS, commandKey);
+                                            executionResult = executionResult.addEvent((int) secondaryLatency, HystrixEventType.FALLBACK_SUCCESS);
+                                        }
+                                    })
+                                    .onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                                        @Override
+                                        public Observable<R> call(Throwable secondaryThrowable) {
+                                            Exception sfe = getExceptionFromThrowable(secondaryThrowable);
+                                            long secondaryLatency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+                                            logger.debug("Secondary fallback also failed.", sfe);
+                                            eventNotifier.markEvent(HystrixEventType.FALLBACK_FAILURE, commandKey);
+                                            executionResult = executionResult.addEvent((int) secondaryLatency, HystrixEventType.FALLBACK_FAILURE);
+
+                                            Exception toEmit = new HystrixRuntimeException(failureType, _cmd.getClass(),
+                                                getLogMessagePrefix() + " " + message + " and both primary and secondary fallback failed.", e, sfe);
+
+                                            if (shouldNotBeWrapped(originalException)) {
+                                                return Observable.error(e);
+                                            }
+                                            return Observable.error(toEmit);
+                                        }
+                                    });
+                            } catch (Throwable secondaryEx) {
+                                logger.debug("Exception while invoking secondary fallback. ", secondaryEx);
+                                Exception toEmit = new HystrixRuntimeException(failureType, _cmd.getClass(),
+                                    getLogMessagePrefix() + " " + message + " and secondary fallback threw exception.", e, getExceptionFromThrowable(secondaryEx));
+                                if (shouldNotBeWrapped(originalException)) {
+                                    return Observable.error(e);
+                                }
+                                return Observable.error(toEmit);
+                            }
+                        }
+
+                        // No secondary fallback available, handle as before
+                        Exception toEmit;
                         if (fe instanceof UnsupportedOperationException) {
                             logger.debug("No fallback for HystrixCommand. ", fe); // debug only since we're throwing the exception and someone higher will do something with it
                             eventNotifier.markEvent(HystrixEventType.FALLBACK_MISSING, commandKey);
@@ -1284,6 +1335,8 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract String getFallbackMethodName();
 
     protected abstract boolean isFallbackUserDefined();
+
+    protected abstract boolean isSecondaryFallbackUserDefined();
 
     /**
      * @return {@link HystrixCommandGroupKey} used to group together multiple {@link AbstractCommand} objects.
