@@ -382,7 +382,13 @@ import java.util.concurrent.atomic.AtomicReference;
         final Action0 unsubscribeCommandCleanup = new Action0() {
             @Override
             public void call() {
+                // Check if circuit breaker state changes when marking non-success (HALF_OPEN -> OPEN)
+                boolean wasHalfOpen = circuitBreaker.isOpen();
                 circuitBreaker.markNonSuccess();
+                boolean isNowOpen = circuitBreaker.isOpen();
+                if (!wasHalfOpen && isNowOpen) {
+                    executionHook.onCircuitBreakerOpen(_cmd);
+                }
                 if (_cmd.commandState.compareAndSet(CommandState.OBSERVABLE_CHAIN_CREATED, CommandState.UNSUBSCRIBED)) {
                     if (!_cmd.executionResult.containsTerminalEvent()) {
                         _cmd.eventNotifier.markEvent(HystrixEventType.CANCELLED, _cmd.commandKey);
@@ -521,7 +527,13 @@ import java.util.concurrent.atomic.AtomicReference;
         executionHook.onStart(_cmd);
 
         /* determine if we're allowed to execute */
-        if (circuitBreaker.attemptExecution()) {
+        boolean wasOpen = circuitBreaker.isOpen();
+        boolean canAttempt = circuitBreaker.attemptExecution();
+        boolean isNowHalfOpen = circuitBreaker.isOpen() && canAttempt;
+        if (wasOpen && isNowHalfOpen) {
+            executionHook.onCircuitBreakerHalfOpen(_cmd);
+        }
+        if (canAttempt) {
             final TryableSemaphore executionSemaphore = getExecutionSemaphore();
             final AtomicBoolean semaphoreHasBeenReleased = new AtomicBoolean(false);
             final Action0 singleSemaphoreRelease = new Action0() {
@@ -581,7 +593,13 @@ import java.util.concurrent.atomic.AtomicReference;
                     eventNotifier.markEvent(HystrixEventType.SUCCESS, commandKey);
                     executionResult = executionResult.addEvent((int) latency, HystrixEventType.SUCCESS);
                     eventNotifier.markCommandExecution(getCommandKey(), properties.executionIsolationStrategy().get(), (int) latency, executionResult.getOrderedList());
+                    // Check if circuit breaker state changes when marking success (HALF_OPEN -> CLOSED)
+                    boolean wasHalfOpen = circuitBreaker.isOpen();
                     circuitBreaker.markSuccess();
+                    boolean isNowClosed = !circuitBreaker.isOpen();
+                    if (wasHalfOpen && isNowClosed) {
+                        executionHook.onCircuitBreakerClosed(_cmd);
+                    }
                 }
             }
         };
@@ -708,6 +726,12 @@ import java.util.concurrent.atomic.AtomicReference;
                         //if it was never started and was cancelled, then no need to clean up
                     }
                     //if it was terminal, then other cleanup handled it
+                }
+            }).doOnSubscribe(new Action0() {
+                @Override
+                public void call() {
+                    // invoke queueing hook when command is submitted to thread pool
+                    executionHook.onThreadPoolQueueing(_cmd);
                 }
             }).subscribeOn(threadPool.getScheduler(new Func0<Boolean>() {
                 @Override
@@ -968,6 +992,8 @@ import java.util.concurrent.atomic.AtomicReference;
         executionResult = executionResult.setExecutionException(semaphoreRejectionException);
         eventNotifier.markEvent(HystrixEventType.SEMAPHORE_REJECTED, commandKey);
         logger.debug("HystrixCommand Execution Rejection by Semaphore."); // debug only since we're throwing the exception and someone higher will do something with it
+        // invoke rejection hook
+        executionHook.onRejection(this, "semaphore");
         // retrieve a fallback or throw an exception if no fallback available
         return getFallbackOrThrowException(this, HystrixEventType.SEMAPHORE_REJECTED, FailureType.REJECTED_SEMAPHORE_EXECUTION,
                 "could not acquire a semaphore for execution", semaphoreRejectionException);
@@ -976,6 +1002,8 @@ import java.util.concurrent.atomic.AtomicReference;
     private Observable<R> handleShortCircuitViaFallback() {
         // record that we are returning a short-circuited fallback
         eventNotifier.markEvent(HystrixEventType.SHORT_CIRCUITED, commandKey);
+        // invoke circuit breaker open hook (circuit is already open when we get here)
+        executionHook.onCircuitBreakerOpen(this);
         // short-circuit and go directly to fallback (or throw an exception if no fallback implemented)
         Exception shortCircuitException = new RuntimeException("Hystrix circuit short-circuited and is OPEN");
         executionResult = executionResult.setExecutionException(shortCircuitException);
@@ -990,6 +1018,8 @@ import java.util.concurrent.atomic.AtomicReference;
     private Observable<R> handleThreadPoolRejectionViaFallback(Exception underlying) {
         eventNotifier.markEvent(HystrixEventType.THREAD_POOL_REJECTED, commandKey);
         threadPool.markThreadRejection();
+        // invoke rejection hook
+        executionHook.onRejection(this, "thread-pool");
         // use a fallback instead (or throw exception if not implemented)
         return getFallbackOrThrowException(this, HystrixEventType.THREAD_POOL_REJECTED, FailureType.REJECTED_THREAD_EXECUTION, "could not be queued for execution", underlying);
     }

@@ -228,6 +228,71 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked when a command is queued in a thread pool queue.
+     * This hook is called after the command has been accepted by the thread pool
+     * but before it starts executing on a worker thread.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onThreadPoolQueueing(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when a command is rejected by the thread pool or semaphore.
+     * This hook is called when the thread pool queue is full, the thread pool
+     * is at capacity, or when a semaphore cannot be acquired.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param rejectionReason String describing why the command was rejected
+     *
+     * @since 1.6.0
+     */
+    public <T> void onRejection(HystrixInvokable<T> commandInstance, String rejectionReason) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the circuit breaker transitions from CLOSED to OPEN state.
+     * This hook is called when the circuit breaker trips due to error thresholds
+     * being exceeded.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onCircuitBreakerOpen(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the circuit breaker transitions from OPEN to HALF_OPEN state.
+     * This hook is called when the sleep window expires and the circuit breaker
+     * allows a test request through.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onCircuitBreakerHalfOpen(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the circuit breaker transitions from HALF_OPEN to CLOSED state.
+     * This hook is called when a test request succeeds during the HALF_OPEN state.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onCircuitBreakerClosed(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
      * DEPRECATED: Change usages of this to {@link #onExecutionStart}.
      *
      * Invoked before {@link HystrixCommand#run()} is about to be executed.
