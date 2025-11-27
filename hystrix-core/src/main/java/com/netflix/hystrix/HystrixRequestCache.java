@@ -25,6 +25,11 @@ import rx.Observable;
 import rx.internal.operators.CachedObservable;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.regex.Pattern;
+import java.util.List;
+import java.util.ArrayList;
 
 /**
  * Cache that is scoped to the current request as managed by {@link HystrixRequestVariableDefault}.
@@ -143,7 +148,7 @@ public class HystrixRequestCache {
 
     /**
      * Clear the cache for a given cacheKey.
-     * 
+     *
      * @param cacheKey
      *            key as defined by {@link HystrixCommand#getCacheKey()}
      */
@@ -158,6 +163,64 @@ public class HystrixRequestCache {
             /* remove this cache key */
             cacheInstance.remove(key);
         }
+    }
+
+    /**
+     * Clear all cache entries matching a given pattern.
+     * This enables pattern-based cache invalidation for related cache keys.
+     *
+     * @param cacheKeyPattern
+     *            regex pattern to match against cache keys
+     * @return number of cache entries that were cleared
+     */
+    public int clearByPattern(String cacheKeyPattern) {
+        if (cacheKeyPattern == null) {
+            return 0;
+        }
+
+        Pattern pattern = Pattern.compile(cacheKeyPattern);
+        ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+        if (cacheInstance == null) {
+            throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
+        }
+
+        Set<ValueCacheKey> keysToRemove = new HashSet<ValueCacheKey>();
+        for (ValueCacheKey key : cacheInstance.keySet()) {
+            if (key.matchesPattern(pattern)) {
+                keysToRemove.add(key);
+            }
+        }
+
+        for (ValueCacheKey key : keysToRemove) {
+            cacheInstance.remove(key);
+        }
+
+        return keysToRemove.size();
+    }
+
+    /**
+     * Clear all cache entries for this command/collapser in the current request.
+     *
+     * @return number of cache entries that were cleared
+     */
+    public int clearAll() {
+        ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+        if (cacheInstance == null) {
+            throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
+        }
+
+        List<ValueCacheKey> keysToRemove = new ArrayList<ValueCacheKey>();
+        for (ValueCacheKey key : cacheInstance.keySet()) {
+            if (key.belongsToRequestCache(rcKey)) {
+                keysToRemove.add(key);
+            }
+        }
+
+        for (ValueCacheKey key : keysToRemove) {
+            cacheInstance.remove(key);
+        }
+
+        return keysToRemove.size();
     }
 
     /**
@@ -183,6 +246,20 @@ public class HystrixRequestCache {
         private ValueCacheKey(RequestCacheKey rvKey, String valueCacheKey) {
             this.rvKey = rvKey;
             this.valueCacheKey = valueCacheKey;
+        }
+
+        boolean matchesPattern(Pattern pattern) {
+            if (valueCacheKey == null) {
+                return false;
+            }
+            return pattern.matcher(valueCacheKey).matches();
+        }
+
+        boolean belongsToRequestCache(RequestCacheKey requestCacheKey) {
+            if (rvKey == null) {
+                return false;
+            }
+            return rvKey.equals(requestCacheKey);
         }
 
         @Override

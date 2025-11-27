@@ -596,6 +596,8 @@ import java.util.concurrent.atomic.AtomicReference;
                     eventNotifier.markCommandExecution(getCommandKey(), properties.executionIsolationStrategy().get(), (int) latency, executionResult.getOrderedList());
                     circuitBreaker.markSuccess();
                 }
+                // Perform automatic cache invalidation if configured
+                performCacheInvalidation();
             }
         };
 
@@ -1725,6 +1727,71 @@ import java.util.concurrent.atomic.AtomicReference;
 
     protected boolean isRequestCachingEnabled() {
         return properties.requestCacheEnabled().get() && getCacheKey() != null;
+    }
+
+    /**
+     * Override this method to specify cache key patterns that should be invalidated
+     * when this command completes successfully. This enables automatic cache invalidation
+     * for write operations or mutations.
+     * <p>
+     * For example, a command that updates user data might return "user:.*" to invalidate
+     * all user-related cache entries.
+     * <p>
+     * Multiple patterns can be returned; each will be compiled as a regex and matched
+     * against existing cache keys.
+     *
+     * @return array of regex patterns for cache keys to invalidate, or null/empty for no invalidation
+     */
+    protected String[] getCacheInvalidationPatterns() {
+        return null;
+    }
+
+    /**
+     * Override this method to specify specific command keys whose caches should be
+     * completely cleared when this command completes successfully.
+     * <p>
+     * This is useful for write operations that affect data retrieved by specific
+     * read commands. For example, an "UpdateUser" command might return
+     * {HystrixCommandKey.Factory.asKey("GetUser")} to clear all GetUser caches.
+     *
+     * @return array of HystrixCommandKeys whose caches should be cleared, or null/empty
+     */
+    protected HystrixCommandKey[] getCacheClearKeys() {
+        return null;
+    }
+
+    /**
+     * Performs automatic cache invalidation based on getCacheInvalidationPatterns() and
+     * getCacheClearKeys() configuration. This is called automatically when a command
+     * completes successfully.
+     */
+    private void performCacheInvalidation() {
+        try {
+            // Invalidate by pattern
+            String[] patterns = getCacheInvalidationPatterns();
+            if (patterns != null && patterns.length > 0) {
+                HystrixRequestCache cache = HystrixRequestCache.getInstance(commandKey, concurrencyStrategy);
+                for (String pattern : patterns) {
+                    if (pattern != null && !pattern.isEmpty()) {
+                        cache.clearByPattern(pattern);
+                    }
+                }
+            }
+
+            // Clear caches for specific command keys
+            HystrixCommandKey[] clearKeys = getCacheClearKeys();
+            if (clearKeys != null && clearKeys.length > 0) {
+                for (HystrixCommandKey key : clearKeys) {
+                    if (key != null) {
+                        HystrixRequestCache cache = HystrixRequestCache.getInstance(key, concurrencyStrategy);
+                        cache.clearAll();
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            // Don't let cache invalidation failures break the command execution
+            logger.warn("Failed to perform automatic cache invalidation for command: " + commandKey.name(), ex);
+        }
     }
 
     protected String getLogMessagePrefix() {
