@@ -140,12 +140,14 @@ public interface HystrixCircuitBreaker {
         private final HystrixCommandMetrics metrics;
 
         enum Status {
-            CLOSED, OPEN, HALF_OPEN;
+            CLOSED, OPEN, HALF_OPEN, VALIDATING;
         }
 
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicLong validationSuccessCount = new AtomicLong(0);
+        private static final int REQUIRED_VALIDATION_SUCCESSES = 3;
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -202,16 +204,26 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            if (status.compareAndSet(Status.HALF_OPEN, Status.VALIDATING)) {
+                //This thread wins the race to transition to validation phase
+                validationSuccessCount.set(1);
+            } else if (status.get().equals(Status.VALIDATING)) {
+                //We're in validation phase, increment the success count
+                long currentCount = validationSuccessCount.incrementAndGet();
+                if (currentCount >= REQUIRED_VALIDATION_SUCCESSES) {
+                    //We've had enough successful validations, close the circuit
+                    if (status.compareAndSet(Status.VALIDATING, Status.CLOSED)) {
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+                        validationSuccessCount.set(0);
+                    }
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
             }
         }
 
@@ -220,6 +232,11 @@ public interface HystrixCircuitBreaker {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+                validationSuccessCount.set(0);
+            } else if (status.compareAndSet(Status.VALIDATING, Status.OPEN)) {
+                //Validation failed, re-open the circuit
+                circuitOpened.set(System.currentTimeMillis());
+                validationSuccessCount.set(0);
             }
         }
 
@@ -245,8 +262,12 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (status.get().equals(Status.HALF_OPEN)) {
+                Status currentStatus = status.get();
+                if (currentStatus.equals(Status.HALF_OPEN)) {
                     return false;
+                } else if (currentStatus.equals(Status.VALIDATING)) {
+                    //Allow limited concurrent requests during validation
+                    return true;
                 } else {
                     return isAfterSleepWindow();
                 }
