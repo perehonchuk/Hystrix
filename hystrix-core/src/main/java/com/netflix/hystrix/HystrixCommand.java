@@ -286,11 +286,50 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     * <p>
+     * If this primary fallback fails, Hystrix will attempt to execute {@link #getSecondaryFallback()} if implemented.
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * If {@link #getFallback()} fails or throws an exception, this method will be invoked as a secondary fallback.
+     * <p>
+     * This provides an additional layer of fault tolerance, allowing you to return a degraded response
+     * even if the primary fallback fails.
+     * <p>
+     * This should be an even more conservative fallback than {@link #getFallback()}, typically returning
+     * a static value or empty result.
+     * <p>
+     * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
+     * <p>
+     * If this secondary fallback fails, Hystrix will attempt to execute {@link #getTertiaryFallback()} if implemented.
+     *
+     * @return R or throw UnsupportedOperationException if not implemented
+     */
+    protected R getSecondaryFallback() {
+        throw new UnsupportedOperationException("No secondary fallback available.");
+    }
+
+    /**
+     * If {@link #getSecondaryFallback()} fails or throws an exception, this method will be invoked as a tertiary (third-level) fallback.
+     * <p>
+     * This provides a final safety net for command execution, allowing you to return a minimal response
+     * even if both primary and secondary fallbacks fail.
+     * <p>
+     * This should be the most conservative fallback, guaranteed to not fail (e.g., returning null, empty collection, or default value).
+     * <p>
+     * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
+     * <p>
+     * If this tertiary fallback also fails, the exception will be propagated to the caller.
+     *
+     * @return R or throw UnsupportedOperationException if not implemented
+     */
+    protected R getTertiaryFallback() {
+        throw new UnsupportedOperationException("No tertiary fallback available.");
     }
 
     @Override

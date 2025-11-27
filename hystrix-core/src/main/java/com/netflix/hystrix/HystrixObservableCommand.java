@@ -240,11 +240,50 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     * <p>
+     * If this primary fallback fails, Hystrix will attempt to execute {@link #resumeWithSecondaryFallback()} if implemented.
+     *
      * @return R or UnsupportedOperationException if not implemented
      */
     protected Observable<R> resumeWithFallback() {
         return Observable.error(new UnsupportedOperationException("No fallback available."));
+    }
+
+    /**
+     * If {@link #resumeWithFallback()} fails or emits an error, this method will be invoked as a secondary fallback.
+     * <p>
+     * This provides an additional layer of fault tolerance, allowing you to return a degraded Observable
+     * even if the primary fallback fails.
+     * <p>
+     * This should be an even more conservative fallback than {@link #resumeWithFallback()}, typically emitting
+     * a static value or empty Observable.
+     * <p>
+     * DEFAULT BEHAVIOR: It emits an error with UnsupportedOperationException.
+     * <p>
+     * If this secondary fallback fails, Hystrix will attempt to execute {@link #resumeWithTertiaryFallback()} if implemented.
+     *
+     * @return Observable<R> or Observable.error with UnsupportedOperationException if not implemented
+     */
+    protected Observable<R> resumeWithSecondaryFallback() {
+        return Observable.error(new UnsupportedOperationException("No secondary fallback available."));
+    }
+
+    /**
+     * If {@link #resumeWithSecondaryFallback()} fails or emits an error, this method will be invoked as a tertiary (third-level) fallback.
+     * <p>
+     * This provides a final safety net for command execution, allowing you to return a minimal Observable
+     * even if both primary and secondary fallbacks fail.
+     * <p>
+     * This should be the most conservative fallback, guaranteed to not fail (e.g., returning Observable.empty() or Observable.just(defaultValue)).
+     * <p>
+     * DEFAULT BEHAVIOR: It emits an error with UnsupportedOperationException.
+     * <p>
+     * If this tertiary fallback also fails, the exception will be propagated to the caller.
+     *
+     * @return Observable<R> or Observable.error with UnsupportedOperationException if not implemented
+     */
+    protected Observable<R> resumeWithTertiaryFallback() {
+        return Observable.error(new UnsupportedOperationException("No tertiary fallback available."));
     }
 
     @Override
