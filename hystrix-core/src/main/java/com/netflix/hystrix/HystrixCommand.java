@@ -286,11 +286,43 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * Determine whether the request cache should be automatically invalidated when this command fails.
+     * <p>
+     * This method is called whenever a command execution fails (timeout, exception, short-circuit, etc.)
+     * to determine if the cached value for this command's cache key should be removed from the request cache.
+     * <p>
+     * By default, cache is invalidated for TIMEOUT and FAILURE events, but NOT for SHORT_CIRCUITED,
+     * THREAD_POOL_REJECTED, or SEMAPHORE_REJECTED events. This allows cached values to be reused when
+     * the system is under load or degraded, but ensures stale data is not served after actual failures.
+     * <p>
+     * Override this method to customize which failure types should trigger cache invalidation.
+     *
+     * @param eventType The type of failure event that occurred
+     * @return true if the cache should be invalidated for this failure type, false otherwise
+     */
+    protected boolean shouldInvalidateCacheOnFailure(HystrixEventType eventType) {
+        // By default, invalidate cache on actual execution failures and timeouts,
+        // but preserve cache on resource exhaustion (rejected, short-circuited)
+        switch (eventType) {
+            case TIMEOUT:
+            case FAILURE:
+                return true;
+            case SHORT_CIRCUITED:
+            case THREAD_POOL_REJECTED:
+            case SEMAPHORE_REJECTED:
+            case BAD_REQUEST:
+                return false;
+            default:
+                return false;
+        }
     }
 
     @Override

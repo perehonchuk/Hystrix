@@ -968,6 +968,8 @@ import java.util.concurrent.atomic.AtomicReference;
         executionResult = executionResult.setExecutionException(semaphoreRejectionException);
         eventNotifier.markEvent(HystrixEventType.SEMAPHORE_REJECTED, commandKey);
         logger.debug("HystrixCommand Execution Rejection by Semaphore."); // debug only since we're throwing the exception and someone higher will do something with it
+        // invalidate cache if configured to do so for this failure type
+        invalidateCacheOnFailure(HystrixEventType.SEMAPHORE_REJECTED);
         // retrieve a fallback or throw an exception if no fallback available
         return getFallbackOrThrowException(this, HystrixEventType.SEMAPHORE_REJECTED, FailureType.REJECTED_SEMAPHORE_EXECUTION,
                 "could not acquire a semaphore for execution", semaphoreRejectionException);
@@ -979,6 +981,8 @@ import java.util.concurrent.atomic.AtomicReference;
         // short-circuit and go directly to fallback (or throw an exception if no fallback implemented)
         Exception shortCircuitException = new RuntimeException("Hystrix circuit short-circuited and is OPEN");
         executionResult = executionResult.setExecutionException(shortCircuitException);
+        // invalidate cache if configured to do so for this failure type
+        invalidateCacheOnFailure(HystrixEventType.SHORT_CIRCUITED);
         try {
             return getFallbackOrThrowException(this, HystrixEventType.SHORT_CIRCUITED, FailureType.SHORTCIRCUIT,
                     "short-circuited", shortCircuitException);
@@ -990,11 +994,15 @@ import java.util.concurrent.atomic.AtomicReference;
     private Observable<R> handleThreadPoolRejectionViaFallback(Exception underlying) {
         eventNotifier.markEvent(HystrixEventType.THREAD_POOL_REJECTED, commandKey);
         threadPool.markThreadRejection();
+        // invalidate cache if configured to do so for this failure type
+        invalidateCacheOnFailure(HystrixEventType.THREAD_POOL_REJECTED);
         // use a fallback instead (or throw exception if not implemented)
         return getFallbackOrThrowException(this, HystrixEventType.THREAD_POOL_REJECTED, FailureType.REJECTED_THREAD_EXECUTION, "could not be queued for execution", underlying);
     }
 
     private Observable<R> handleTimeoutViaFallback() {
+        // invalidate cache if configured to do so for timeout
+        invalidateCacheOnFailure(HystrixEventType.TIMEOUT);
         return getFallbackOrThrowException(this, HystrixEventType.TIMEOUT, FailureType.TIMEOUT, "timed-out", new TimeoutException());
     }
 
@@ -1005,6 +1013,8 @@ import java.util.concurrent.atomic.AtomicReference;
             long executionLatency = System.currentTimeMillis() - executionResult.getStartTimestamp();
             eventNotifier.markEvent(HystrixEventType.BAD_REQUEST, commandKey);
             executionResult = executionResult.addEvent((int) executionLatency, HystrixEventType.BAD_REQUEST);
+            // invalidate cache if configured to do so for bad request
+            invalidateCacheOnFailure(HystrixEventType.BAD_REQUEST);
             Exception decorated = executionHook.onError(this, FailureType.BAD_REQUEST_EXCEPTION, underlying);
 
             if (decorated instanceof HystrixBadRequestException) {
@@ -1032,6 +1042,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
         // record the exception
         executionResult = executionResult.setException(underlying);
+        // invalidate cache if configured to do so for execution failure
+        invalidateCacheOnFailure(HystrixEventType.FAILURE);
         return getFallbackOrThrowException(this, HystrixEventType.FAILURE, FailureType.COMMAND_EXCEPTION, "failed", underlying);
     }
 
@@ -1284,6 +1296,33 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract String getFallbackMethodName();
 
     protected abstract boolean isFallbackUserDefined();
+
+    /**
+     * Determine whether the request cache should be automatically invalidated when this command fails.
+     * Implemented by HystrixCommand and HystrixObservableCommand subclasses.
+     *
+     * @param eventType The type of failure event that occurred
+     * @return true if the cache should be invalidated for this failure type, false otherwise
+     */
+    protected abstract boolean shouldInvalidateCacheOnFailure(HystrixEventType eventType);
+
+    /**
+     * Invalidate the cache entry for this command if caching is enabled and the failure type
+     * warrants cache invalidation according to shouldInvalidateCacheOnFailure().
+     *
+     * @param eventType The type of failure event that occurred
+     */
+    private void invalidateCacheOnFailure(HystrixEventType eventType) {
+        String cacheKey = getCacheKey();
+        if (cacheKey != null && shouldInvalidateCacheOnFailure(eventType)) {
+            try {
+                requestCache.clear(cacheKey);
+                logger.debug("Invalidated cache for key [{}] due to {} event", cacheKey, eventType);
+            } catch (Exception e) {
+                logger.warn("Failed to invalidate cache for key [{}] due to {} event", cacheKey, eventType, e);
+            }
+        }
+    }
 
     /**
      * @return {@link HystrixCommandGroupKey} used to group together multiple {@link AbstractCommand} objects.
