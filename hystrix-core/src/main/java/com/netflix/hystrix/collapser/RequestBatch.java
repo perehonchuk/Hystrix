@@ -15,7 +15,9 @@
  */
 package com.netflix.hystrix.collapser;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -48,7 +50,10 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
             new ConcurrentHashMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>();
+    private final List<CollapsedRequest<ResponseType, RequestArgumentType>> argumentList =
+            new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
     private final HystrixCollapserProperties properties;
+    private final boolean allowDuplicates;
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
 
@@ -56,6 +61,8 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
         this.maxBatchSize = maxBatchSize;
+        String strategy = properties.duplicateArgumentStrategy().get();
+        this.allowDuplicates = "ALLOW_DUPLICATES".equals(strategy);
     }
 
     /**
@@ -77,35 +84,56 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     return null;
                 }
 
-                if (argumentMap.size() >= maxBatchSize) {
+                // When ALLOW_DUPLICATES strategy is used, check argumentList size instead of argumentMap
+                int currentSize = allowDuplicates ? argumentList.size() : argumentMap.size();
+                if (currentSize >= maxBatchSize) {
                     return null;
                 } else {
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
                             new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
-                    final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
-                    /**
-                     * If the argument already exists in the batch, then there are 2 options:
-                     * A) If request caching is ON (the default): only keep 1 argument in the batch and let all responses
-                     * be hooked up to that argument
-                     * B) If request caching is OFF: return an error to all duplicate argument requests
-                     *
-                     * This maintains the invariant that each batch has no duplicate arguments.  This prevents the impossible
-                     * logic (in a user-provided mapResponseToRequests for HystrixCollapser and the internals of HystrixObservableCollapser)
-                     * of trying to figure out which argument of a set of duplicates should get attached to a response.
-                     *
-                     * See https://github.com/Netflix/Hystrix/pull/1176 for further discussion.
-                     */
-                    if (existing != null) {
-                        boolean requestCachingEnabled = properties.requestCacheEnabled().get();
-                        if (requestCachingEnabled) {
-                            return existing.toObservable();
-                        } else {
-                            return Observable.error(new IllegalArgumentException("Duplicate argument in collapser batch : [" + arg + "]  This is not supported.  Please turn request-caching on for HystrixCollapser:" + commandCollapser.getCollapserKey().name() + " or prevent duplicates from making it into the batch!"));
-                        }
-                    } else {
-                        return collapsedRequest.toObservable();
-                    }
 
+                    if (allowDuplicates) {
+                        // ALLOW_DUPLICATES strategy: add all requests to a list, including duplicates
+                        argumentList.add(collapsedRequest);
+                        return collapsedRequest.toObservable();
+                    } else {
+                        // MERGE or REJECT strategy: use the map-based approach
+                        final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
+                        /**
+                         * If the argument already exists in the batch, then there are 3 options based on duplicateArgumentStrategy:
+                         * A) MERGE (default): If request caching is ON, only keep 1 argument in the batch and let all responses
+                         * be hooked up to that argument
+                         * B) REJECT: If request caching is OFF, return an error to all duplicate argument requests
+                         * C) ALLOW_DUPLICATES: Allow duplicates to exist independently (handled above)
+                         *
+                         * This maintains the invariant that each batch has no duplicate arguments (unless ALLOW_DUPLICATES is used).
+                         * This prevents the impossible logic (in a user-provided mapResponseToRequests for HystrixCollapser and
+                         * the internals of HystrixObservableCollapser) of trying to figure out which argument of a set of
+                         * duplicates should get attached to a response.
+                         *
+                         * See https://github.com/Netflix/Hystrix/pull/1176 for further discussion.
+                         */
+                        if (existing != null) {
+                            String strategy = properties.duplicateArgumentStrategy().get();
+                            if ("MERGE".equals(strategy)) {
+                                // MERGE strategy: return the existing request's observable
+                                return existing.toObservable();
+                            } else if ("REJECT".equals(strategy)) {
+                                // REJECT strategy: return error for duplicates
+                                return Observable.error(new IllegalArgumentException("Duplicate argument in collapser batch : [" + arg + "]  This is not supported with REJECT strategy.  Please use MERGE strategy or ALLOW_DUPLICATES strategy for HystrixCollapser:" + commandCollapser.getCollapserKey().name()));
+                            } else {
+                                // For backwards compatibility: fall back to checking requestCacheEnabled
+                                boolean requestCachingEnabled = properties.requestCacheEnabled().get();
+                                if (requestCachingEnabled) {
+                                    return existing.toObservable();
+                                } else {
+                                    return Observable.error(new IllegalArgumentException("Duplicate argument in collapser batch : [" + arg + "]  This is not supported.  Please turn request-caching on for HystrixCollapser:" + commandCollapser.getCollapserKey().name() + " or prevent duplicates from making it into the batch!"));
+                                }
+                            }
+                        } else {
+                            return collapsedRequest.toObservable();
+                        }
+                    }
                 }
             } finally {
                 batchLock.readLock().unlock();
@@ -163,8 +191,9 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
-                // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
+                // shard batches - use argumentList if ALLOW_DUPLICATES, otherwise use argumentMap
+                Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests = allowDuplicates ? argumentList : argumentMap.values();
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(requests);
                 // for each shard execute its requests 
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
@@ -187,7 +216,8 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                                 }
                                 logger.debug("Exception mapping responses to requests.", e);
                                 // if a failure occurs we want to pass that exception to all of the Futures that we've returned
-                                for (CollapsedRequest<ResponseType, RequestArgumentType> request : argumentMap.values()) {
+                                Collection<CollapsedRequest<ResponseType, RequestArgumentType>> allRequests = allowDuplicates ? argumentList : argumentMap.values();
+                                for (CollapsedRequest<ResponseType, RequestArgumentType> request : allRequests) {
                                     try {
                                         ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) request).setExceptionIfResponseNotReceived(ee);
                                     } catch (IllegalStateException e2) {
@@ -235,7 +265,8 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             } catch (Exception e) {
                 logger.error("Exception while sharding requests.", e);
                 // same error handling as we do around the shards, but this is a wider net in case the shardRequest method fails
-                for (CollapsedRequest<ResponseType, RequestArgumentType> request : argumentMap.values()) {
+                Collection<CollapsedRequest<ResponseType, RequestArgumentType>> allRequests = allowDuplicates ? argumentList : argumentMap.values();
+                for (CollapsedRequest<ResponseType, RequestArgumentType> request : allRequests) {
                     try {
                         request.setException(e);
                     } catch (IllegalStateException e2) {
@@ -255,16 +286,18 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
             try {
                 // if we win the 'start' and once we have the lock we can now shut it down otherwise another thread will finish executing this batch
-                if (argumentMap.size() > 0) {
-                    logger.warn("Requests still exist in queue but will not be executed due to RequestCollapser shutdown: " + argumentMap.size(), new IllegalStateException());
+                int requestCount = allowDuplicates ? argumentList.size() : argumentMap.size();
+                if (requestCount > 0) {
+                    logger.warn("Requests still exist in queue but will not be executed due to RequestCollapser shutdown: " + requestCount, new IllegalStateException());
                     /*
                      * In the event that there is a concurrency bug or thread scheduling prevents the timer from ticking we need to handle this so the Future.get() calls do not block.
-                     * 
+                     *
                      * I haven't been able to reproduce this use case on-demand but when stressing a machine saw this occur briefly right after the JVM paused (logs stopped scrolling).
-                     * 
+                     *
                      * This safety-net just prevents the CollapsedRequestFutureImpl.get() from waiting on the CountDownLatch until its max timeout.
                      */
-                    for (CollapsedRequest<ResponseType, RequestArgumentType> request : argumentMap.values()) {
+                    Collection<CollapsedRequest<ResponseType, RequestArgumentType>> allRequests = allowDuplicates ? argumentList : argumentMap.values();
+                    for (CollapsedRequest<ResponseType, RequestArgumentType> request : allRequests) {
                         try {
                             ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) request).setExceptionIfResponseNotReceived(new IllegalStateException("Requests not executed before shutdown."));
                         } catch (Exception e) {
@@ -284,6 +317,6 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
     }
 
     public int getSize() {
-        return argumentMap.size();
+        return allowDuplicates ? argumentList.size() : argumentMap.size();
     }
 }

@@ -31,10 +31,33 @@ import com.netflix.hystrix.util.HystrixRollingPercentile;
  */
 public abstract class HystrixCollapserProperties {
 
+    /**
+     * Strategy for handling duplicate arguments in a collapsed batch.
+     */
+    public static enum DuplicateArgumentStrategy {
+        /**
+         * Merge duplicate arguments - only keep one instance in the batch and share the response.
+         * This is the default behavior and requires request caching to be enabled.
+         */
+        MERGE,
+        /**
+         * Reject duplicate arguments with an error when request caching is disabled.
+         * This prevents ambiguity about which duplicate should get which response.
+         */
+        REJECT,
+        /**
+         * Allow duplicate arguments to exist in the batch and execute them independently.
+         * Each duplicate will maintain its own CollapsedRequest and receive its own response.
+         * This changes the batching behavior to use a List instead of a Map for tracking requests.
+         */
+        ALLOW_DUPLICATES
+    }
+
     /* defaults */
     private static final Integer default_maxRequestsInBatch = Integer.MAX_VALUE;
     private static final Integer default_timerDelayInMilliseconds = 10;
     private static final Boolean default_requestCacheEnabled = true;
+    private static final String default_duplicateArgumentStrategy = "MERGE";
     /* package */ static final Integer default_metricsRollingStatisticalWindow = 10000;// default => statisticalWindow: 10000 = 10 seconds (and default of 10 buckets so each bucket is 1 second)
     private static final Integer default_metricsRollingStatisticalWindowBuckets = 10;// default => statisticalWindowBuckets: 10 = 10 buckets in a 10 second window so each bucket is 1 second
     private static final Boolean default_metricsRollingPercentileEnabled = true;
@@ -45,6 +68,7 @@ public abstract class HystrixCollapserProperties {
     private final HystrixProperty<Integer> maxRequestsInBatch;
     private final HystrixProperty<Integer> timerDelayInMilliseconds;
     private final HystrixProperty<Boolean> requestCacheEnabled;
+    private final HystrixProperty<String> duplicateArgumentStrategy;
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowBuckets; // number of buckets in the statisticalWindow
     private final HystrixProperty<Boolean> metricsRollingPercentileEnabled; // Whether monitoring should be enabled
@@ -64,6 +88,7 @@ public abstract class HystrixCollapserProperties {
         this.maxRequestsInBatch = getProperty(propertyPrefix, key, "maxRequestsInBatch", builder.getMaxRequestsInBatch(), default_maxRequestsInBatch);
         this.timerDelayInMilliseconds = getProperty(propertyPrefix, key, "timerDelayInMilliseconds", builder.getTimerDelayInMilliseconds(), default_timerDelayInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
+        this.duplicateArgumentStrategy = getProperty(propertyPrefix, key, "duplicateArgumentStrategy", builder.getDuplicateArgumentStrategy(), default_duplicateArgumentStrategy);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -83,6 +108,13 @@ public abstract class HystrixCollapserProperties {
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCollapserKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
         return forBoolean()
+                .add(propertyPrefix + ".collapser." + key.name() + "." + instanceProperty, builderOverrideValue)
+                .add(propertyPrefix + ".collapser.default." + instanceProperty, defaultValue)
+                .build();
+    }
+
+    private static HystrixProperty<String> getProperty(String propertyPrefix, HystrixCollapserKey key, String instanceProperty, String builderOverrideValue, String defaultValue) {
+        return forString()
                 .add(propertyPrefix + ".collapser." + key.name() + "." + instanceProperty, builderOverrideValue)
                 .add(propertyPrefix + ".collapser.default." + instanceProperty, defaultValue)
                 .build();
@@ -120,11 +152,20 @@ public abstract class HystrixCollapserProperties {
 
     /**
      * The number of milliseconds between batch executions (unless {@link #maxRequestsInBatch} is hit which will cause a batch to execute early.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> timerDelayInMilliseconds() {
         return timerDelayInMilliseconds;
+    }
+
+    /**
+     * The strategy for handling duplicate arguments in a collapsed batch.
+     *
+     * @return {@code HystrixProperty<String>} the duplicate argument strategy name (MERGE, REJECT, or ALLOW_DUPLICATES)
+     */
+    public HystrixProperty<String> duplicateArgumentStrategy() {
+        return duplicateArgumentStrategy;
     }
 
     /**
@@ -217,6 +258,7 @@ public abstract class HystrixCollapserProperties {
         private Integer maxRequestsInBatch = null;
         private Integer timerDelayInMilliseconds = null;
         private Boolean requestCacheEnabled = null;
+        private String duplicateArgumentStrategy = null;
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Integer metricsRollingPercentileBucketSize = null;
@@ -245,6 +287,10 @@ public abstract class HystrixCollapserProperties {
 
         public Boolean getRequestCacheEnabled() {
             return requestCacheEnabled;
+        }
+
+        public String getDuplicateArgumentStrategy() {
+            return duplicateArgumentStrategy;
         }
 
         public Integer getMetricsRollingStatisticalWindowInMilliseconds() {
@@ -292,6 +338,16 @@ public abstract class HystrixCollapserProperties {
 
         public Setter withRequestCacheEnabled(boolean value) {
             this.requestCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withDuplicateArgumentStrategy(String value) {
+            this.duplicateArgumentStrategy = value;
+            return this;
+        }
+
+        public Setter withDuplicateArgumentStrategy(DuplicateArgumentStrategy value) {
+            this.duplicateArgumentStrategy = value.name();
             return this;
         }
 
