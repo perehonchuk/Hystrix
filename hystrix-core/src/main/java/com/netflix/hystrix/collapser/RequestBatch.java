@@ -30,6 +30,8 @@ import rx.functions.Action1;
 
 import com.netflix.hystrix.HystrixCollapser.CollapsedRequest;
 import com.netflix.hystrix.HystrixCollapserProperties;
+import com.netflix.hystrix.strategy.HystrixPlugins;
+import com.netflix.hystrix.strategy.eventnotifier.HystrixEventNotifier;
 
 /**
  * A batch of requests collapsed together by a RequestCollapser instance. When full or time has expired it will execute and stop accepting further submissions.
@@ -45,10 +47,12 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
     private final HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser;
     private final int maxBatchSize;
     private final AtomicBoolean batchStarted = new AtomicBoolean();
+    private final AtomicBoolean batchCreatedEventFired = new AtomicBoolean();
 
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
             new ConcurrentHashMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>();
     private final HystrixCollapserProperties properties;
+    private final HystrixEventNotifier eventNotifier;
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
 
@@ -56,6 +60,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
         this.maxBatchSize = maxBatchSize;
+        this.eventNotifier = HystrixPlugins.getInstance().getEventNotifier();
     }
 
     /**
@@ -80,6 +85,15 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 if (argumentMap.size() >= maxBatchSize) {
                     return null;
                 } else {
+                    // Fire batch created event only once per batch
+                    if (batchCreatedEventFired.compareAndSet(false, true)) {
+                        try {
+                            eventNotifier.markCollapserBatchCreated(commandCollapser.getCollapserKey());
+                        } catch (Exception e) {
+                            logger.warn("Failed to invoke event notifier for batch created", e);
+                        }
+                    }
+
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
                             new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
@@ -103,6 +117,12 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                             return Observable.error(new IllegalArgumentException("Duplicate argument in collapser batch : [" + arg + "]  This is not supported.  Please turn request-caching on for HystrixCollapser:" + commandCollapser.getCollapserKey().name() + " or prevent duplicates from making it into the batch!"));
                         }
                     } else {
+                        // Fire event for request added to batch
+                        try {
+                            eventNotifier.markCollapserRequestAddedToBatch(commandCollapser.getCollapserKey(), argumentMap.size());
+                        } catch (Exception e) {
+                            logger.warn("Failed to invoke event notifier for request added to batch", e);
+                        }
                         return collapsedRequest.toObservable();
                     }
 
@@ -165,7 +185,17 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             try {
                 // shard batches
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
+
+                // Fire event for batch execution
+                final int totalBatchSize = argumentMap.size();
+                final int shardCount = shards.size();
+                try {
+                    eventNotifier.markCollapserBatchExecuted(commandCollapser.getCollapserKey(), totalBatchSize, shardCount);
+                } catch (Exception e) {
+                    logger.warn("Failed to invoke event notifier for batch executed", e);
+                }
+
+                // for each shard execute its requests
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests
@@ -186,6 +216,14 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                                     ee = new RuntimeException("Throwable caught while executing batch and mapping responses.", e);
                                 }
                                 logger.debug("Exception mapping responses to requests.", e);
+
+                                // Fire event for batch failure
+                                try {
+                                    eventNotifier.markCollapserBatchFailed(commandCollapser.getCollapserKey(), shardRequests.size(), ee);
+                                } catch (Exception notifierException) {
+                                    logger.warn("Failed to invoke event notifier for batch failed", notifierException);
+                                }
+
                                 // if a failure occurs we want to pass that exception to all of the Futures that we've returned
                                 for (CollapsedRequest<ResponseType, RequestArgumentType> request : argumentMap.values()) {
                                     try {

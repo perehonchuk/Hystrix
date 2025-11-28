@@ -18,6 +18,7 @@ package com.netflix.hystrix.strategy.eventnotifier;
 import java.util.List;
 
 import com.netflix.hystrix.HystrixCommandKey;
+import com.netflix.hystrix.HystrixCollapserKey;
 import com.netflix.hystrix.HystrixCommandProperties.ExecutionIsolationStrategy;
 import com.netflix.hystrix.HystrixEventType;
 import com.netflix.hystrix.strategy.HystrixPlugins;
@@ -55,7 +56,7 @@ public abstract class HystrixEventNotifier {
      * Will not get called if a command is rejected, short-circuited etc.
      * <p>
      * <b>Default Implementation: </b> Does nothing
-     * 
+     *
      * @param key
      *            {@link HystrixCommandKey} of command instance.
      * @param isolationStrategy
@@ -66,6 +67,64 @@ public abstract class HystrixEventNotifier {
      *            {@code List<HystrixEventType>} of events occurred during execution.
      */
     public void markCommandExecution(HystrixCommandKey key, ExecutionIsolationStrategy isolationStrategy, int duration, List<HystrixEventType> eventsDuringExecution) {
+        // do nothing
+    }
+
+    /**
+     * Called when a request batch is created by a collapser.
+     * <p>
+     * <b>Default Implementation: </b> Does nothing
+     *
+     * @param key
+     *            {@link HystrixCollapserKey} of collapser instance.
+     */
+    public void markCollapserBatchCreated(HystrixCollapserKey key) {
+        // do nothing
+    }
+
+    /**
+     * Called when a request is added to a collapser batch.
+     * <p>
+     * <b>Default Implementation: </b> Does nothing
+     *
+     * @param key
+     *            {@link HystrixCollapserKey} of collapser instance.
+     * @param batchSize
+     *            current size of the batch after adding this request
+     */
+    public void markCollapserRequestAddedToBatch(HystrixCollapserKey key, int batchSize) {
+        // do nothing
+    }
+
+    /**
+     * Called when a request batch is executed by a collapser.
+     * <p>
+     * <b>Default Implementation: </b> Does nothing
+     *
+     * @param key
+     *            {@link HystrixCollapserKey} of collapser instance.
+     * @param batchSize
+     *            number of requests in the batch being executed
+     * @param shardCount
+     *            number of shards the batch was divided into
+     */
+    public void markCollapserBatchExecuted(HystrixCollapserKey key, int batchSize, int shardCount) {
+        // do nothing
+    }
+
+    /**
+     * Called when a collapser batch execution fails.
+     * <p>
+     * <b>Default Implementation: </b> Does nothing
+     *
+     * @param key
+     *            {@link HystrixCollapserKey} of collapser instance.
+     * @param batchSize
+     *            number of requests in the failed batch
+     * @param exception
+     *            exception that caused the batch to fail
+     */
+    public void markCollapserBatchFailed(HystrixCollapserKey key, int batchSize, Exception exception) {
         // do nothing
     }
 
