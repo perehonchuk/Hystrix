@@ -647,7 +647,8 @@ import java.util.concurrent.atomic.AtomicReference;
     }
 
     private Observable<R> executeCommandWithSpecifiedIsolation(final AbstractCommand<R> _cmd) {
-        if (properties.executionIsolationStrategy().get() == ExecutionIsolationStrategy.THREAD) {
+        ExecutionIsolationStrategy actualStrategy = determineActualIsolationStrategy();
+        if (actualStrategy == ExecutionIsolationStrategy.THREAD) {
             // mark that we are executing in a thread (even if we end up being rejected we still were a THREAD execution and not SEMAPHORE)
             return Observable.defer(new Func0<Observable<R>>() {
                 @Override
@@ -1249,12 +1250,52 @@ import java.util.concurrent.atomic.AtomicReference;
     }
 
     /**
+     * Determines the actual isolation strategy to use for execution.
+     * <p>
+     * If the configured strategy is ADAPTIVE, this method examines command metrics to decide whether
+     * to use THREAD or SEMAPHORE isolation based on observed latency patterns.
+     * <p>
+     * Low-latency commands (below threshold) use SEMAPHORE to avoid thread overhead.
+     * High-latency commands (above threshold) use THREAD to prevent blocking the caller.
+     *
+     * @return the actual ExecutionIsolationStrategy to use (THREAD or SEMAPHORE)
+     */
+    private ExecutionIsolationStrategy determineActualIsolationStrategy() {
+        ExecutionIsolationStrategy configuredStrategy = properties.executionIsolationStrategy().get();
+
+        if (configuredStrategy != ExecutionIsolationStrategy.ADAPTIVE) {
+            return configuredStrategy;
+        }
+
+        // For ADAPTIVE strategy, determine based on metrics
+        int executionCount = (int) metrics.getCumulativeCount(HystrixEventType.SUCCESS);
+        int minSampleSize = properties.executionIsolationAdaptiveMinSampleSize().get();
+
+        // Until we have enough samples, default to THREAD for safety
+        if (executionCount < minSampleSize) {
+            return ExecutionIsolationStrategy.THREAD;
+        }
+
+        // Get average execution latency from metrics
+        int meanExecutionTime = metrics.getExecutionTimeMean();
+        int latencyThreshold = properties.executionIsolationAdaptiveLatencyThresholdInMilliseconds().get();
+
+        // Use SEMAPHORE for low-latency commands, THREAD for high-latency commands
+        if (meanExecutionTime < latencyThreshold) {
+            return ExecutionIsolationStrategy.SEMAPHORE;
+        } else {
+            return ExecutionIsolationStrategy.THREAD;
+        }
+    }
+
+    /**
      * Get the TryableSemaphore this HystrixCommand should use for execution if not running in a separate thread.
-     * 
+     *
      * @return TryableSemaphore
      */
     protected TryableSemaphore getExecutionSemaphore() {
-        if (properties.executionIsolationStrategy().get() == ExecutionIsolationStrategy.SEMAPHORE) {
+        ExecutionIsolationStrategy actualStrategy = determineActualIsolationStrategy();
+        if (actualStrategy == ExecutionIsolationStrategy.SEMAPHORE) {
             if (executionSemaphoreOverride == null) {
                 TryableSemaphore _s = executionSemaphorePerCircuit.get(commandKey.name());
                 if (_s == null) {

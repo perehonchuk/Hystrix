@@ -62,6 +62,8 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Integer default_executionIsolationAdaptiveLatencyThresholdInMilliseconds = 50; // default => adaptiveLatencyThreshold: 50ms = if execution latency is below this, use SEMAPHORE; otherwise use THREAD
+    private static final Integer default_executionIsolationAdaptiveMinSampleSize = 20; // default => adaptiveMinSampleSize: 20 = minimum number of executions before switching strategies
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +90,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Integer> executionIsolationAdaptiveLatencyThresholdInMilliseconds; // latency threshold for adaptive strategy
+    private final HystrixProperty<Integer> executionIsolationAdaptiveMinSampleSize; // minimum sample size before adaptive strategy makes decisions
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -95,10 +99,11 @@ public abstract class HystrixCommandProperties {
      * <ul>
      * <li>THREAD: Execute the {@link HystrixCommand#run()} method on a separate thread and restrict concurrent executions using the thread-pool size.</li>
      * <li>SEMAPHORE: Execute the {@link HystrixCommand#run()} method on the calling thread and restrict concurrent executions using the semaphore permit count.</li>
+     * <li>ADAPTIVE: Dynamically choose between THREAD and SEMAPHORE based on observed command execution latency. Commands with low latency (below threshold) use SEMAPHORE for efficiency, while higher latency commands use THREAD for better isolation.</li>
      * </ul>
      */
     public static enum ExecutionIsolationStrategy {
-        THREAD, SEMAPHORE
+        THREAD, SEMAPHORE, ADAPTIVE
     }
 
     protected HystrixCommandProperties(HystrixCommandKey key) {
@@ -136,6 +141,8 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.executionIsolationAdaptiveLatencyThresholdInMilliseconds = getProperty(propertyPrefix, key, "execution.isolation.adaptive.latencyThresholdInMilliseconds", builder.getExecutionIsolationAdaptiveLatencyThresholdInMilliseconds(), default_executionIsolationAdaptiveLatencyThresholdInMilliseconds);
+        this.executionIsolationAdaptiveMinSampleSize = getProperty(propertyPrefix, key, "execution.isolation.adaptive.minSampleSize", builder.getExecutionIsolationAdaptiveMinSampleSize(), default_executionIsolationAdaptiveMinSampleSize);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -324,13 +331,41 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand#getFallback()} should be attempted when failure occurs.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
-     * 
+     *
      * @since 1.2
      */
     public HystrixProperty<Boolean> fallbackEnabled() {
         return fallbackEnabled;
+    }
+
+    /**
+     * Latency threshold in milliseconds for adaptive isolation strategy.
+     * <p>
+     * When {@link #executionIsolationStrategy()} == ADAPTIVE, commands with average execution time below this threshold
+     * will use SEMAPHORE isolation for efficiency, while commands above this threshold will use THREAD isolation for better resilience.
+     * <p>
+     * This allows low-latency commands to avoid thread overhead while ensuring high-latency commands don't block calling threads.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> executionIsolationAdaptiveLatencyThresholdInMilliseconds() {
+        return executionIsolationAdaptiveLatencyThresholdInMilliseconds;
+    }
+
+    /**
+     * Minimum sample size required before adaptive isolation strategy switches between THREAD and SEMAPHORE.
+     * <p>
+     * When {@link #executionIsolationStrategy()} == ADAPTIVE, at least this many successful executions must complete
+     * before the strategy will evaluate average latency and potentially switch isolation modes.
+     * <p>
+     * This prevents premature switching based on insufficient data.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> executionIsolationAdaptiveMinSampleSize() {
+        return executionIsolationAdaptiveMinSampleSize;
     }
 
     /**
@@ -560,6 +595,8 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Integer executionIsolationAdaptiveLatencyThresholdInMilliseconds = null;
+        private Integer executionIsolationAdaptiveMinSampleSize = null;
 
         /* package */ Setter() {
         }
@@ -662,6 +699,14 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Integer getExecutionIsolationAdaptiveLatencyThresholdInMilliseconds() {
+            return executionIsolationAdaptiveLatencyThresholdInMilliseconds;
+        }
+
+        public Integer getExecutionIsolationAdaptiveMinSampleSize() {
+            return executionIsolationAdaptiveMinSampleSize;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -785,6 +830,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withExecutionIsolationAdaptiveLatencyThresholdInMilliseconds(int value) {
+            this.executionIsolationAdaptiveLatencyThresholdInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withExecutionIsolationAdaptiveMinSampleSize(int value) {
+            this.executionIsolationAdaptiveMinSampleSize = value;
             return this;
         }
     }
