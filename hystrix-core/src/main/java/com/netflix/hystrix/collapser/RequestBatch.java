@@ -153,6 +153,48 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
      * </ul>
      * 
      */
+    /**
+     * Automatically splits a large batch into smaller sub-batches based on the autoBatchSplitThreshold configuration.
+     * This occurs before user-defined sharding logic is applied.
+     *
+     * @param requests The full collection of requests to potentially split
+     * @return Collection of batches, either as a single batch (if splitting disabled or threshold not exceeded)
+     *         or multiple smaller batches
+     */
+    private Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> autoBatchSplit(
+            Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+
+        boolean autoBatchSplitEnabled = properties.autoBatchSplitEnabled().get();
+        int threshold = properties.autoBatchSplitThreshold().get();
+
+        if (!autoBatchSplitEnabled || requests.size() <= threshold) {
+            // No splitting needed - return original batch as single collection
+            return java.util.Collections.singletonList(requests);
+        }
+
+        // Split into multiple batches
+        Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> splitBatches =
+            new java.util.ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+
+        java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>> currentBatch =
+            new java.util.ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>(threshold);
+
+        for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+            currentBatch.add(request);
+            if (currentBatch.size() >= threshold) {
+                splitBatches.add(currentBatch);
+                currentBatch = new java.util.ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>(threshold);
+            }
+        }
+
+        // Add remaining requests if any
+        if (!currentBatch.isEmpty()) {
+            splitBatches.add(currentBatch);
+        }
+
+        return splitBatches;
+    }
+
     public void executeBatchIfNotAlreadyStarted() {
         /*
          * - check that we only execute once since there's multiple paths to do so (timer, waiting thread or max batch size hit)
@@ -163,8 +205,16 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
-                // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
+                // perform automatic batch splitting if enabled
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> preSplitBatches = autoBatchSplit(argumentMap.values());
+
+                // apply user-defined sharding to each pre-split batch
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = new java.util.ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+                for (Collection<CollapsedRequest<ResponseType, RequestArgumentType>> preSplitBatch : preSplitBatches) {
+                    Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> userShards = commandCollapser.shardRequests(preSplitBatch);
+                    shards.addAll(userShards);
+                }
+
                 // for each shard execute its requests 
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {

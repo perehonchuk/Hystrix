@@ -35,6 +35,8 @@ public abstract class HystrixCollapserProperties {
     private static final Integer default_maxRequestsInBatch = Integer.MAX_VALUE;
     private static final Integer default_timerDelayInMilliseconds = 10;
     private static final Boolean default_requestCacheEnabled = true;
+    private static final Integer default_autoBatchSplitThreshold = 50;
+    private static final Boolean default_autoBatchSplitEnabled = true;
     /* package */ static final Integer default_metricsRollingStatisticalWindow = 10000;// default => statisticalWindow: 10000 = 10 seconds (and default of 10 buckets so each bucket is 1 second)
     private static final Integer default_metricsRollingStatisticalWindowBuckets = 10;// default => statisticalWindowBuckets: 10 = 10 buckets in a 10 second window so each bucket is 1 second
     private static final Boolean default_metricsRollingPercentileEnabled = true;
@@ -45,6 +47,8 @@ public abstract class HystrixCollapserProperties {
     private final HystrixProperty<Integer> maxRequestsInBatch;
     private final HystrixProperty<Integer> timerDelayInMilliseconds;
     private final HystrixProperty<Boolean> requestCacheEnabled;
+    private final HystrixProperty<Integer> autoBatchSplitThreshold;
+    private final HystrixProperty<Boolean> autoBatchSplitEnabled;
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowBuckets; // number of buckets in the statisticalWindow
     private final HystrixProperty<Boolean> metricsRollingPercentileEnabled; // Whether monitoring should be enabled
@@ -64,6 +68,8 @@ public abstract class HystrixCollapserProperties {
         this.maxRequestsInBatch = getProperty(propertyPrefix, key, "maxRequestsInBatch", builder.getMaxRequestsInBatch(), default_maxRequestsInBatch);
         this.timerDelayInMilliseconds = getProperty(propertyPrefix, key, "timerDelayInMilliseconds", builder.getTimerDelayInMilliseconds(), default_timerDelayInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
+        this.autoBatchSplitThreshold = getProperty(propertyPrefix, key, "autoBatchSplitThreshold", builder.getAutoBatchSplitThreshold(), default_autoBatchSplitThreshold);
+        this.autoBatchSplitEnabled = getProperty(propertyPrefix, key, "autoBatchSplit.enabled", builder.getAutoBatchSplitEnabled(), default_autoBatchSplitEnabled);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -120,11 +126,31 @@ public abstract class HystrixCollapserProperties {
 
     /**
      * The number of milliseconds between batch executions (unless {@link #maxRequestsInBatch} is hit which will cause a batch to execute early.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> timerDelayInMilliseconds() {
         return timerDelayInMilliseconds;
+    }
+
+    /**
+     * The threshold at which automatic batch splitting will occur. When a batch exceeds this size,
+     * it will be split into multiple sub-batches before user-defined sharding is applied.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> autoBatchSplitThreshold() {
+        return autoBatchSplitThreshold;
+    }
+
+    /**
+     * Whether automatic batch splitting is enabled. When true, large batches will be automatically
+     * split into smaller sub-batches before being passed to user sharding logic.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> autoBatchSplitEnabled() {
+        return autoBatchSplitEnabled;
     }
 
     /**
@@ -217,6 +243,8 @@ public abstract class HystrixCollapserProperties {
         private Integer maxRequestsInBatch = null;
         private Integer timerDelayInMilliseconds = null;
         private Boolean requestCacheEnabled = null;
+        private Integer autoBatchSplitThreshold = null;
+        private Boolean autoBatchSplitEnabled = null;
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Integer metricsRollingPercentileBucketSize = null;
@@ -245,6 +273,14 @@ public abstract class HystrixCollapserProperties {
 
         public Boolean getRequestCacheEnabled() {
             return requestCacheEnabled;
+        }
+
+        public Integer getAutoBatchSplitThreshold() {
+            return autoBatchSplitThreshold;
+        }
+
+        public Boolean getAutoBatchSplitEnabled() {
+            return autoBatchSplitEnabled;
         }
 
         public Integer getMetricsRollingStatisticalWindowInMilliseconds() {
@@ -292,6 +328,16 @@ public abstract class HystrixCollapserProperties {
 
         public Setter withRequestCacheEnabled(boolean value) {
             this.requestCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withAutoBatchSplitThreshold(int value) {
+            this.autoBatchSplitThreshold = value;
+            return this;
+        }
+
+        public Setter withAutoBatchSplitEnabled(boolean value) {
+            this.autoBatchSplitEnabled = value;
             return this;
         }
 
