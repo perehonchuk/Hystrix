@@ -32,6 +32,7 @@ public enum HystrixEventType {
     TIMEOUT(false),
     BAD_REQUEST(true),
     SHORT_CIRCUITED(false),
+    DEGRADED_REJECTED(false),
     THREAD_POOL_REJECTED(false),
     SEMAPHORE_REJECTED(false),
     FALLBACK_EMIT(false),
@@ -63,6 +64,7 @@ public enum HystrixEventType {
             case FAILURE: return FAILURE;
             case TIMEOUT: return TIMEOUT;
             case SHORT_CIRCUITED: return SHORT_CIRCUITED;
+            case DEGRADED_REJECTED: return DEGRADED_REJECTED;
             case THREAD_POOL_REJECTED: return THREAD_POOL_REJECTED;
             case SEMAPHORE_REJECTED: return SEMAPHORE_REJECTED;
             case FALLBACK_EMIT: return FALLBACK_EMIT;

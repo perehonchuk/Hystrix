@@ -140,11 +140,13 @@ public interface HystrixCircuitBreaker {
         private final HystrixCommandMetrics metrics;
 
         enum Status {
-            CLOSED, OPEN, HALF_OPEN;
+            CLOSED, DEGRADED, OPEN, HALF_OPEN;
         }
 
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
+        private final AtomicLong circuitDegraded = new AtomicLong(-1);
+        private final AtomicLong degradedRequestCounter = new AtomicLong(0);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
@@ -180,18 +182,27 @@ public interface HystrixCircuitBreaker {
                                 // we are not past the minimum volume threshold for the stat window,
                                 // so no change to circuit status.
                                 // if it was CLOSED, it stays CLOSED
+                                // if it was degraded, it stays DEGRADED
                                 // if it was half-open, we need to wait for a successful command execution
                                 // if it was open, we need to wait for sleep window to elapse
                             } else {
-                                if (hc.getErrorPercentage() < properties.circuitBreakerErrorThresholdPercentage().get()) {
-                                    //we are not past the minimum error threshold for the stat window,
-                                    // so no change to circuit status.
-                                    // if it was CLOSED, it stays CLOSED
-                                    // if it was half-open, we need to wait for a successful command execution
-                                    // if it was open, we need to wait for sleep window to elapse
+                                long errorPercentage = hc.getErrorPercentage();
+                                long degradedThreshold = properties.circuitBreakerDegradedThresholdPercentage().get();
+                                long errorThreshold = properties.circuitBreakerErrorThresholdPercentage().get();
+
+                                if (errorPercentage < degradedThreshold) {
+                                    // health is good, try to close circuit if it was degraded
+                                    status.compareAndSet(Status.DEGRADED, Status.CLOSED);
+                                } else if (errorPercentage < errorThreshold) {
+                                    // error rate is elevated but not critical - enter DEGRADED state
+                                    if (status.compareAndSet(Status.CLOSED, Status.DEGRADED)) {
+                                        circuitDegraded.set(System.currentTimeMillis());
+                                    }
                                 } else {
-                                    // our failure rate is too high, we need to set the state to OPEN
+                                    // error rate is critical - transition to OPEN from either CLOSED or DEGRADED
                                     if (status.compareAndSet(Status.CLOSED, Status.OPEN)) {
+                                        circuitOpened.set(System.currentTimeMillis());
+                                    } else if (status.compareAndSet(Status.DEGRADED, Status.OPEN)) {
                                         circuitOpened.set(System.currentTimeMillis());
                                     }
                                 }
@@ -212,6 +223,7 @@ public interface HystrixCircuitBreaker {
                 Subscription newSubscription = subscribeToStream();
                 activeSubscription.set(newSubscription);
                 circuitOpened.set(-1L);
+                circuitDegraded.set(-1L);
             }
         }
 
@@ -242,10 +254,20 @@ public interface HystrixCircuitBreaker {
             if (properties.circuitBreakerForceClosed().get()) {
                 return true;
             }
+
+            Status currentStatus = status.get();
+
+            // In DEGRADED state, only allow a percentage of requests through
+            if (currentStatus.equals(Status.DEGRADED)) {
+                long counter = degradedRequestCounter.incrementAndGet();
+                long trafficPercentage = properties.circuitBreakerDegradedTrafficPercentage().get();
+                return (counter % 100) < trafficPercentage;
+            }
+
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (status.get().equals(Status.HALF_OPEN)) {
+                if (currentStatus.equals(Status.HALF_OPEN)) {
                     return false;
                 } else {
                     return isAfterSleepWindow();

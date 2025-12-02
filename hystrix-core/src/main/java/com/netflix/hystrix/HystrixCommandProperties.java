@@ -44,6 +44,8 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_circuitBreakerRequestVolumeThreshold = 20;// default => statisticalWindowVolumeThreshold: 20 requests in 10 seconds must occur before statistics matter
     private static final Integer default_circuitBreakerSleepWindowInMilliseconds = 5000;// default => sleepWindow: 5000 = 5 seconds that we will sleep before trying again after tripping the circuit
     private static final Integer default_circuitBreakerErrorThresholdPercentage = 50;// default => errorThresholdPercentage = 50 = if 50%+ of requests in 10 seconds are failures or latent then we will trip the circuit
+    private static final Integer default_circuitBreakerDegradedThresholdPercentage = 25;// default => degradedThresholdPercentage = 25 = if 25%+ of requests are failing, enter DEGRADED state
+    private static final Integer default_circuitBreakerDegradedTrafficPercentage = 50;// default => degradedTrafficPercentage = 50 = allow 50% of traffic through in DEGRADED state
     private static final Boolean default_circuitBreakerForceOpen = false;// default => forceCircuitOpen = false (we want to allow traffic)
     /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false 
     private static final Integer default_executionTimeoutInMilliseconds = 1000; // default => executionTimeoutInMilliseconds: 1000 = 1 second
@@ -68,6 +70,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> circuitBreakerSleepWindowInMilliseconds; // milliseconds after tripping circuit before allowing retry
     private final HystrixProperty<Boolean> circuitBreakerEnabled; // Whether circuit breaker should be enabled.
     private final HystrixProperty<Integer> circuitBreakerErrorThresholdPercentage; // % of 'marks' that must be failed to trip the circuit
+    private final HystrixProperty<Integer> circuitBreakerDegradedThresholdPercentage; // % of 'marks' that must be failed to enter DEGRADED state
+    private final HystrixProperty<Integer> circuitBreakerDegradedTrafficPercentage; // % of traffic to allow through in DEGRADED state
     private final HystrixProperty<Boolean> circuitBreakerForceOpen; // a property to allow forcing the circuit open (stopping all requests)
     private final HystrixProperty<Boolean> circuitBreakerForceClosed; // a property to allow ignoring errors and therefore never trip 'open' (ie. allow all traffic through)
     private final HystrixProperty<ExecutionIsolationStrategy> executionIsolationStrategy; // Whether a command should be executed in a separate thread or not.
@@ -116,6 +120,8 @@ public abstract class HystrixCommandProperties {
         this.circuitBreakerRequestVolumeThreshold = getProperty(propertyPrefix, key, "circuitBreaker.requestVolumeThreshold", builder.getCircuitBreakerRequestVolumeThreshold(), default_circuitBreakerRequestVolumeThreshold);
         this.circuitBreakerSleepWindowInMilliseconds = getProperty(propertyPrefix, key, "circuitBreaker.sleepWindowInMilliseconds", builder.getCircuitBreakerSleepWindowInMilliseconds(), default_circuitBreakerSleepWindowInMilliseconds);
         this.circuitBreakerErrorThresholdPercentage = getProperty(propertyPrefix, key, "circuitBreaker.errorThresholdPercentage", builder.getCircuitBreakerErrorThresholdPercentage(), default_circuitBreakerErrorThresholdPercentage);
+        this.circuitBreakerDegradedThresholdPercentage = getProperty(propertyPrefix, key, "circuitBreaker.degradedThresholdPercentage", builder.getCircuitBreakerDegradedThresholdPercentage(), default_circuitBreakerDegradedThresholdPercentage);
+        this.circuitBreakerDegradedTrafficPercentage = getProperty(propertyPrefix, key, "circuitBreaker.degradedTrafficPercentage", builder.getCircuitBreakerDegradedTrafficPercentage(), default_circuitBreakerDegradedTrafficPercentage);
         this.circuitBreakerForceOpen = getProperty(propertyPrefix, key, "circuitBreaker.forceOpen", builder.getCircuitBreakerForceOpen(), default_circuitBreakerForceOpen);
         this.circuitBreakerForceClosed = getProperty(propertyPrefix, key, "circuitBreaker.forceClosed", builder.getCircuitBreakerForceClosed(), default_circuitBreakerForceClosed);
         this.executionIsolationStrategy = getProperty(propertyPrefix, key, "execution.isolation.strategy", builder.getExecutionIsolationStrategy(), default_executionIsolationStrategy);
@@ -159,7 +165,7 @@ public abstract class HystrixCommandProperties {
      * It will stay tripped for the duration defined in {@link #circuitBreakerSleepWindowInMilliseconds()};
      * <p>
      * The error percentage this is compared against comes from {@link HystrixCommandMetrics#getHealthCounts()}.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> circuitBreakerErrorThresholdPercentage() {
@@ -167,10 +173,34 @@ public abstract class HystrixCommandProperties {
     }
 
     /**
+     * Error percentage threshold (as whole number such as 25) at which point the circuit breaker will enter DEGRADED state.
+     * <p>
+     * In DEGRADED state, only a percentage of traffic is allowed through as specified by {@link #circuitBreakerDegradedTrafficPercentage()}.
+     * <p>
+     * The error percentage this is compared against comes from {@link HystrixCommandMetrics#getHealthCounts()}.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerDegradedThresholdPercentage() {
+        return circuitBreakerDegradedThresholdPercentage;
+    }
+
+    /**
+     * Percentage of traffic (as whole number such as 50) to allow through when circuit breaker is in DEGRADED state.
+     * <p>
+     * This allows partial traffic reduction when the service is experiencing elevated but non-critical error rates.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerDegradedTrafficPercentage() {
+        return circuitBreakerDegradedTrafficPercentage;
+    }
+
+    /**
      * If true the {@link HystrixCircuitBreaker#allowRequest()} will always return true to allow requests regardless of the error percentage from {@link HystrixCommandMetrics#getHealthCounts()}.
      * <p>
      * The {@link #circuitBreakerForceOpen()} property takes precedence so if it set to true this property does nothing.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> circuitBreakerForceClosed() {
@@ -538,6 +568,8 @@ public abstract class HystrixCommandProperties {
 
         private Boolean circuitBreakerEnabled = null;
         private Integer circuitBreakerErrorThresholdPercentage = null;
+        private Integer circuitBreakerDegradedThresholdPercentage = null;
+        private Integer circuitBreakerDegradedTrafficPercentage = null;
         private Boolean circuitBreakerForceClosed = null;
         private Boolean circuitBreakerForceOpen = null;
         private Integer circuitBreakerRequestVolumeThreshold = null;
@@ -570,6 +602,14 @@ public abstract class HystrixCommandProperties {
 
         public Integer getCircuitBreakerErrorThresholdPercentage() {
             return circuitBreakerErrorThresholdPercentage;
+        }
+
+        public Integer getCircuitBreakerDegradedThresholdPercentage() {
+            return circuitBreakerDegradedThresholdPercentage;
+        }
+
+        public Integer getCircuitBreakerDegradedTrafficPercentage() {
+            return circuitBreakerDegradedTrafficPercentage;
         }
 
         public Boolean getCircuitBreakerForceClosed() {
@@ -671,6 +711,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withCircuitBreakerErrorThresholdPercentage(int value) {
             this.circuitBreakerErrorThresholdPercentage = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerDegradedThresholdPercentage(int value) {
+            this.circuitBreakerDegradedThresholdPercentage = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerDegradedTrafficPercentage(int value) {
+            this.circuitBreakerDegradedTrafficPercentage = value;
             return this;
         }
 
