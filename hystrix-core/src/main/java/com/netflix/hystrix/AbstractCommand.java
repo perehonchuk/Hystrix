@@ -569,6 +569,15 @@ import java.util.concurrent.atomic.AtomicReference;
     private Observable<R> executeCommandAndObserve(final AbstractCommand<R> _cmd) {
         final HystrixRequestContext currentRequestContext = HystrixRequestContext.getContextForCurrentThread();
 
+        // Wrap execution with retry logic if enabled
+        if (properties.retryEnabled().get() && properties.retryMaxAttempts().get() > 0) {
+            return executeCommandWithRetry(_cmd, currentRequestContext);
+        } else {
+            return executeCommandWithoutRetry(_cmd, currentRequestContext);
+        }
+    }
+
+    private Observable<R> executeCommandWithoutRetry(final AbstractCommand<R> _cmd, final HystrixRequestContext currentRequestContext) {
         final Action1<R> markEmits = new Action1<R>() {
             @Override
             public void call(R r) {
@@ -644,6 +653,62 @@ import java.util.concurrent.atomic.AtomicReference;
                 .doOnCompleted(markOnCompleted)
                 .onErrorResumeNext(handleFallback)
                 .doOnEach(setRequestContext);
+    }
+
+    private Observable<R> executeCommandWithRetry(final AbstractCommand<R> _cmd, final HystrixRequestContext currentRequestContext) {
+        final int maxAttempts = properties.retryMaxAttempts().get();
+        final int retryDelay = properties.retryDelayInMilliseconds().get();
+        final AtomicInteger attemptCounter = new AtomicInteger(0);
+
+        return Observable.defer(new Func0<Observable<R>>() {
+            @Override
+            public Observable<R> call() {
+                return executeCommandWithoutRetry(_cmd, currentRequestContext);
+            }
+        }).retryWhen(new Func1<Observable<? extends Throwable>, Observable<?>>() {
+            @Override
+            public Observable<?> call(Observable<? extends Throwable> errors) {
+                return errors.flatMap(new Func1<Throwable, Observable<?>>() {
+                    @Override
+                    public Observable<?> call(Throwable error) {
+                        int currentAttempt = attemptCounter.incrementAndGet();
+
+                        if (currentAttempt <= maxAttempts) {
+                            // Mark retry attempt event
+                            executionResult = executionResult.addEvent(HystrixEventType.RETRY_ATTEMPTED);
+                            eventNotifier.markEvent(HystrixEventType.RETRY_ATTEMPTED, commandKey);
+                            executionHook.onRetryAttempt(_cmd, currentAttempt);
+
+                            // Introduce delay before retry
+                            if (retryDelay > 0) {
+                                return Observable.timer(retryDelay, java.util.concurrent.TimeUnit.MILLISECONDS);
+                            } else {
+                                return Observable.just(null);
+                            }
+                        } else {
+                            // All retries exhausted
+                            executionResult = executionResult.addEvent(HystrixEventType.RETRY_EXHAUSTED);
+                            eventNotifier.markEvent(HystrixEventType.RETRY_EXHAUSTED, commandKey);
+                            executionHook.onRetryExhausted(_cmd, maxAttempts);
+
+                            // Propagate the original error
+                            return Observable.error(error);
+                        }
+                    }
+                });
+            }
+        }).doOnNext(new Action1<R>() {
+            @Override
+            public void call(R r) {
+                int attempts = attemptCounter.get();
+                if (attempts > 0) {
+                    // Command succeeded after retry
+                    executionResult = executionResult.addEvent(HystrixEventType.RETRY_SUCCESS);
+                    eventNotifier.markEvent(HystrixEventType.RETRY_SUCCESS, commandKey);
+                    executionHook.onRetrySuccess(_cmd, attempts);
+                }
+            }
+        });
     }
 
     private Observable<R> executeCommandWithSpecifiedIsolation(final AbstractCommand<R> _cmd) {

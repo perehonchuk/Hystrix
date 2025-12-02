@@ -228,6 +228,36 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked when a retry attempt is about to be made after an execution failure.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param attemptNumber The retry attempt number (1 for first retry, 2 for second, etc.)
+     */
+    public <T> void onRetryAttempt(HystrixInvokable<T> commandInstance, int attemptNumber) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when a retry attempt succeeds.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param attemptNumber The retry attempt number that succeeded
+     */
+    public <T> void onRetrySuccess(HystrixInvokable<T> commandInstance, int attemptNumber) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when all retry attempts have been exhausted and the command still fails.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param maxAttempts The maximum number of retry attempts that were configured
+     */
+    public <T> void onRetryExhausted(HystrixInvokable<T> commandInstance, int maxAttempts) {
+        //do nothing by default
+    }
+
+    /**
      * DEPRECATED: Change usages of this to {@link #onExecutionStart}.
      *
      * Invoked before {@link HystrixCommand#run()} is about to be executed.
