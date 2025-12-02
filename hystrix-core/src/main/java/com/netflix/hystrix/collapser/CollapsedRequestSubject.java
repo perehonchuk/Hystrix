@@ -16,6 +16,7 @@
 package com.netflix.hystrix.collapser;
 
 import com.netflix.hystrix.HystrixCollapser.CollapsedRequest;
+import com.netflix.hystrix.RequestPriority;
 import rx.Observable;
 import rx.functions.Action0;
 import rx.subjects.ReplaySubject;
@@ -44,6 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 /* package */class CollapsedRequestSubject<T, R> implements CollapsedRequest<T, R> {
     private final R argument;
+    private final RequestPriority priority;
 
     private AtomicBoolean valueSet = new AtomicBoolean(false);
     private final ReplaySubject<T> subject = ReplaySubject.create();
@@ -52,11 +54,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
     private volatile int outstandingSubscriptions = 0;
 
     public CollapsedRequestSubject(final R arg, final RequestBatch<?, T, R> containingBatch) {
+        this(arg, RequestPriority.NORMAL, containingBatch);
+    }
+
+    public CollapsedRequestSubject(final R arg, final RequestPriority priority, final RequestBatch<?, T, R> containingBatch) {
         if (arg == RequestCollapser.NULL_SENTINEL) {
             this.argument = null;
         } else {
             this.argument = arg;
         }
+        this.priority = priority != null ? priority : RequestPriority.NORMAL;
         this.subjectWithAccounting = subject
                 .doOnSubscribe(new Action0() {
                     @Override
@@ -76,18 +83,33 @@ import java.util.concurrent.atomic.AtomicBoolean;
     }
 
     public CollapsedRequestSubject(final R arg) {
+        this(arg, RequestPriority.NORMAL);
+    }
+
+    public CollapsedRequestSubject(final R arg, final RequestPriority priority) {
         this.subjectWithAccounting = subject;
         this.argument = arg;
+        this.priority = priority != null ? priority : RequestPriority.NORMAL;
     }
 
     /**
      * The request argument.
-     * 
+     *
      * @return request argument
      */
     @Override
     public R getArgument() {
         return argument;
+    }
+
+    /**
+     * The priority level of this request.
+     *
+     * @return request priority
+     */
+    @Override
+    public RequestPriority getPriority() {
+        return priority;
     }
 
     /**

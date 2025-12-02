@@ -16,6 +16,8 @@
 package com.netflix.hystrix.collapser;
 
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,6 +32,7 @@ import rx.functions.Action1;
 
 import com.netflix.hystrix.HystrixCollapser.CollapsedRequest;
 import com.netflix.hystrix.HystrixCollapserProperties;
+import com.netflix.hystrix.RequestPriority;
 
 /**
  * A batch of requests collapsed together by a RequestCollapser instance. When full or time has expired it will execute and stop accepting further submissions.
@@ -48,6 +51,8 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
             new ConcurrentHashMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>();
+    private final Map<RequestPriority, ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>> priorityBatchMaps =
+            new HashMap<RequestPriority, ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>>();
     private final HystrixCollapserProperties properties;
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
@@ -56,12 +61,28 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
         this.maxBatchSize = maxBatchSize;
+
+        // Initialize priority-based batch maps if priority batching is enabled
+        if (properties.priorityBatchingEnabled().get()) {
+            for (RequestPriority priority : RequestPriority.values()) {
+                priorityBatchMaps.put(priority, new ConcurrentHashMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>());
+            }
+        }
     }
 
     /**
      * @return Observable if offer accepted, null if batch is full, already started or completed
      */
     public Observable<ResponseType> offer(RequestArgumentType arg) {
+        return offer(arg, RequestPriority.NORMAL);
+    }
+
+    /**
+     * @param arg the request argument
+     * @param priority the priority level for this request
+     * @return Observable if offer accepted, null if batch is full, already started or completed
+     */
+    public Observable<ResponseType> offer(RequestArgumentType arg, RequestPriority priority) {
         /* short-cut - if the batch is started we reject the offer */
         if (batchStarted.get()) {
             return null;
@@ -77,35 +98,47 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     return null;
                 }
 
-                if (argumentMap.size() >= maxBatchSize) {
-                    return null;
-                } else {
-                    CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
-                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
-                    final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
-                    /**
-                     * If the argument already exists in the batch, then there are 2 options:
-                     * A) If request caching is ON (the default): only keep 1 argument in the batch and let all responses
-                     * be hooked up to that argument
-                     * B) If request caching is OFF: return an error to all duplicate argument requests
-                     *
-                     * This maintains the invariant that each batch has no duplicate arguments.  This prevents the impossible
-                     * logic (in a user-provided mapResponseToRequests for HystrixCollapser and the internals of HystrixObservableCollapser)
-                     * of trying to figure out which argument of a set of duplicates should get attached to a response.
-                     *
-                     * See https://github.com/Netflix/Hystrix/pull/1176 for further discussion.
-                     */
-                    if (existing != null) {
-                        boolean requestCachingEnabled = properties.requestCacheEnabled().get();
-                        if (requestCachingEnabled) {
-                            return existing.toObservable();
-                        } else {
-                            return Observable.error(new IllegalArgumentException("Duplicate argument in collapser batch : [" + arg + "]  This is not supported.  Please turn request-caching on for HystrixCollapser:" + commandCollapser.getCollapserKey().name() + " or prevent duplicates from making it into the batch!"));
-                        }
-                    } else {
-                        return collapsedRequest.toObservable();
-                    }
+                ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> targetMap;
+                boolean priorityBatchingEnabled = properties.priorityBatchingEnabled().get();
 
+                if (priorityBatchingEnabled) {
+                    // Use priority-specific map
+                    targetMap = priorityBatchMaps.get(priority);
+                    if (targetMap.size() >= maxBatchSize) {
+                        return null;
+                    }
+                } else {
+                    // Use single argumentMap for all priorities
+                    targetMap = argumentMap;
+                    if (targetMap.size() >= maxBatchSize) {
+                        return null;
+                    }
+                }
+
+                CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
+                        new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, priority, this);
+                final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) targetMap.putIfAbsent(arg, collapsedRequest);
+                /**
+                 * If the argument already exists in the batch, then there are 2 options:
+                 * A) If request caching is ON (the default): only keep 1 argument in the batch and let all responses
+                 * be hooked up to that argument
+                 * B) If request caching is OFF: return an error to all duplicate argument requests
+                 *
+                 * This maintains the invariant that each batch has no duplicate arguments.  This prevents the impossible
+                 * logic (in a user-provided mapResponseToRequests for HystrixCollapser and the internals of HystrixObservableCollapser)
+                 * of trying to figure out which argument of a set of duplicates should get attached to a response.
+                 *
+                 * See https://github.com/Netflix/Hystrix/pull/1176 for further discussion.
+                 */
+                if (existing != null) {
+                    boolean requestCachingEnabled = properties.requestCacheEnabled().get();
+                    if (requestCachingEnabled) {
+                        return existing.toObservable();
+                    } else {
+                        return Observable.error(new IllegalArgumentException("Duplicate argument in collapser batch : [" + arg + "]  This is not supported.  Please turn request-caching on for HystrixCollapser:" + commandCollapser.getCollapserKey().name() + " or prevent duplicates from making it into the batch!"));
+                    }
+                } else {
+                    return collapsedRequest.toObservable();
                 }
             } finally {
                 batchLock.readLock().unlock();
@@ -163,10 +196,58 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
-                // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
-                for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
+                boolean priorityBatchingEnabled = properties.priorityBatchingEnabled().get();
+                Collection<CollapsedRequest<ResponseType, RequestArgumentType>> allRequests;
+
+                if (priorityBatchingEnabled) {
+                    // Execute priority batches in priority order (HIGH first, then NORMAL, then LOW)
+                    for (RequestPriority priority : new RequestPriority[]{RequestPriority.HIGH, RequestPriority.NORMAL, RequestPriority.LOW}) {
+                        ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> priorityMap = priorityBatchMaps.get(priority);
+                        if (priorityMap != null && !priorityMap.isEmpty()) {
+                            executeBatchForRequests(priorityMap.values());
+                        }
+                    }
+                } else {
+                    // Execute all requests together (legacy behavior)
+                    executeBatchForRequests(argumentMap.values());
+                }
+
+            } catch (Exception e) {
+                logger.error("Exception while sharding requests.", e);
+                // same error handling as we do around the shards, but this is a wider net in case the shardRequest method fails
+                Collection<CollapsedRequest<ResponseType, RequestArgumentType>> allRequests =
+                    properties.priorityBatchingEnabled().get() ? getAllPriorityRequests() : argumentMap.values();
+                for (CollapsedRequest<ResponseType, RequestArgumentType> request : allRequests) {
+                    try {
+                        request.setException(e);
+                    } catch (IllegalStateException e2) {
+                        logger.debug("Failed trying to setException on CollapsedRequest", e2);
+                    }
+                }
+            } finally {
+                batchLock.writeLock().unlock();
+            }
+        }
+    }
+
+    private Collection<CollapsedRequest<ResponseType, RequestArgumentType>> getAllPriorityRequests() {
+        Collection<CollapsedRequest<ResponseType, RequestArgumentType>> allRequests = new java.util.ArrayList<>();
+        for (ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> priorityMap : priorityBatchMaps.values()) {
+            allRequests.addAll(priorityMap.values());
+        }
+        return allRequests;
+    }
+
+    private void executeBatchForRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        if (requests == null || requests.isEmpty()) {
+            return;
+        }
+
+        try {
+            // shard batches
+            Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(requests);
+            // for each shard execute its requests
+            for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests
                         Observable<BatchReturnType> o = commandCollapser.createObservableCommand(shardRequests);
@@ -231,19 +312,15 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                         }
                     }
                 }
-
-            } catch (Exception e) {
-                logger.error("Exception while sharding requests.", e);
-                // same error handling as we do around the shards, but this is a wider net in case the shardRequest method fails
-                for (CollapsedRequest<ResponseType, RequestArgumentType> request : argumentMap.values()) {
-                    try {
-                        request.setException(e);
-                    } catch (IllegalStateException e2) {
-                        logger.debug("Failed trying to setException on CollapsedRequest", e2);
-                    }
+        } catch (Exception e) {
+            logger.error("Exception while sharding requests.", e);
+            // error handling for shard failures
+            for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+                try {
+                    request.setException(e);
+                } catch (IllegalStateException e2) {
+                    logger.debug("Failed trying to setException on CollapsedRequest", e2);
                 }
-            } finally {
-                batchLock.writeLock().unlock();
             }
         }
     }
@@ -284,6 +361,14 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
     }
 
     public int getSize() {
-        return argumentMap.size();
+        if (properties.priorityBatchingEnabled().get()) {
+            int totalSize = 0;
+            for (ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> priorityMap : priorityBatchMaps.values()) {
+                totalSize += priorityMap.size();
+            }
+            return totalSize;
+        } else {
+            return argumentMap.size();
+        }
     }
 }
