@@ -228,6 +228,20 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked when the command execution fails and a retry attempt is being made.
+     * This hook is called before each retry attempt (not including the initial execution).
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param attemptNumber The retry attempt number (1 for first retry, 2 for second, etc.)
+     * @param failureException The exception that caused the retry
+     *
+     * @since 1.6.0
+     */
+    public <T> void onRetryAttempt(HystrixInvokable<T> commandInstance, int attemptNumber, Throwable failureException) {
+        //do nothing by default
+    }
+
+    /**
      * DEPRECATED: Change usages of this to {@link #onExecutionStart}.
      *
      * Invoked before {@link HystrixCommand#run()} is about to be executed.

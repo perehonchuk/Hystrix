@@ -892,9 +892,79 @@ import java.util.concurrent.atomic.AtomicReference;
             userObservable = Observable.error(ex);
         }
 
+        // Apply retry logic if enabled
+        if (properties.retryEnabled().get()) {
+            userObservable = applyRetryLogic(userObservable, _cmd);
+        }
+
         return userObservable
                 .lift(new ExecutionHookApplication(_cmd))
                 .lift(new DeprecatedOnRunHookApplication(_cmd));
+    }
+
+    private Observable<R> applyRetryLogic(Observable<R> userObservable, final AbstractCommand<R> _cmd) {
+        final int maxAttempts = properties.retryMaxAttempts().get();
+        final int retryDelay = properties.retryDelayInMilliseconds().get();
+        final AtomicInteger attemptCounter = new AtomicInteger(0);
+
+        return userObservable.onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+            @Override
+            public Observable<R> call(Throwable throwable) {
+                int currentAttempt = attemptCounter.incrementAndGet();
+
+                // Check if we should retry
+                if (currentAttempt <= maxAttempts && shouldRetryOnException(throwable)) {
+                    // Invoke retry hook
+                    try {
+                        executionHook.onRetryAttempt(_cmd, currentAttempt, throwable);
+                    } catch (Throwable hookEx) {
+                        logger.warn("Error calling HystrixCommandExecutionHook.onRetryAttempt", hookEx);
+                    }
+
+                    // Log retry event
+                    executionResult = executionResult.addEvent(HystrixEventType.RETRY);
+                    eventNotifier.markEvent(HystrixEventType.RETRY, commandKey);
+
+                    // Wait for retry delay, then retry
+                    if (retryDelay > 0) {
+                        try {
+                            Thread.sleep(retryDelay);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            return Observable.error(ie);
+                        }
+                    }
+
+                    // Retry by recursively applying retry logic to a new execution
+                    try {
+                        Observable<R> retryObservable = getExecutionObservable();
+                        return applyRetryLogic(retryObservable, _cmd);
+                    } catch (Throwable ex) {
+                        return Observable.error(ex);
+                    }
+                } else {
+                    // No more retries, propagate the error
+                    return Observable.error(throwable);
+                }
+            }
+        });
+    }
+
+    private boolean shouldRetryOnException(Throwable t) {
+        // Don't retry on bad request exceptions - these are client errors
+        if (t instanceof HystrixBadRequestException) {
+            return false;
+        }
+        // Don't retry on timeout exceptions - retrying won't help
+        if (t instanceof HystrixTimeoutException) {
+            return false;
+        }
+        // Don't retry on rejected execution - thread pool is full
+        if (t instanceof RejectedExecutionException) {
+            return false;
+        }
+        // Retry on all other exceptions (network errors, service errors, etc.)
+        return true;
     }
 
     private Observable<R> handleRequestCacheHitAndEmitValues(final HystrixCommandResponseFromCache<R> fromCache, final AbstractCommand<R> _cmd) {
