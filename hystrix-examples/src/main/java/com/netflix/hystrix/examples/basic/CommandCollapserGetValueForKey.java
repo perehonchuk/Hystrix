@@ -25,6 +25,7 @@ import java.util.concurrent.Future;
 import org.junit.Test;
 
 import com.netflix.hystrix.HystrixCollapser;
+import com.netflix.hystrix.HystrixCollapserProperties;
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
 import com.netflix.hystrix.HystrixCommandKey;

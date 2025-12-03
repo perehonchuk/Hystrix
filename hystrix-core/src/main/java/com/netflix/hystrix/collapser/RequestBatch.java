@@ -52,10 +52,17 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
 
+    private final Action0 immediateExecutionCallback;
+
     public RequestBatch(HystrixCollapserProperties properties, HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser, int maxBatchSize) {
+        this(properties, commandCollapser, maxBatchSize, null);
+    }
+
+    public RequestBatch(HystrixCollapserProperties properties, HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser, int maxBatchSize, Action0 immediateExecutionCallback) {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
         this.maxBatchSize = maxBatchSize;
+        this.immediateExecutionCallback = immediateExecutionCallback;
     }
 
     /**
@@ -103,6 +110,21 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                             return Observable.error(new IllegalArgumentException("Duplicate argument in collapser batch : [" + arg + "]  This is not supported.  Please turn request-caching on for HystrixCollapser:" + commandCollapser.getCollapserKey().name() + " or prevent duplicates from making it into the batch!"));
                         }
                     } else {
+                        // Check if we've reached the minimum batch size for immediate execution
+                        int minBatchSize = properties.minBatchSizeForImmediateExecution().get();
+                        int currentSize = argumentMap.size();
+
+                        // Trigger immediate execution if threshold is met and callback is available
+                        if (minBatchSize > 0 && currentSize >= minBatchSize && immediateExecutionCallback != null) {
+                            logger.debug("Minimum batch size of {} reached with {} requests, triggering immediate execution for collapser {}",
+                                    minBatchSize, currentSize, commandCollapser.getCollapserKey().name());
+                            try {
+                                immediateExecutionCallback.call();
+                            } catch (Exception e) {
+                                logger.error("Failed to trigger immediate execution callback", e);
+                            }
+                        }
+
                         return collapsedRequest.toObservable();
                     }
 
