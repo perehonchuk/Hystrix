@@ -62,6 +62,7 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Integer default_requestCacheTTLInMilliseconds = 5000; // default => requestCacheTTL: 5000 = 5 seconds that cached values remain valid within a request
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +89,7 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Integer> requestCacheTTLInMilliseconds; // TTL for cached values in milliseconds
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -135,6 +137,7 @@ public abstract class HystrixCommandProperties {
         this.metricsRollingPercentileBucketSize = getProperty(propertyPrefix, key, "metrics.rollingPercentile.bucketSize", builder.getMetricsRollingPercentileBucketSize(), default_metricsRollingPercentileBucketSize);
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
+        this.requestCacheTTLInMilliseconds = getProperty(propertyPrefix, key, "requestCache.ttlInMilliseconds", builder.getRequestCacheTTLInMilliseconds(), default_requestCacheTTLInMilliseconds);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
 
         // threadpool doesn't have a global override, only instance level makes sense
@@ -410,7 +413,7 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand#getCacheKey()} should be used with {@link HystrixRequestCache} to provide de-duplication functionality via request-scoped caching.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestCacheEnabled() {
@@ -418,8 +421,18 @@ public abstract class HystrixCommandProperties {
     }
 
     /**
+     * Time-to-live in milliseconds for cached values within a request context. After this duration,
+     * cached observables will be considered stale and a new execution will be triggered.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> requestCacheTTLInMilliseconds() {
+        return requestCacheTTLInMilliseconds;
+    }
+
+    /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
@@ -559,6 +572,7 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
+        private Integer requestCacheTTLInMilliseconds = null;
         private Boolean requestLogEnabled = null;
 
         /* package */ Setter() {
@@ -658,6 +672,10 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestCacheEnabled() {
             return requestCacheEnabled;
+        }
+
+        public Integer getRequestCacheTTLInMilliseconds() {
+            return requestCacheTTLInMilliseconds;
         }
 
         public Boolean getRequestLogEnabled() {
@@ -780,6 +798,11 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestCacheEnabled(boolean value) {
             this.requestCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withRequestCacheTTLInMilliseconds(int value) {
+            this.requestCacheTTLInMilliseconds = value;
             return this;
         }
 

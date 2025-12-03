@@ -44,17 +44,17 @@ public class HystrixRequestCache {
     /**
      * A ConcurrentHashMap per 'prefix' and per request scope that is used to to dedupe requests in the same request.
      * <p>
-     * Key => CommandPrefix + CacheKey : Future<?> from queue()
+     * Key => CommandPrefix + CacheKey : CachedObservableWithTimestamp containing the observable and timestamp
      */
-    private static final HystrixRequestVariableHolder<ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>> requestVariableForCache = new HystrixRequestVariableHolder<ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>>(new HystrixRequestVariableLifecycle<ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>>() {
+    private static final HystrixRequestVariableHolder<ConcurrentHashMap<ValueCacheKey, CachedObservableWithTimestamp<?>>> requestVariableForCache = new HystrixRequestVariableHolder<ConcurrentHashMap<ValueCacheKey, CachedObservableWithTimestamp<?>>>(new HystrixRequestVariableLifecycle<ConcurrentHashMap<ValueCacheKey, CachedObservableWithTimestamp<?>>>() {
 
         @Override
-        public ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> initialValue() {
-            return new ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>();
+        public ConcurrentHashMap<ValueCacheKey, CachedObservableWithTimestamp<?>> initialValue() {
+            return new ConcurrentHashMap<ValueCacheKey, CachedObservableWithTimestamp<?>>();
         }
 
         @Override
-        public void shutdown(ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> value) {
+        public void shutdown(ConcurrentHashMap<ValueCacheKey, CachedObservableWithTimestamp<?>> value) {
             // nothing to shutdown
         }
 
@@ -90,51 +90,77 @@ public class HystrixRequestCache {
     }
 
     /**
-     * Retrieve a cached Future for this request scope if a matching command has already been executed/queued.
-     * 
-     * @return {@code Future<T>}
+     * Retrieve a cached Future for this request scope if a matching command has already been executed/queued
+     * and the cached value has not exceeded its TTL.
+     *
+     * @param cacheKey the cache key
+     * @param ttlMillis time-to-live in milliseconds; values older than this will be considered expired
+     * @return {@code HystrixCachedObservable<T>} or null if not cached or expired
      */
     // suppressing warnings because we are using a raw Future since it's in a heterogeneous ConcurrentHashMap cache
     @SuppressWarnings({ "unchecked" })
-    /* package */<T> HystrixCachedObservable<T> get(String cacheKey) {
+    /* package */<T> HystrixCachedObservable<T> get(String cacheKey, long ttlMillis) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
-            ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+            ConcurrentHashMap<ValueCacheKey, CachedObservableWithTimestamp<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
             if (cacheInstance == null) {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }
             /* look for the stored value */
-            return (HystrixCachedObservable<T>) cacheInstance.get(key);
+            CachedObservableWithTimestamp<T> cachedWithTimestamp = (CachedObservableWithTimestamp<T>) cacheInstance.get(key);
+            if (cachedWithTimestamp != null) {
+                // Check if the cached value has expired based on TTL
+                if (cachedWithTimestamp.isExpired(ttlMillis)) {
+                    // Remove expired entry from cache
+                    cacheInstance.remove(key);
+                    return null;
+                }
+                return cachedWithTimestamp.getCachedObservable();
+            }
         }
         return null;
     }
 
     /**
-     * Put the Future in the cache if it does not already exist.
+     * Put the Future in the cache if it does not already exist or if the existing entry has expired.
      * <p>
      * If this method returns a non-null value then another thread won the race and it should be returned instead of proceeding with execution of the new Future.
-     * 
-     * @param cacheKey
-     *            key as defined by {@link HystrixCommand#getCacheKey()}
-     * @param f
-     *            Future to be cached
-     * 
+     *
+     * @param cacheKey key as defined by {@link HystrixCommand#getCacheKey()}
+     * @param f Future to be cached
+     * @param ttlMillis time-to-live in milliseconds for the cached value
+     *
      * @return null if nothing else was in the cache (or this {@link HystrixCommand} does not have a cacheKey) or previous value if another thread beat us to adding to the cache
      */
     // suppressing warnings because we are using a raw Future since it's in a heterogeneous ConcurrentHashMap cache
     @SuppressWarnings({ "unchecked" })
-    /* package */<T> HystrixCachedObservable<T> putIfAbsent(String cacheKey, HystrixCachedObservable<T> f) {
+    /* package */<T> HystrixCachedObservable<T> putIfAbsent(String cacheKey, HystrixCachedObservable<T> f, long ttlMillis) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
             /* look for the stored value */
-            ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+            ConcurrentHashMap<ValueCacheKey, CachedObservableWithTimestamp<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
             if (cacheInstance == null) {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }
-            HystrixCachedObservable<T> alreadySet = (HystrixCachedObservable<T>) cacheInstance.putIfAbsent(key, f);
+
+            CachedObservableWithTimestamp<T> wrappedValue = new CachedObservableWithTimestamp<T>(f);
+            CachedObservableWithTimestamp<T> alreadySet = (CachedObservableWithTimestamp<T>) cacheInstance.putIfAbsent(key, wrappedValue);
+
             if (alreadySet != null) {
+                // Check if the existing cached value has expired
+                if (alreadySet.isExpired(ttlMillis)) {
+                    // Try to replace the expired value
+                    if (cacheInstance.replace(key, alreadySet, wrappedValue)) {
+                        // Successfully replaced expired value
+                        return null;
+                    } else {
+                        // Another thread replaced it first, return the new value
+                        CachedObservableWithTimestamp<T> newValue = (CachedObservableWithTimestamp<T>) cacheInstance.get(key);
+                        return newValue != null ? newValue.getCachedObservable() : null;
+                    }
+                }
                 // someone beat us so we didn't cache this
-                return alreadySet;
+                return alreadySet.getCachedObservable();
             }
         }
         // we either set it in the cache or do not have a cache key
@@ -143,14 +169,13 @@ public class HystrixRequestCache {
 
     /**
      * Clear the cache for a given cacheKey.
-     * 
-     * @param cacheKey
-     *            key as defined by {@link HystrixCommand#getCacheKey()}
+     *
+     * @param cacheKey key as defined by {@link HystrixCommand#getCacheKey()}
      */
     public void clear(String cacheKey) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
-            ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+            ConcurrentHashMap<ValueCacheKey, CachedObservableWithTimestamp<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
             if (cacheInstance == null) {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }
@@ -174,6 +199,32 @@ public class HystrixRequestCache {
             return new ValueCacheKey(rcKey, cacheKey);
         }
         return null;
+    }
+
+    /**
+     * Wrapper class to hold cached observable along with timestamp for TTL-based expiration.
+     */
+    private static class CachedObservableWithTimestamp<T> {
+        private final HystrixCachedObservable<T> cachedObservable;
+        private final long cachedAtNanos;
+
+        private CachedObservableWithTimestamp(HystrixCachedObservable<T> cachedObservable) {
+            this.cachedObservable = cachedObservable;
+            this.cachedAtNanos = System.nanoTime();
+        }
+
+        public HystrixCachedObservable<T> getCachedObservable() {
+            return cachedObservable;
+        }
+
+        public boolean isExpired(long ttlMillis) {
+            if (ttlMillis <= 0) {
+                return false; // TTL disabled or invalid
+            }
+            long ageNanos = System.nanoTime() - cachedAtNanos;
+            long ageMillis = ageNanos / 1_000_000;
+            return ageMillis >= ttlMillis;
+        }
     }
 
     private static class ValueCacheKey {
