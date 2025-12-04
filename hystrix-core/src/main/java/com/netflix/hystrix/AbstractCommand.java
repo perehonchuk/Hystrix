@@ -678,7 +678,7 @@ import java.util.concurrent.atomic.AtomicReference;
                             executionHook.onThreadStart(_cmd);
                             executionHook.onRunStart(_cmd);
                             executionHook.onExecutionStart(_cmd);
-                            return getUserExecutionObservable(_cmd);
+                            return getUserExecutionObservableWithRetry(_cmd);
                         } catch (Throwable ex) {
                             return Observable.error(ex);
                         }
@@ -731,7 +731,7 @@ import java.util.concurrent.atomic.AtomicReference;
                     try {
                         executionHook.onRunStart(_cmd);
                         executionHook.onExecutionStart(_cmd);
-                        return getUserExecutionObservable(_cmd);  //the getUserExecutionObservable method already wraps sync exceptions, so this shouldn't throw
+                        return getUserExecutionObservableWithRetry(_cmd);  //the getUserExecutionObservable method already wraps sync exceptions, so this shouldn't throw
                     } catch (Throwable ex) {
                         //If the above hooks throw, then use that as the result of the run method
                         return Observable.error(ex);
@@ -895,6 +895,83 @@ import java.util.concurrent.atomic.AtomicReference;
         return userObservable
                 .lift(new ExecutionHookApplication(_cmd))
                 .lift(new DeprecatedOnRunHookApplication(_cmd));
+    }
+
+    private Observable<R> getUserExecutionObservableWithRetry(final AbstractCommand<R> _cmd) {
+        if (!properties.retryEnabled().get() || properties.retryMaxAttempts().get() <= 0) {
+            return getUserExecutionObservable(_cmd);
+        }
+
+        final int maxAttempts = properties.retryMaxAttempts().get();
+        final int retryDelay = properties.retryDelayInMilliseconds().get();
+
+        return Observable.defer(new Func0<Observable<R>>() {
+            @Override
+            public Observable<R> call() {
+                return retryWithAttempts(_cmd, 0, maxAttempts, retryDelay);
+            }
+        });
+    }
+
+    private Observable<R> retryWithAttempts(final AbstractCommand<R> _cmd, final int attemptNumber, final int maxAttempts, final int retryDelay) {
+        return getUserExecutionObservable(_cmd).onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+            @Override
+            public Observable<R> call(final Throwable error) {
+                // Don't retry on HystrixBadRequestException
+                if (error instanceof HystrixBadRequestException) {
+                    return Observable.error(error);
+                }
+
+                // Check if we should retry
+                if (attemptNumber < maxAttempts) {
+                    final int nextAttempt = attemptNumber + 1;
+
+                    try {
+                        executionHook.onRetryAttempt(_cmd, nextAttempt);
+                    } catch (Throwable hookEx) {
+                        logger.warn("Error calling HystrixCommandExecutionHook.onRetryAttempt", hookEx);
+                    }
+
+                    executionResult = executionResult.addEvent(HystrixEventType.RETRY_ATTEMPTED);
+
+                    // Add delay before retry if configured
+                    if (retryDelay > 0) {
+                        return Observable.timer(retryDelay, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                .flatMap(new Func1<Long, Observable<R>>() {
+                                    @Override
+                                    public Observable<R> call(Long aLong) {
+                                        return retryWithAttempts(_cmd, nextAttempt, maxAttempts, retryDelay);
+                                    }
+                                });
+                    } else {
+                        return retryWithAttempts(_cmd, nextAttempt, maxAttempts, retryDelay);
+                    }
+                } else {
+                    // All retries exhausted
+                    try {
+                        executionHook.onRetryExhausted(_cmd, maxAttempts);
+                    } catch (Throwable hookEx) {
+                        logger.warn("Error calling HystrixCommandExecutionHook.onRetryExhausted", hookEx);
+                    }
+
+                    executionResult = executionResult.addEvent(HystrixEventType.RETRY_EXHAUSTED);
+                    return Observable.error(error);
+                }
+            }
+        }).doOnNext(new Action1<R>() {
+            @Override
+            public void call(R r) {
+                // If we had previous failures and now succeeded, mark retry as successful
+                if (attemptNumber > 0) {
+                    try {
+                        executionHook.onRetrySuccess(_cmd, attemptNumber);
+                    } catch (Throwable hookEx) {
+                        logger.warn("Error calling HystrixCommandExecutionHook.onRetrySuccess", hookEx);
+                    }
+                    executionResult = executionResult.addEvent(HystrixEventType.RETRY_SUCCESS);
+                }
+            }
+        });
     }
 
     private Observable<R> handleRequestCacheHitAndEmitValues(final HystrixCommandResponseFromCache<R> fromCache, final AbstractCommand<R> _cmd) {
