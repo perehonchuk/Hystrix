@@ -1719,6 +1719,22 @@ import java.util.concurrent.atomic.AtomicReference;
         return null;
     }
 
+    /**
+     * Returns the Time-To-Live (TTL) in milliseconds for cached responses.
+     * <p>
+     * By default this returns -1 which means cached entries never expire (standard request-scoped behavior).
+     * <p>
+     * Override this method to enable time-based cache expiration. Cached entries will be automatically
+     * invalidated and removed from the cache when the TTL expires.
+     * <p>
+     * This works in conjunction with getCacheKey() - both must be implemented for caching to work.
+     *
+     * @return TTL in milliseconds, or -1 for no expiration (default)
+     */
+    protected long getCacheTTLMillis() {
+        return -1;
+    }
+
     public String getPublicCacheKey() {
         return getCacheKey();
     }
