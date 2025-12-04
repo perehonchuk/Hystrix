@@ -45,7 +45,11 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_circuitBreakerSleepWindowInMilliseconds = 5000;// default => sleepWindow: 5000 = 5 seconds that we will sleep before trying again after tripping the circuit
     private static final Integer default_circuitBreakerErrorThresholdPercentage = 50;// default => errorThresholdPercentage = 50 = if 50%+ of requests in 10 seconds are failures or latent then we will trip the circuit
     private static final Boolean default_circuitBreakerForceOpen = false;// default => forceCircuitOpen = false (we want to allow traffic)
-    /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false 
+    /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false
+    private static final Boolean default_circuitBreakerWarmupEnabled = true;// default => warmup enabled to gradually ramp traffic after recovery
+    private static final Integer default_circuitBreakerWarmupDurationInMilliseconds = 10000;// default => 10 seconds to complete warmup phase
+    private static final Integer default_circuitBreakerWarmupMinTrafficPercentage = 25;// default => start at 25% traffic during warmup
+    private static final Integer default_circuitBreakerWarmupRequestThreshold = 20;// default => 20 successful requests needed to complete warmup 
     private static final Integer default_executionTimeoutInMilliseconds = 1000; // default => executionTimeoutInMilliseconds: 1000 = 1 second
     private static final Boolean default_executionTimeoutEnabled = true;
     private static final ExecutionIsolationStrategy default_executionIsolationStrategy = ExecutionIsolationStrategy.THREAD;
@@ -70,6 +74,10 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> circuitBreakerErrorThresholdPercentage; // % of 'marks' that must be failed to trip the circuit
     private final HystrixProperty<Boolean> circuitBreakerForceOpen; // a property to allow forcing the circuit open (stopping all requests)
     private final HystrixProperty<Boolean> circuitBreakerForceClosed; // a property to allow ignoring errors and therefore never trip 'open' (ie. allow all traffic through)
+    private final HystrixProperty<Boolean> circuitBreakerWarmupEnabled; // Whether gradual traffic warmup should be enabled after recovery
+    private final HystrixProperty<Integer> circuitBreakerWarmupDurationInMilliseconds; // Duration of warmup phase in milliseconds
+    private final HystrixProperty<Integer> circuitBreakerWarmupMinTrafficPercentage; // Minimum traffic percentage to start with during warmup
+    private final HystrixProperty<Integer> circuitBreakerWarmupRequestThreshold; // Number of successful requests needed to complete warmup phase
     private final HystrixProperty<ExecutionIsolationStrategy> executionIsolationStrategy; // Whether a command should be executed in a separate thread or not.
     private final HystrixProperty<Integer> executionTimeoutInMilliseconds; // Timeout value in milliseconds for a command
     private final HystrixProperty<Boolean> executionTimeoutEnabled; //Whether timeout should be triggered
@@ -118,6 +126,10 @@ public abstract class HystrixCommandProperties {
         this.circuitBreakerErrorThresholdPercentage = getProperty(propertyPrefix, key, "circuitBreaker.errorThresholdPercentage", builder.getCircuitBreakerErrorThresholdPercentage(), default_circuitBreakerErrorThresholdPercentage);
         this.circuitBreakerForceOpen = getProperty(propertyPrefix, key, "circuitBreaker.forceOpen", builder.getCircuitBreakerForceOpen(), default_circuitBreakerForceOpen);
         this.circuitBreakerForceClosed = getProperty(propertyPrefix, key, "circuitBreaker.forceClosed", builder.getCircuitBreakerForceClosed(), default_circuitBreakerForceClosed);
+        this.circuitBreakerWarmupEnabled = getProperty(propertyPrefix, key, "circuitBreaker.warmup.enabled", builder.getCircuitBreakerWarmupEnabled(), default_circuitBreakerWarmupEnabled);
+        this.circuitBreakerWarmupDurationInMilliseconds = getProperty(propertyPrefix, key, "circuitBreaker.warmup.durationInMilliseconds", builder.getCircuitBreakerWarmupDurationInMilliseconds(), default_circuitBreakerWarmupDurationInMilliseconds);
+        this.circuitBreakerWarmupMinTrafficPercentage = getProperty(propertyPrefix, key, "circuitBreaker.warmup.minTrafficPercentage", builder.getCircuitBreakerWarmupMinTrafficPercentage(), default_circuitBreakerWarmupMinTrafficPercentage);
+        this.circuitBreakerWarmupRequestThreshold = getProperty(propertyPrefix, key, "circuitBreaker.warmup.requestThreshold", builder.getCircuitBreakerWarmupRequestThreshold(), default_circuitBreakerWarmupRequestThreshold);
         this.executionIsolationStrategy = getProperty(propertyPrefix, key, "execution.isolation.strategy", builder.getExecutionIsolationStrategy(), default_executionIsolationStrategy);
         //this property name is now misleading.  //TODO figure out a good way to deprecate this property name
         this.executionTimeoutInMilliseconds = getProperty(propertyPrefix, key, "execution.isolation.thread.timeoutInMilliseconds", builder.getExecutionIsolationThreadTimeoutInMilliseconds(), default_executionTimeoutInMilliseconds);
@@ -201,11 +213,52 @@ public abstract class HystrixCommandProperties {
 
     /**
      * The time in milliseconds after a {@link HystrixCircuitBreaker} trips open that it should wait before trying requests again.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> circuitBreakerSleepWindowInMilliseconds() {
         return circuitBreakerSleepWindowInMilliseconds;
+    }
+
+    /**
+     * Whether gradual traffic warmup should be enabled after circuit breaker recovery.
+     * When enabled, the circuit breaker enters a WARMING_UP state after successful half-open test,
+     * gradually ramping up traffic from warmupMinTrafficPercentage to 100% over warmupDurationInMilliseconds.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> circuitBreakerWarmupEnabled() {
+        return circuitBreakerWarmupEnabled;
+    }
+
+    /**
+     * Duration in milliseconds for the warmup phase to complete.
+     * Traffic will gradually ramp from warmupMinTrafficPercentage to 100% over this period.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerWarmupDurationInMilliseconds() {
+        return circuitBreakerWarmupDurationInMilliseconds;
+    }
+
+    /**
+     * Minimum traffic percentage (0-100) to allow at the start of warmup phase.
+     * Traffic will linearly increase from this percentage to 100% during warmup.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerWarmupMinTrafficPercentage() {
+        return circuitBreakerWarmupMinTrafficPercentage;
+    }
+
+    /**
+     * Number of successful requests required during warmup phase before transitioning to CLOSED state.
+     * This ensures enough successful traffic has flowed before fully opening the circuit.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerWarmupRequestThreshold() {
+        return circuitBreakerWarmupRequestThreshold;
     }
 
     /**
@@ -542,6 +595,10 @@ public abstract class HystrixCommandProperties {
         private Boolean circuitBreakerForceOpen = null;
         private Integer circuitBreakerRequestVolumeThreshold = null;
         private Integer circuitBreakerSleepWindowInMilliseconds = null;
+        private Boolean circuitBreakerWarmupEnabled = null;
+        private Integer circuitBreakerWarmupDurationInMilliseconds = null;
+        private Integer circuitBreakerWarmupMinTrafficPercentage = null;
+        private Integer circuitBreakerWarmupRequestThreshold = null;
         private Integer executionIsolationSemaphoreMaxConcurrentRequests = null;
         private ExecutionIsolationStrategy executionIsolationStrategy = null;
         private Boolean executionIsolationThreadInterruptOnTimeout = null;
@@ -586,6 +643,22 @@ public abstract class HystrixCommandProperties {
 
         public Integer getCircuitBreakerSleepWindowInMilliseconds() {
             return circuitBreakerSleepWindowInMilliseconds;
+        }
+
+        public Boolean getCircuitBreakerWarmupEnabled() {
+            return circuitBreakerWarmupEnabled;
+        }
+
+        public Integer getCircuitBreakerWarmupDurationInMilliseconds() {
+            return circuitBreakerWarmupDurationInMilliseconds;
+        }
+
+        public Integer getCircuitBreakerWarmupMinTrafficPercentage() {
+            return circuitBreakerWarmupMinTrafficPercentage;
+        }
+
+        public Integer getCircuitBreakerWarmupRequestThreshold() {
+            return circuitBreakerWarmupRequestThreshold;
         }
 
         public Integer getExecutionIsolationSemaphoreMaxConcurrentRequests() {
@@ -691,6 +764,26 @@ public abstract class HystrixCommandProperties {
 
         public Setter withCircuitBreakerSleepWindowInMilliseconds(int value) {
             this.circuitBreakerSleepWindowInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerWarmupEnabled(boolean value) {
+            this.circuitBreakerWarmupEnabled = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerWarmupDurationInMilliseconds(int value) {
+            this.circuitBreakerWarmupDurationInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerWarmupMinTrafficPercentage(int value) {
+            this.circuitBreakerWarmupMinTrafficPercentage = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerWarmupRequestThreshold(int value) {
+            this.circuitBreakerWarmupRequestThreshold = value;
             return this;
         }
 

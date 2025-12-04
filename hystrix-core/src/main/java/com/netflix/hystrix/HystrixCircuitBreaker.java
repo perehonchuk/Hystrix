@@ -140,12 +140,14 @@ public interface HystrixCircuitBreaker {
         private final HystrixCommandMetrics metrics;
 
         enum Status {
-            CLOSED, OPEN, HALF_OPEN;
+            CLOSED, OPEN, HALF_OPEN, WARMING_UP;
         }
 
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicLong warmupStartTime = new AtomicLong(-1);
+        private final AtomicLong warmupRequestCount = new AtomicLong(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -202,16 +204,44 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            if (properties.circuitBreakerWarmupEnabled().get()) {
+                // With warmup enabled, transition from HALF_OPEN to WARMING_UP
+                if (status.compareAndSet(Status.HALF_OPEN, Status.WARMING_UP)) {
+                    //This thread wins the race to start warmup - initialize warmup state
+                    warmupStartTime.set(System.currentTimeMillis());
+                    warmupRequestCount.set(0L);
+                    metrics.resetStream();
+                    Subscription previousSubscription = activeSubscription.get();
+                    if (previousSubscription != null) {
+                        previousSubscription.unsubscribe();
+                    }
+                    Subscription newSubscription = subscribeToStream();
+                    activeSubscription.set(newSubscription);
+                    circuitOpened.set(-1L);
+                } else if (status.get() == Status.WARMING_UP) {
+                    // Already in warmup, check if we should transition to CLOSED
+                    long currentCount = warmupRequestCount.incrementAndGet();
+                    long warmupRequestThreshold = properties.circuitBreakerWarmupRequestThreshold().get();
+
+                    if (currentCount >= warmupRequestThreshold) {
+                        status.compareAndSet(Status.WARMING_UP, Status.CLOSED);
+                        warmupStartTime.set(-1L);
+                        warmupRequestCount.set(0L);
+                    }
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
+            } else {
+                // Original behavior without warmup
+                if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
+                    //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                    metrics.resetStream();
+                    Subscription previousSubscription = activeSubscription.get();
+                    if (previousSubscription != null) {
+                        previousSubscription.unsubscribe();
+                    }
+                    Subscription newSubscription = subscribeToStream();
+                    activeSubscription.set(newSubscription);
+                    circuitOpened.set(-1L);
+                }
             }
         }
 
@@ -220,6 +250,11 @@ public interface HystrixCircuitBreaker {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+            } else if (status.compareAndSet(Status.WARMING_UP, Status.OPEN)) {
+                //Failure during warmup - reopen the circuit
+                circuitOpened.set(System.currentTimeMillis());
+                warmupStartTime.set(-1L);
+                warmupRequestCount.set(0L);
             }
         }
 
@@ -245,8 +280,12 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (status.get().equals(Status.HALF_OPEN)) {
+                Status currentStatus = status.get();
+                if (currentStatus.equals(Status.HALF_OPEN)) {
                     return false;
+                } else if (currentStatus.equals(Status.WARMING_UP)) {
+                    // During warmup, throttle requests based on percentage
+                    return shouldAllowDuringWarmup();
                 } else {
                     return isAfterSleepWindow();
                 }
@@ -260,6 +299,21 @@ public interface HystrixCircuitBreaker {
             return currentTime > circuitOpenTime + sleepWindowTime;
         }
 
+        private boolean shouldAllowDuringWarmup() {
+            long warmupDuration = properties.circuitBreakerWarmupDurationInMilliseconds().get();
+            long elapsedTime = System.currentTimeMillis() - warmupStartTime.get();
+
+            // Calculate what percentage of requests to allow based on elapsed warmup time
+            // Start at minTrafficPercentage and linearly ramp up to 100%
+            int minPercentage = properties.circuitBreakerWarmupMinTrafficPercentage().get();
+            double progressRatio = Math.min(1.0, (double) elapsedTime / warmupDuration);
+            int currentPercentage = (int) (minPercentage + (100 - minPercentage) * progressRatio);
+
+            // Use request count modulo to achieve the desired percentage
+            long currentRequest = warmupRequestCount.get();
+            return (currentRequest % 100) < currentPercentage;
+        }
+
         @Override
         public boolean attemptExecution() {
             if (properties.circuitBreakerForceOpen().get()) {
@@ -271,9 +325,13 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (isAfterSleepWindow()) {
+                Status currentStatus = status.get();
+                if (currentStatus.equals(Status.WARMING_UP)) {
+                    // During warmup, throttle based on percentage
+                    return shouldAllowDuringWarmup();
+                } else if (isAfterSleepWindow()) {
                     //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
+                    //if the executing command succeeds, the status will transition to CLOSED or WARMING_UP
                     //if the executing command fails, the status will transition to OPEN
                     //if the executing command gets unsubscribed, the status will transition to OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
