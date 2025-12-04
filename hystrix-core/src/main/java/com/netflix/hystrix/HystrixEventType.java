@@ -44,7 +44,10 @@ public enum HystrixEventType {
     RESPONSE_FROM_CACHE(true),
     CANCELLED(true),
     COLLAPSED(false),
-    COMMAND_MAX_ACTIVE(false);
+    COMMAND_MAX_ACTIVE(false),
+    CIRCUIT_BREAKER_OPENED(false),
+    CIRCUIT_BREAKER_HALF_OPENED(false),
+    CIRCUIT_BREAKER_CLOSED(false);
 
     private final boolean isTerminal;
 
@@ -76,6 +79,9 @@ public enum HystrixEventType {
             case COLLAPSED: return COLLAPSED;
             case BAD_REQUEST: return BAD_REQUEST;
             case COMMAND_MAX_ACTIVE: return COMMAND_MAX_ACTIVE;
+            case CIRCUIT_BREAKER_OPENED: return CIRCUIT_BREAKER_OPENED;
+            case CIRCUIT_BREAKER_HALF_OPENED: return CIRCUIT_BREAKER_HALF_OPENED;
+            case CIRCUIT_BREAKER_CLOSED: return CIRCUIT_BREAKER_CLOSED;
             default:
                 throw new RuntimeException("Not an event that can be converted to HystrixEventType : " + event);
         }
@@ -139,6 +145,19 @@ public enum HystrixEventType {
                 case RESPONSE_FROM_CACHE: return RESPONSE_FROM_CACHE;
                 default:
                     throw new RuntimeException("Not an event that can be converted to HystrixEventType.Collapser : " + event);
+            }
+        }
+    }
+
+    public enum CircuitBreaker {
+        OPENED, HALF_OPENED, CLOSED;
+
+        public static CircuitBreaker from(HystrixEventType eventType) {
+            switch (eventType) {
+                case CIRCUIT_BREAKER_OPENED: return OPENED;
+                case CIRCUIT_BREAKER_HALF_OPENED: return HALF_OPENED;
+                case CIRCUIT_BREAKER_CLOSED: return CLOSED;
+                default: return null;
             }
         }
     }

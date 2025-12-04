@@ -138,6 +138,8 @@ public interface HystrixCircuitBreaker {
     /* package */class HystrixCircuitBreakerImpl implements HystrixCircuitBreaker {
         private final HystrixCommandProperties properties;
         private final HystrixCommandMetrics metrics;
+        private final HystrixCommandKey commandKey;
+        private final HystrixEventNotifier eventNotifier;
 
         enum Status {
             CLOSED, OPEN, HALF_OPEN;
@@ -150,6 +152,8 @@ public interface HystrixCircuitBreaker {
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
             this.metrics = metrics;
+            this.commandKey = key;
+            this.eventNotifier = com.netflix.hystrix.strategy.HystrixPlugins.getInstance().getEventNotifier();
 
             //On a timer, this will set the circuit between OPEN/CLOSED as command executions occur
             Subscription s = subscribeToStream();
@@ -193,6 +197,7 @@ public interface HystrixCircuitBreaker {
                                     // our failure rate is too high, we need to set the state to OPEN
                                     if (status.compareAndSet(Status.CLOSED, Status.OPEN)) {
                                         circuitOpened.set(System.currentTimeMillis());
+                                        eventNotifier.markEvent(HystrixEventType.CIRCUIT_BREAKER_OPENED, commandKey);
                                     }
                                 }
                             }
@@ -212,6 +217,7 @@ public interface HystrixCircuitBreaker {
                 Subscription newSubscription = subscribeToStream();
                 activeSubscription.set(newSubscription);
                 circuitOpened.set(-1L);
+                eventNotifier.markEvent(HystrixEventType.CIRCUIT_BREAKER_CLOSED, commandKey);
             }
         }
 
@@ -220,6 +226,7 @@ public interface HystrixCircuitBreaker {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+                eventNotifier.markEvent(HystrixEventType.CIRCUIT_BREAKER_OPENED, commandKey);
             }
         }
 
@@ -277,6 +284,7 @@ public interface HystrixCircuitBreaker {
                     //if the executing command fails, the status will transition to OPEN
                     //if the executing command gets unsubscribed, the status will transition to OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        eventNotifier.markEvent(HystrixEventType.CIRCUIT_BREAKER_HALF_OPENED, commandKey);
                         return true;
                     } else {
                         return false;
