@@ -76,6 +76,25 @@ import java.util.concurrent.atomic.AtomicReference;
         NOT_USING_THREAD, STARTED, UNSUBSCRIBED, TERMINAL
     }
 
+    /**
+     * Priority levels for command execution when using priority queuing in thread pools.
+     * Higher priority commands are executed before lower priority commands when the thread pool queue is full.
+     */
+    public static enum CommandPriority {
+        LOW(1), NORMAL(5), HIGH(10), CRITICAL(20);
+
+        private final int value;
+
+        CommandPriority(int value) {
+            this.value = value;
+        }
+
+        public int getValue() {
+            return value;
+        }
+    }
+
+    protected final CommandPriority commandPriority;
     protected final HystrixCommandMetrics metrics;
 
     protected final HystrixCommandKey commandKey;
@@ -181,6 +200,19 @@ import java.util.concurrent.atomic.AtomicReference;
 
         /* execution semaphore override if applicable */
         this.executionSemaphoreOverride = executionSemaphore;
+
+        /* initialize command priority - subclasses can override getCommandPriority() */
+        this.commandPriority = getCommandPriority();
+    }
+
+    /**
+     * Override this method to specify a custom priority for this command instance.
+     * By default, all commands have NORMAL priority.
+     *
+     * @return the priority level for this command
+     */
+    protected CommandPriority getCommandPriority() {
+        return CommandPriority.NORMAL;
     }
 
     private static HystrixCommandGroupKey initGroupKey(final HystrixCommandGroupKey fromConstructor) {

@@ -57,6 +57,7 @@ public abstract class HystrixThreadPoolProperties {
     static int default_queueSizeRejectionThreshold = 5; // number of items in queue
     static int default_threadPoolRollingNumberStatisticalWindow = 10000; // milliseconds for rolling number
     static int default_threadPoolRollingNumberStatisticalWindowBuckets = 10; // number of buckets in rolling number (10 1-second buckets)
+    static boolean default_priorityQueueEnabled = false; // by default, use standard FIFO queuing instead of priority-based queuing
 
     private final HystrixProperty<Integer> corePoolSize;
     private final HystrixProperty<Integer> maximumPoolSize;
@@ -64,6 +65,7 @@ public abstract class HystrixThreadPoolProperties {
     private final HystrixProperty<Integer> maxQueueSize;
     private final HystrixProperty<Integer> queueSizeRejectionThreshold;
     private final HystrixProperty<Boolean> allowMaximumSizeToDivergeFromCoreSize;
+    private final HystrixProperty<Boolean> priorityQueueEnabled;
 
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowInMilliseconds;
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowBuckets;
@@ -88,6 +90,7 @@ public abstract class HystrixThreadPoolProperties {
         this.keepAliveTime = getProperty(propertyPrefix, key, "keepAliveTimeMinutes", builder.getKeepAliveTimeMinutes(), default_keepAliveTimeMinutes);
         this.maxQueueSize = getProperty(propertyPrefix, key, "maxQueueSize", builder.getMaxQueueSize(), default_maxQueueSize);
         this.queueSizeRejectionThreshold = getProperty(propertyPrefix, key, "queueSizeRejectionThreshold", builder.getQueueSizeRejectionThreshold(), default_queueSizeRejectionThreshold);
+        this.priorityQueueEnabled = getProperty(propertyPrefix, key, "priorityQueueEnabled", builder.getPriorityQueueEnabled(), default_priorityQueueEnabled);
         this.threadPoolRollingNumberStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_threadPoolRollingNumberStatisticalWindow);
         this.threadPoolRollingNumberStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_threadPoolRollingNumberStatisticalWindowBuckets);
     }
@@ -205,6 +208,17 @@ public abstract class HystrixThreadPoolProperties {
     }
 
     /**
+     * Whether to enable priority-based queuing for commands in the thread pool.
+     * When enabled, commands with higher priority will be executed before lower priority commands
+     * when the thread pool is under load.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> priorityQueueEnabled() {
+        return priorityQueueEnabled;
+    }
+
+    /**
      * Factory method to retrieve the default Setter.
      */
     public static Setter Setter() {
@@ -243,6 +257,7 @@ public abstract class HystrixThreadPoolProperties {
         private Integer maxQueueSize = null;
         private Integer queueSizeRejectionThreshold = null;
         private Boolean allowMaximumSizeToDivergeFromCoreSize = null;
+        private Boolean priorityQueueEnabled = null;
         private Integer rollingStatisticalWindowInMilliseconds = null;
         private Integer rollingStatisticalWindowBuckets = null;
 
@@ -279,6 +294,10 @@ public abstract class HystrixThreadPoolProperties {
 
         public Integer getMetricsRollingStatisticalWindowBuckets() {
             return rollingStatisticalWindowBuckets;
+        }
+
+        public Boolean getPriorityQueueEnabled() {
+            return priorityQueueEnabled;
         }
 
         public Setter withCoreSize(int value) {
@@ -321,8 +340,10 @@ public abstract class HystrixThreadPoolProperties {
             return this;
         }
 
-
-
+        public Setter withPriorityQueueEnabled(boolean value) {
+            this.priorityQueueEnabled = value;
+            return this;
+        }
 
     }
 }
