@@ -69,4 +69,32 @@ public abstract class HystrixEventNotifier {
         // do nothing
     }
 
+    /**
+     * Called when an execution semaphore is successfully acquired.
+     * <p>
+     * This is called when using SEMAPHORE isolation strategy and a permit is successfully obtained.
+     * <p>
+     * <b>Default Implementation: </b> Does nothing
+     *
+     * @param key
+     *            {@link HystrixCommandKey} of command instance.
+     */
+    public void markExecutionSemaphoreAcquired(HystrixCommandKey key) {
+        // do nothing
+    }
+
+    /**
+     * Called when a fallback semaphore is successfully acquired.
+     * <p>
+     * This is called when fallback logic requires a semaphore permit and it is successfully obtained.
+     * <p>
+     * <b>Default Implementation: </b> Does nothing
+     *
+     * @param key
+     *            {@link HystrixCommandKey} of command instance.
+     */
+    public void markFallbackSemaphoreAcquired(HystrixCommandKey key) {
+        // do nothing
+    }
+
 }

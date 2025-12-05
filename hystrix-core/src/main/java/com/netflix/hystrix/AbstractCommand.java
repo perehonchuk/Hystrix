@@ -544,6 +544,9 @@ import java.util.concurrent.atomic.AtomicReference;
                 try {
                     /* used to track userThreadExecutionTime */
                     executionResult = executionResult.setInvocationStartTime(System.currentTimeMillis());
+                    eventNotifier.markEvent(HystrixEventType.EXECUTION_SEMAPHORE_ACQUIRED, commandKey);
+                    eventNotifier.markExecutionSemaphoreAcquired(commandKey);
+                    executionResult = executionResult.addEvent(HystrixEventType.EXECUTION_SEMAPHORE_ACQUIRED);
                     return executeCommandAndObserve(_cmd)
                             .doOnError(markExceptionThrown)
                             .doOnTerminate(singleSemaphoreRelease)
@@ -850,6 +853,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
                 // acquire a permit
                 if (fallbackSemaphore.tryAcquire()) {
+                    eventNotifier.markEvent(HystrixEventType.FALLBACK_SEMAPHORE_ACQUIRED, commandKey);
+                    eventNotifier.markFallbackSemaphoreAcquired(commandKey);
+                    executionResult = executionResult.addEvent(HystrixEventType.FALLBACK_SEMAPHORE_ACQUIRED);
                     try {
                         if (isFallbackUserDefined()) {
                             executionHook.onFallbackStart(this);
