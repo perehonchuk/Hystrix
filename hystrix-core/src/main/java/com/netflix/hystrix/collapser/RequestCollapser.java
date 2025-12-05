@@ -68,7 +68,8 @@ public class RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType
 
     /**
      * Submit a request to a batch. If the batch maxSize is hit trigger the batch immediately.
-     * 
+     * Also triggers batch execution if early execution threshold is reached.
+     *
      * @param arg argument to a {@link RequestCollapser}
      * @return Observable<ResponseType>
      * @throws IllegalStateException
@@ -98,6 +99,10 @@ public class RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType
             }
             // it will always get an Observable unless we hit the max batch size
             if (response != null) {
+                // Check if we've hit the early execution threshold
+                if (b.shouldExecuteEarly()) {
+                    createNewBatchAndExecutePreviousIfNeeded(b);
+                }
                 return response;
             } else {
                 // this batch can't accept requests so create a new one and set it if another thread doesn't beat us

@@ -44,6 +44,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private final HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser;
     private final int maxBatchSize;
+    private final int earlyExecutionThreshold;
     private final AtomicBoolean batchStarted = new AtomicBoolean();
 
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
@@ -56,6 +57,15 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
         this.maxBatchSize = maxBatchSize;
+        // Calculate early execution threshold based on percentage
+        int thresholdPercentage = properties.earlyExecutionThresholdPercentage().get();
+        if (maxBatchSize == Integer.MAX_VALUE) {
+            // If maxBatchSize is unlimited, disable early execution
+            this.earlyExecutionThreshold = Integer.MAX_VALUE;
+        } else {
+            // Calculate threshold: (maxBatchSize * thresholdPercentage) / 100
+            this.earlyExecutionThreshold = Math.max(1, (maxBatchSize * thresholdPercentage) / 100);
+        }
     }
 
     /**
@@ -285,5 +295,16 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     public int getSize() {
         return argumentMap.size();
+    }
+
+    /**
+     * Check if the batch has reached the early execution threshold.
+     * This enables adaptive batching where batches execute when reaching a percentage
+     * of the max batch size, rather than waiting for the timer or hitting max size.
+     *
+     * @return true if batch size >= early execution threshold
+     */
+    public boolean shouldExecuteEarly() {
+        return argumentMap.size() >= earlyExecutionThreshold;
     }
 }

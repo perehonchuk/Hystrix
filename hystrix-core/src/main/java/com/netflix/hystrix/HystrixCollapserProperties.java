@@ -35,6 +35,7 @@ public abstract class HystrixCollapserProperties {
     private static final Integer default_maxRequestsInBatch = Integer.MAX_VALUE;
     private static final Integer default_timerDelayInMilliseconds = 10;
     private static final Boolean default_requestCacheEnabled = true;
+    private static final Integer default_earlyExecutionThresholdPercentage = 50; // default to 50% of maxBatchSize triggers early execution
     /* package */ static final Integer default_metricsRollingStatisticalWindow = 10000;// default => statisticalWindow: 10000 = 10 seconds (and default of 10 buckets so each bucket is 1 second)
     private static final Integer default_metricsRollingStatisticalWindowBuckets = 10;// default => statisticalWindowBuckets: 10 = 10 buckets in a 10 second window so each bucket is 1 second
     private static final Boolean default_metricsRollingPercentileEnabled = true;
@@ -45,6 +46,7 @@ public abstract class HystrixCollapserProperties {
     private final HystrixProperty<Integer> maxRequestsInBatch;
     private final HystrixProperty<Integer> timerDelayInMilliseconds;
     private final HystrixProperty<Boolean> requestCacheEnabled;
+    private final HystrixProperty<Integer> earlyExecutionThresholdPercentage; // percentage of maxBatchSize that triggers early execution
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowBuckets; // number of buckets in the statisticalWindow
     private final HystrixProperty<Boolean> metricsRollingPercentileEnabled; // Whether monitoring should be enabled
@@ -64,6 +66,7 @@ public abstract class HystrixCollapserProperties {
         this.maxRequestsInBatch = getProperty(propertyPrefix, key, "maxRequestsInBatch", builder.getMaxRequestsInBatch(), default_maxRequestsInBatch);
         this.timerDelayInMilliseconds = getProperty(propertyPrefix, key, "timerDelayInMilliseconds", builder.getTimerDelayInMilliseconds(), default_timerDelayInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
+        this.earlyExecutionThresholdPercentage = getProperty(propertyPrefix, key, "earlyExecutionThresholdPercentage", builder.getEarlyExecutionThresholdPercentage(), default_earlyExecutionThresholdPercentage);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -120,11 +123,25 @@ public abstract class HystrixCollapserProperties {
 
     /**
      * The number of milliseconds between batch executions (unless {@link #maxRequestsInBatch} is hit which will cause a batch to execute early.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> timerDelayInMilliseconds() {
         return timerDelayInMilliseconds;
+    }
+
+    /**
+     * The percentage of {@link #maxRequestsInBatch} at which early execution is triggered.
+     * When the batch size reaches this percentage of the max batch size, the batch will be executed
+     * immediately without waiting for the timer delay. This enables adaptive batching based on load.
+     *
+     * For example, with maxRequestsInBatch=100 and earlyExecutionThresholdPercentage=50,
+     * the batch will execute when 50 requests are queued (or when the timer fires).
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> earlyExecutionThresholdPercentage() {
+        return earlyExecutionThresholdPercentage;
     }
 
     /**
@@ -217,6 +234,7 @@ public abstract class HystrixCollapserProperties {
         private Integer maxRequestsInBatch = null;
         private Integer timerDelayInMilliseconds = null;
         private Boolean requestCacheEnabled = null;
+        private Integer earlyExecutionThresholdPercentage = null;
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Integer metricsRollingPercentileBucketSize = null;
@@ -245,6 +263,10 @@ public abstract class HystrixCollapserProperties {
 
         public Boolean getRequestCacheEnabled() {
             return requestCacheEnabled;
+        }
+
+        public Integer getEarlyExecutionThresholdPercentage() {
+            return earlyExecutionThresholdPercentage;
         }
 
         public Integer getMetricsRollingStatisticalWindowInMilliseconds() {
@@ -295,6 +317,11 @@ public abstract class HystrixCollapserProperties {
             return this;
         }
 
+        public Setter withEarlyExecutionThresholdPercentage(int value) {
+            this.earlyExecutionThresholdPercentage = value;
+            return this;
+        }
+
         public Setter withMetricsRollingStatisticalWindowInMilliseconds(int value) {
             this.metricsRollingStatisticalWindowInMilliseconds = value;
             return this;
@@ -332,7 +359,8 @@ public abstract class HystrixCollapserProperties {
             return new Setter()
                     .withMaxRequestsInBatch(Integer.MAX_VALUE)
                     .withTimerDelayInMilliseconds(10)
-                    .withRequestCacheEnabled(true);
+                    .withRequestCacheEnabled(true)
+                    .withEarlyExecutionThresholdPercentage(50);
         }
 
         /**
