@@ -16,6 +16,7 @@
 package com.netflix.hystrix;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -56,6 +57,11 @@ public interface HystrixCircuitBreaker {
      * Invoked on unsuccessful executions from {@link HystrixCommand} as part of feedback mechanism when in a half-open state.
      */
     void markNonSuccess();
+
+    /**
+     * Invoked when a half-open request completes (either success or failure) to decrement the concurrent request count.
+     */
+    void decrementHalfOpenCount();
 
     /**
      * Invoked at start of command execution to attempt an execution.  This is non-idempotent - it may modify internal
@@ -146,6 +152,7 @@ public interface HystrixCircuitBreaker {
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicInteger halfOpenRequestCount = new AtomicInteger(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -204,6 +211,7 @@ public interface HystrixCircuitBreaker {
         public void markSuccess() {
             if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
                 //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                halfOpenRequestCount.set(0);
                 metrics.resetStream();
                 Subscription previousSubscription = activeSubscription.get();
                 if (previousSubscription != null) {
@@ -219,7 +227,15 @@ public interface HystrixCircuitBreaker {
         public void markNonSuccess() {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
+                halfOpenRequestCount.set(0);
                 circuitOpened.set(System.currentTimeMillis());
+            }
+        }
+
+        @Override
+        public void decrementHalfOpenCount() {
+            if (status.get() == Status.HALF_OPEN) {
+                halfOpenRequestCount.decrementAndGet();
             }
         }
 
@@ -272,12 +288,23 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (isAfterSleepWindow()) {
-                    //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
-                    //if the executing command fails, the status will transition to OPEN
-                    //if the executing command gets unsubscribed, the status will transition to OPEN
+                    // Allow up to maxConcurrentRequests during half-open state
+                    // The first request will transition from OPEN to HALF_OPEN
+                    // Subsequent requests will be allowed if we haven't hit the concurrent limit
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        // First request transitions to HALF_OPEN
+                        halfOpenRequestCount.incrementAndGet();
                         return true;
+                    } else if (status.get() == Status.HALF_OPEN) {
+                        // Already in HALF_OPEN, check if we can allow more concurrent requests
+                        int maxConcurrent = properties.circuitBreakerHalfOpenMaxConcurrentRequests().get();
+                        int currentCount = halfOpenRequestCount.get();
+                        if (currentCount < maxConcurrent) {
+                            halfOpenRequestCount.incrementAndGet();
+                            return true;
+                        } else {
+                            return false;
+                        }
                     } else {
                         return false;
                     }
@@ -312,6 +339,11 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markNonSuccess() {
+
+        }
+
+        @Override
+        public void decrementHalfOpenCount() {
 
         }
 
