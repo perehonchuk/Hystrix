@@ -340,6 +340,18 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getFallbackObservable();
 
     /**
+     * Override to provide validation logic that executes before command execution.
+     * Return a list of validation error messages, or empty list if validation passes.
+     * If non-empty list is returned, command execution is skipped and fallback is invoked.
+     *
+     * @return List of validation error messages, empty if validation succeeds
+     * @since 1.6
+     */
+    protected List<String> getValidationErrors() {
+        return java.util.Collections.emptyList();
+    }
+
+    /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
      * <p>
      * This lazily starts execution of the command once the {@link Observable} is subscribed to.
@@ -519,6 +531,27 @@ import java.util.concurrent.atomic.AtomicReference;
         // mark that we're starting execution on the ExecutionHook
         // if this hook throws an exception, then a fast-fail occurs with no fallback.  No state is left inconsistent
         executionHook.onStart(_cmd);
+
+        /* perform validation before execution */
+        try {
+            executionHook.onValidationStart(_cmd);
+            eventNotifier.markEvent(HystrixEventType.VALIDATION_STARTED, commandKey);
+            executionResult = executionResult.addEvent(HystrixEventType.VALIDATION_STARTED);
+
+            List<String> validationErrors = _cmd.getValidationErrors();
+            if (validationErrors != null && !validationErrors.isEmpty()) {
+                executionHook.onValidationFailed(_cmd, validationErrors);
+                eventNotifier.markEvent(HystrixEventType.VALIDATION_FAILED, commandKey);
+                executionResult = executionResult.addEvent(HystrixEventType.VALIDATION_FAILED);
+                return handleValidationFailureViaFallback(validationErrors);
+            } else {
+                executionHook.onValidationSuccess(_cmd);
+                eventNotifier.markEvent(HystrixEventType.VALIDATION_SUCCESS, commandKey);
+                executionResult = executionResult.addEvent(HystrixEventType.VALIDATION_SUCCESS);
+            }
+        } catch (Throwable validationEx) {
+            logger.warn("Error during validation", validationEx);
+        }
 
         /* determine if we're allowed to execute */
         if (circuitBreaker.attemptExecution()) {
@@ -982,6 +1015,19 @@ import java.util.concurrent.atomic.AtomicReference;
         try {
             return getFallbackOrThrowException(this, HystrixEventType.SHORT_CIRCUITED, FailureType.SHORTCIRCUIT,
                     "short-circuited", shortCircuitException);
+        } catch (Exception e) {
+            return Observable.error(e);
+        }
+    }
+
+    private Observable<R> handleValidationFailureViaFallback(List<String> validationErrors) {
+        // validation failed, go directly to fallback (or throw an exception if no fallback implemented)
+        String errorMessage = "Command validation failed: " + String.join(", ", validationErrors);
+        Exception validationException = new RuntimeException(errorMessage);
+        executionResult = executionResult.setExecutionException(validationException);
+        try {
+            return getFallbackOrThrowException(this, HystrixEventType.VALIDATION_FAILED, FailureType.COMMAND_EXCEPTION,
+                    "validation-failed", validationException);
         } catch (Exception e) {
             return Observable.error(e);
         }
@@ -1996,6 +2042,21 @@ import java.util.concurrent.atomic.AtomicReference;
         @Override
         public <T> void onSuccess(HystrixInvokable<T> commandInstance) {
             actual.onSuccess(commandInstance);
+        }
+
+        @Override
+        public <T> void onValidationStart(HystrixInvokable<T> commandInstance) {
+            actual.onValidationStart(commandInstance);
+        }
+
+        @Override
+        public <T> void onValidationSuccess(HystrixInvokable<T> commandInstance) {
+            actual.onValidationSuccess(commandInstance);
+        }
+
+        @Override
+        public <T> void onValidationFailed(HystrixInvokable<T> commandInstance, List<String> validationErrors) {
+            actual.onValidationFailed(commandInstance, validationErrors);
         }
 
         @Override

@@ -23,6 +23,8 @@ import com.netflix.hystrix.exception.HystrixRuntimeException;
 import com.netflix.hystrix.exception.HystrixRuntimeException.FailureType;
 import com.netflix.hystrix.strategy.HystrixPlugins;
 
+import java.util.List;
+
 /**
  * Abstract ExecutionHook with invocations at different lifecycle points of {@link HystrixCommand}
  * and {@link HystrixObservableCommand} execution with default no-op implementations.
@@ -49,6 +51,40 @@ public abstract class HystrixCommandExecutionHook {
      * @since 1.2
      */
     public <T> void onStart(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when {@link HystrixInvokable} begins validation phase.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6
+     */
+    public <T> void onValidationStart(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when {@link HystrixInvokable} completes validation successfully.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6
+     */
+    public <T> void onValidationSuccess(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when {@link HystrixInvokable} validation fails.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param validationErrors List of validation error messages
+     *
+     * @since 1.6
+     */
+    public <T> void onValidationFailed(HystrixInvokable<T> commandInstance, List<String> validationErrors) {
         //do nothing by default
     }
 
