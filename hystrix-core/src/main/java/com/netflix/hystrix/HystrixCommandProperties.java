@@ -45,7 +45,8 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_circuitBreakerSleepWindowInMilliseconds = 5000;// default => sleepWindow: 5000 = 5 seconds that we will sleep before trying again after tripping the circuit
     private static final Integer default_circuitBreakerErrorThresholdPercentage = 50;// default => errorThresholdPercentage = 50 = if 50%+ of requests in 10 seconds are failures or latent then we will trip the circuit
     private static final Boolean default_circuitBreakerForceOpen = false;// default => forceCircuitOpen = false (we want to allow traffic)
-    /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false 
+    /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false
+    private static final Boolean default_circuitBreakerForceHalfOpen = false;// default => forceHalfOpen = false (allow normal circuit breaker state transitions) 
     private static final Integer default_executionTimeoutInMilliseconds = 1000; // default => executionTimeoutInMilliseconds: 1000 = 1 second
     private static final Boolean default_executionTimeoutEnabled = true;
     private static final ExecutionIsolationStrategy default_executionIsolationStrategy = ExecutionIsolationStrategy.THREAD;
@@ -70,6 +71,7 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> circuitBreakerErrorThresholdPercentage; // % of 'marks' that must be failed to trip the circuit
     private final HystrixProperty<Boolean> circuitBreakerForceOpen; // a property to allow forcing the circuit open (stopping all requests)
     private final HystrixProperty<Boolean> circuitBreakerForceClosed; // a property to allow ignoring errors and therefore never trip 'open' (ie. allow all traffic through)
+    private final HystrixProperty<Boolean> circuitBreakerForceHalfOpen; // a property to allow forcing the circuit into half-open state (allowing limited traffic for testing)
     private final HystrixProperty<ExecutionIsolationStrategy> executionIsolationStrategy; // Whether a command should be executed in a separate thread or not.
     private final HystrixProperty<Integer> executionTimeoutInMilliseconds; // Timeout value in milliseconds for a command
     private final HystrixProperty<Boolean> executionTimeoutEnabled; //Whether timeout should be triggered
@@ -118,6 +120,7 @@ public abstract class HystrixCommandProperties {
         this.circuitBreakerErrorThresholdPercentage = getProperty(propertyPrefix, key, "circuitBreaker.errorThresholdPercentage", builder.getCircuitBreakerErrorThresholdPercentage(), default_circuitBreakerErrorThresholdPercentage);
         this.circuitBreakerForceOpen = getProperty(propertyPrefix, key, "circuitBreaker.forceOpen", builder.getCircuitBreakerForceOpen(), default_circuitBreakerForceOpen);
         this.circuitBreakerForceClosed = getProperty(propertyPrefix, key, "circuitBreaker.forceClosed", builder.getCircuitBreakerForceClosed(), default_circuitBreakerForceClosed);
+        this.circuitBreakerForceHalfOpen = getProperty(propertyPrefix, key, "circuitBreaker.forceHalfOpen", builder.getCircuitBreakerForceHalfOpen(), default_circuitBreakerForceHalfOpen);
         this.executionIsolationStrategy = getProperty(propertyPrefix, key, "execution.isolation.strategy", builder.getExecutionIsolationStrategy(), default_executionIsolationStrategy);
         //this property name is now misleading.  //TODO figure out a good way to deprecate this property name
         this.executionTimeoutInMilliseconds = getProperty(propertyPrefix, key, "execution.isolation.thread.timeoutInMilliseconds", builder.getExecutionIsolationThreadTimeoutInMilliseconds(), default_executionTimeoutInMilliseconds);
@@ -181,11 +184,25 @@ public abstract class HystrixCommandProperties {
      * If true the {@link HystrixCircuitBreaker#allowRequest()} will always return false, causing the circuit to be open (tripped) and reject all requests.
      * <p>
      * This property takes precedence over {@link #circuitBreakerForceClosed()};
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> circuitBreakerForceOpen() {
         return circuitBreakerForceOpen;
+    }
+
+    /**
+     * If true the {@link HystrixCircuitBreaker} will be forced into a half-open state, allowing a limited number of requests through for testing.
+     * <p>
+     * This is useful for controlled testing of recovering services. Unlike the automatic half-open state that occurs after the sleep window,
+     * this allows operators to manually control when to start testing a potentially recovering downstream service.
+     * <p>
+     * The {@link #circuitBreakerForceOpen()} property takes precedence over this property.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> circuitBreakerForceHalfOpen() {
+        return circuitBreakerForceHalfOpen;
     }
 
     /**
@@ -540,6 +557,7 @@ public abstract class HystrixCommandProperties {
         private Integer circuitBreakerErrorThresholdPercentage = null;
         private Boolean circuitBreakerForceClosed = null;
         private Boolean circuitBreakerForceOpen = null;
+        private Boolean circuitBreakerForceHalfOpen = null;
         private Integer circuitBreakerRequestVolumeThreshold = null;
         private Integer circuitBreakerSleepWindowInMilliseconds = null;
         private Integer executionIsolationSemaphoreMaxConcurrentRequests = null;
@@ -578,6 +596,10 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getCircuitBreakerForceOpen() {
             return circuitBreakerForceOpen;
+        }
+
+        public Boolean getCircuitBreakerForceHalfOpen() {
+            return circuitBreakerForceHalfOpen;
         }
 
         public Integer getCircuitBreakerRequestVolumeThreshold() {
@@ -681,6 +703,11 @@ public abstract class HystrixCommandProperties {
 
         public Setter withCircuitBreakerForceOpen(boolean value) {
             this.circuitBreakerForceOpen = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerForceHalfOpen(boolean value) {
+            this.circuitBreakerForceHalfOpen = value;
             return this;
         }
 

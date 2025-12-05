@@ -140,7 +140,7 @@ public interface HystrixCircuitBreaker {
         private final HystrixCommandMetrics metrics;
 
         enum Status {
-            CLOSED, OPEN, HALF_OPEN;
+            CLOSED, OPEN, HALF_OPEN, FORCED_HALF_OPEN;
         }
 
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
@@ -213,12 +213,29 @@ public interface HystrixCircuitBreaker {
                 activeSubscription.set(newSubscription);
                 circuitOpened.set(-1L);
             }
+            // Handle forced half-open state success
+            if (status.compareAndSet(Status.FORCED_HALF_OPEN, Status.CLOSED)) {
+                //Successful execution in forced half-open transitions to CLOSED
+                metrics.resetStream();
+                Subscription previousSubscription = activeSubscription.get();
+                if (previousSubscription != null) {
+                    previousSubscription.unsubscribe();
+                }
+                Subscription newSubscription = subscribeToStream();
+                activeSubscription.set(newSubscription);
+                circuitOpened.set(-1L);
+            }
         }
 
         @Override
         public void markNonSuccess() {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
+                circuitOpened.set(System.currentTimeMillis());
+            }
+            // Handle forced half-open state failure
+            if (status.compareAndSet(Status.FORCED_HALF_OPEN, Status.OPEN)) {
+                //Failed execution in forced half-open transitions to OPEN
                 circuitOpened.set(System.currentTimeMillis());
             }
         }
@@ -231,6 +248,9 @@ public interface HystrixCircuitBreaker {
             if (properties.circuitBreakerForceClosed().get()) {
                 return false;
             }
+            if (properties.circuitBreakerForceHalfOpen().get()) {
+                return false; // half-open is not fully open
+            }
             return circuitOpened.get() >= 0;
         }
 
@@ -241,6 +261,11 @@ public interface HystrixCircuitBreaker {
             }
             if (properties.circuitBreakerForceClosed().get()) {
                 return true;
+            }
+            if (properties.circuitBreakerForceHalfOpen().get()) {
+                // In forced half-open state, behave like natural half-open:
+                // allow requests only if not already in progress
+                return !status.get().equals(Status.FORCED_HALF_OPEN);
             }
             if (circuitOpened.get() == -1) {
                 return true;
@@ -267,6 +292,19 @@ public interface HystrixCircuitBreaker {
             }
             if (properties.circuitBreakerForceClosed().get()) {
                 return true;
+            }
+            if (properties.circuitBreakerForceHalfOpen().get()) {
+                // Forced half-open: allow one request at a time for testing
+                // Try to transition from any state to FORCED_HALF_OPEN
+                Status currentStatus = status.get();
+                if (currentStatus == Status.FORCED_HALF_OPEN) {
+                    return false; // Already have a request in flight
+                }
+                // Allow transition from any state to FORCED_HALF_OPEN
+                if (status.compareAndSet(currentStatus, Status.FORCED_HALF_OPEN)) {
+                    return true;
+                }
+                return false;
             }
             if (circuitOpened.get() == -1) {
                 return true;
