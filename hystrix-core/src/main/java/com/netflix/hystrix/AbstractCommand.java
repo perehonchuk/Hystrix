@@ -520,7 +520,37 @@ import java.util.concurrent.atomic.AtomicReference;
         // if this hook throws an exception, then a fast-fail occurs with no fallback.  No state is left inconsistent
         executionHook.onStart(_cmd);
 
+        /* check if fallback-first execution is enabled */
+        if (properties.fallbackPriority().get() && properties.fallbackEnabled().get()) {
+            // Mark that we're using fallback-priority mode
+            executionResult = executionResult.addEvent(HystrixEventType.FALLBACK_PRIORITY);
+            eventNotifier.markEvent(HystrixEventType.FALLBACK_PRIORITY, commandKey);
+
+            // Try fallback first. If fallback succeeds, skip main command execution entirely
+            return getFallbackOrThrowException(_cmd, HystrixEventType.FALLBACK_SUCCESS, FailureType.COMMAND_EXCEPTION,
+                    "Fallback-priority mode: executing fallback first", new RuntimeException("Fallback-priority mode"))
+                    .doOnNext(new Action1<R>() {
+                        @Override
+                        public void call(R r) {
+                            // Mark that fallback succeeded and command execution was skipped
+                            executionResult = executionResult.addEvent(HystrixEventType.FALLBACK_SUCCESS);
+                            executionResult = executionResult.setExecutionOccurred();
+                        }
+                    })
+                    .onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                        @Override
+                        public Observable<R> call(Throwable fallbackError) {
+                            // Fallback failed, proceed with normal command execution
+                            return executeNormalFlow(_cmd);
+                        }
+                    });
+        }
+
         /* determine if we're allowed to execute */
+        return executeNormalFlow(_cmd);
+    }
+
+    private Observable<R> executeNormalFlow(final AbstractCommand<R> _cmd) {
         if (circuitBreaker.attemptExecution()) {
             final TryableSemaphore executionSemaphore = getExecutionSemaphore();
             final AtomicBoolean semaphoreHasBeenReleased = new AtomicBoolean(false);
