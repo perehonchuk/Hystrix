@@ -990,8 +990,40 @@ import java.util.concurrent.atomic.AtomicReference;
     private Observable<R> handleThreadPoolRejectionViaFallback(Exception underlying) {
         eventNotifier.markEvent(HystrixEventType.THREAD_POOL_REJECTED, commandKey);
         threadPool.markThreadRejection();
+
+        // If queue rejection semaphore fallback is enabled, attempt to execute with semaphore isolation
+        if (properties.queueRejectionSemaphoreFallbackEnabled().get()) {
+            if (executionSemaphore.tryAcquire()) {
+                try {
+                    // Mark that we're attempting degraded execution on calling thread
+                    eventNotifier.markEvent(HystrixEventType.QUEUE_REJECTION_SEMAPHORE_EXECUTION, commandKey);
+                    executionResult = executionResult.addEvent(HystrixEventType.QUEUE_REJECTION_SEMAPHORE_EXECUTION);
+                    return executeCommandViaSemaphore();
+                } catch (Exception e) {
+                    // If semaphore execution also fails, proceed to fallback
+                    return getFallbackOrThrowException(this, HystrixEventType.THREAD_POOL_REJECTED, FailureType.REJECTED_THREAD_EXECUTION, "could not be queued for execution and semaphore execution failed", e);
+                } finally {
+                    executionSemaphore.release();
+                }
+            }
+        }
+
         // use a fallback instead (or throw exception if not implemented)
         return getFallbackOrThrowException(this, HystrixEventType.THREAD_POOL_REJECTED, FailureType.REJECTED_THREAD_EXECUTION, "could not be queued for execution", underlying);
+    }
+
+    private Observable<R> executeCommandViaSemaphore() {
+        // Execute the command on the calling thread (semaphore isolation)
+        return Observable.defer(new Func0<Observable<R>>() {
+            @Override
+            public Observable<R> call() {
+                try {
+                    return Observable.just(run());
+                } catch (Exception e) {
+                    return Observable.error(e);
+                }
+            }
+        });
     }
 
     private Observable<R> handleTimeoutViaFallback() {

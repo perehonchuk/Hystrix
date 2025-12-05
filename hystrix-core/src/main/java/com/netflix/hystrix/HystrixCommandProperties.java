@@ -62,6 +62,7 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Boolean default_queueRejectionSemaphoreFallbackEnabled = true; // default => when thread pool queue rejects, attempt semaphore execution before invoking fallback
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +89,7 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> queueRejectionSemaphoreFallbackEnabled; // Whether to attempt semaphore execution when thread pool queue rejects
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -136,6 +138,7 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.queueRejectionSemaphoreFallbackEnabled = getProperty(propertyPrefix, key, "queueRejectionSemaphoreFallback.enabled", builder.getQueueRejectionSemaphoreFallbackEnabled(), default_queueRejectionSemaphoreFallbackEnabled);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -419,11 +422,22 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
         return requestLogEnabled;
+    }
+
+    /**
+     * Whether thread pool queue rejections should attempt semaphore execution before invoking fallback.
+     * When enabled, if a command is rejected due to the thread pool queue being full, it will attempt
+     * to execute on the calling thread using semaphore isolation before falling back to the fallback method.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> queueRejectionSemaphoreFallbackEnabled() {
+        return queueRejectionSemaphoreFallbackEnabled;
     }
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
@@ -560,6 +574,7 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Boolean queueRejectionSemaphoreFallbackEnabled = null;
 
         /* package */ Setter() {
         }
@@ -662,6 +677,10 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Boolean getQueueRejectionSemaphoreFallbackEnabled() {
+            return queueRejectionSemaphoreFallbackEnabled;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -785,6 +804,11 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withQueueRejectionSemaphoreFallbackEnabled(boolean value) {
+            this.queueRejectionSemaphoreFallbackEnabled = value;
             return this;
         }
     }
