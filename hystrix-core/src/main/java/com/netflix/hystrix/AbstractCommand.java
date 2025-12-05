@@ -340,6 +340,16 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getFallbackObservable();
 
     /**
+     * Override this method to provide a custom cache TTL in milliseconds.
+     * By default, returns 5000ms (5 seconds).
+     *
+     * @return Time-to-live for cached responses in milliseconds
+     */
+    protected long getCacheTtlInMillis() {
+        return 5000L;
+    }
+
+    /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
      * <p>
      * This lazily starts execution of the command once the {@link Observable} is subscribed to.
@@ -493,7 +503,7 @@ import java.util.concurrent.atomic.AtomicReference;
                 if (requestCacheEnabled && cacheKey != null) {
                     // wrap it for caching
                     HystrixCachedObservable<R> toCache = HystrixCachedObservable.from(hystrixObservable, _cmd);
-                    HystrixCommandResponseFromCache<R> fromCache = (HystrixCommandResponseFromCache<R>) requestCache.putIfAbsent(cacheKey, toCache);
+                    HystrixCommandResponseFromCache<R> fromCache = (HystrixCommandResponseFromCache<R>) requestCache.putIfAbsent(cacheKey, toCache, getCacheTtlInMillis());
                     if (fromCache != null) {
                         // another thread beat us so we'll use the cached value instead
                         toCache.unsubscribe();

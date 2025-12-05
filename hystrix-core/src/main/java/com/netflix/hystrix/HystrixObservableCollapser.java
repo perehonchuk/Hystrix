@@ -301,6 +301,16 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
     public abstract RequestArgumentType getRequestArgument();
 
     /**
+     * Override this method to provide a custom cache TTL in milliseconds for collapser responses.
+     * By default, returns 5000ms (5 seconds).
+     *
+     * @return Time-to-live for cached collapser responses in milliseconds
+     */
+    protected long getCollapserCacheTtlInMillis() {
+        return 5000L;
+    }
+
+    /**
      * Factory method to create a new {@link HystrixObservableCommand}{@code <BatchReturnType>} command object each time a batch needs to be executed.
      * <p>
      * Do not return the same instance each time. Return a new instance on each invocation.
@@ -310,7 +320,7 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      * If a batch or requests needs to be split (sharded) into multiple commands, see {@link #shardRequests} <p>
      * IMPLEMENTATION NOTE: Be fast (ie. <1ms) in this method otherwise it can block the Timer from executing subsequent batches. Do not do any processing beyond constructing the command and returning
      * it.
-     * 
+     *
      * @param requests
      *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects containing the arguments of each request collapsed in this batch.
      * @return {@link HystrixObservableCommand}{@code <BatchReturnType>} which when executed will retrieve results for the batch of arguments as found in the Collection of {@link CollapsedRequest}
@@ -468,7 +478,7 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
                      * then only the winning 'put' will be invoked to actually call 'submitRequest'
                      */
                     HystrixCachedObservable<ResponseType> toCache = HystrixCachedObservable.from(response);
-                    HystrixCachedObservable<ResponseType> fromCache = requestCache.putIfAbsent(getCacheKey(), toCache);
+                    HystrixCachedObservable<ResponseType> fromCache = requestCache.putIfAbsent(getCacheKey(), toCache, getCollapserCacheTtlInMillis());
                     if (fromCache == null) {
                         return toCache.toObservable();
                     } else {
