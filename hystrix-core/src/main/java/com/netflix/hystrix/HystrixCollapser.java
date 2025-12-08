@@ -227,10 +227,23 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * Typically this means to take the argument(s) provided to the constructor and return it here.
      * <p>
      * If there are multiple arguments that need to be bundled, create a single object to contain them, or use a Tuple.
-     * 
+     *
      * @return RequestArgumentType
      */
     public abstract RequestArgumentType getRequestArgument();
+
+    /**
+     * The priority of this request for priority-based collapsing.
+     * Higher priority values are executed before lower priority values.
+     * Default priority is 0.
+     * <p>
+     * Override this method to provide custom priority values for different requests.
+     *
+     * @return int priority value (default 0)
+     */
+    protected int getRequestPriority() {
+        return 0;
+    }
 
     /**
      * Factory method to create a new {@link HystrixCommand}{@code <BatchReturnType>} command object each time a batch needs to be executed.
@@ -395,7 +408,7 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
                 }
 
                 RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType> requestCollapser = collapserFactory.getRequestCollapser(collapserInstanceWrapper);
-                Observable<ResponseType> response = requestCollapser.submitRequest(getRequestArgument());
+                Observable<ResponseType> response = requestCollapser.submitRequest(getRequestArgument(), getRequestPriority());
 
                 if (isRequestCacheEnabled && cacheKey != null) {
                     HystrixCachedObservable<ResponseType> toCache = HystrixCachedObservable.from(response);
@@ -504,10 +517,19 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
     public interface CollapsedRequest<ResponseType, RequestArgumentType> {
         /**
          * The request argument passed into the {@link HystrixCollapser} instance constructor which was then collapsed.
-         * 
+         *
          * @return RequestArgumentType
          */
         RequestArgumentType getArgument();
+
+        /**
+         * The priority of this request for priority-based collapsing.
+         * Higher priority values are executed before lower priority values.
+         * Default priority is 0.
+         *
+         * @return int priority value
+         */
+        int getPriority();
 
         /**
          * This corresponds in a OnNext(Response); OnCompleted pair of emissions.  It represents a single-value usecase.

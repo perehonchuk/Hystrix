@@ -15,7 +15,11 @@
  */
 package com.netflix.hystrix.collapser;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -62,6 +66,14 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
      * @return Observable if offer accepted, null if batch is full, already started or completed
      */
     public Observable<ResponseType> offer(RequestArgumentType arg) {
+        return offer(arg, 0);
+    }
+
+    /**
+     * @param priority priority value for this request (higher values = higher priority)
+     * @return Observable if offer accepted, null if batch is full, already started or completed
+     */
+    public Observable<ResponseType> offer(RequestArgumentType arg, int priority) {
         /* short-cut - if the batch is started we reject the offer */
         if (batchStarted.get()) {
             return null;
@@ -81,7 +93,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     return null;
                 } else {
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
-                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
+                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this, priority);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
                     /**
                      * If the argument already exists in the batch, then there are 2 options:
@@ -163,9 +175,19 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
+                // Sort requests by priority (highest priority first) before sharding
+                List<CollapsedRequest<ResponseType, RequestArgumentType>> sortedRequests = new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>(argumentMap.values());
+                Collections.sort(sortedRequests, new Comparator<CollapsedRequest<ResponseType, RequestArgumentType>>() {
+                    @Override
+                    public int compare(CollapsedRequest<ResponseType, RequestArgumentType> r1, CollapsedRequest<ResponseType, RequestArgumentType> r2) {
+                        // Sort in descending order (higher priority first)
+                        return Integer.compare(r2.getPriority(), r1.getPriority());
+                    }
+                });
+
                 // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(sortedRequests);
+                // for each shard execute its requests
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests
