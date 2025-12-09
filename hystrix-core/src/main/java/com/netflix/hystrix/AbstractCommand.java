@@ -53,6 +53,7 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -1025,14 +1026,80 @@ import java.util.concurrent.atomic.AtomicReference;
         /**
          * All other error handling
          */
-        logger.debug("Error executing HystrixCommand.run(). Proceeding to fallback logic ...", underlying);
+        logger.debug("Error executing HystrixCommand.run(). Checking for retry or fallback logic ...", underlying);
 
         // report failure
         eventNotifier.markEvent(HystrixEventType.FAILURE, commandKey);
 
         // record the exception
         executionResult = executionResult.setException(underlying);
+
+        // Check if retry is enabled and we haven't exhausted attempts
+        if (properties.retryEnabled().get()) {
+            return handleFailureViaRetryOrFallback(underlying);
+        }
+
         return getFallbackOrThrowException(this, HystrixEventType.FAILURE, FailureType.COMMAND_EXCEPTION, "failed", underlying);
+    }
+
+    private Observable<R> handleFailureViaRetryOrFallback(final Exception originalException) {
+        final int maxAttempts = properties.retryMaxAttempts().get();
+        final int retryDelay = properties.retryDelayInMilliseconds().get();
+
+        return Observable.defer(new Func0<Observable<R>>() {
+            private int attemptCount = 0;
+
+            @Override
+            public Observable<R> call() {
+                if (attemptCount >= maxAttempts) {
+                    // Exhausted retries, proceed to fallback
+                    logger.debug("Retry attempts exhausted. Proceeding to fallback logic ...");
+                    eventNotifier.markEvent(HystrixEventType.RETRY_EXHAUSTED, commandKey);
+                    executionResult = executionResult.addEvent(HystrixEventType.RETRY_EXHAUSTED);
+                    return getFallbackOrThrowException(AbstractCommand.this, HystrixEventType.FAILURE, FailureType.COMMAND_EXCEPTION, "failed after retries", originalException);
+                }
+
+                attemptCount++;
+                logger.debug("Attempting retry " + attemptCount + " of " + maxAttempts);
+                eventNotifier.markEvent(HystrixEventType.RETRY_ATTEMPTED, commandKey);
+                executionResult = executionResult.addEvent(HystrixEventType.RETRY_ATTEMPTED);
+
+                // Add delay before retry
+                Observable<R> retryObservable = Observable.timer(retryDelay, TimeUnit.MILLISECONDS)
+                    .flatMap(new Func1<Long, Observable<R>>() {
+                        @Override
+                        public Observable<R> call(Long aLong) {
+                            // Re-execute the command
+                            return getUserExecutionObservable(AbstractCommand.this);
+                        }
+                    });
+
+                // Handle retry success or failure
+                return retryObservable.onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                    @Override
+                    public Observable<R> call(Throwable throwable) {
+                        if (attemptCount < maxAttempts) {
+                            // Try again
+                            return handleFailureViaRetryOrFallback(originalException);
+                        } else {
+                            // Exhausted retries
+                            logger.debug("Retry attempts exhausted after error. Proceeding to fallback logic ...");
+                            eventNotifier.markEvent(HystrixEventType.RETRY_EXHAUSTED, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.RETRY_EXHAUSTED);
+                            return getFallbackOrThrowException(AbstractCommand.this, HystrixEventType.FAILURE, FailureType.COMMAND_EXCEPTION, "failed after retries", originalException);
+                        }
+                    }
+                }).doOnNext(new Action1<R>() {
+                    @Override
+                    public void call(R r) {
+                        // Retry succeeded
+                        logger.debug("Retry attempt " + attemptCount + " succeeded");
+                        eventNotifier.markEvent(HystrixEventType.RETRY_SUCCESS, commandKey);
+                        executionResult = executionResult.addEvent(HystrixEventType.RETRY_SUCCESS);
+                    }
+                });
+            }
+        });
     }
 
     private Observable<R> handleFallbackRejectionByEmittingError() {
