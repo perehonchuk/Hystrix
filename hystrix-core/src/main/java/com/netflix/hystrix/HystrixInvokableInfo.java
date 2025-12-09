@@ -72,4 +72,15 @@ public interface HystrixInvokableInfo<R> {
     long getCommandRunStartTimeInNanos();
 
     ExecutionResult.EventCounts getEventCounts();
+
+    /**
+     * Returns the current depth of the fallback chain for this command execution.
+     * <p>
+     * This is useful for monitoring and debugging fallback chains, especially when
+     * implementing complex fallback logic involving nested HystrixCommands.
+     *
+     * @return the current fallback chain depth (0 means no fallback chain)
+     * @since 1.6.0
+     */
+    int getCurrentFallbackChainDepth();
 }

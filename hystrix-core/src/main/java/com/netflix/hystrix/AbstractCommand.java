@@ -92,6 +92,13 @@ import java.util.concurrent.atomic.AtomicReference;
     protected final TryableSemaphore fallbackSemaphoreOverride;
     /* each circuit has a semaphore to restrict concurrent fallback execution */
     protected static final ConcurrentHashMap<String, TryableSemaphore> fallbackSemaphorePerCircuit = new ConcurrentHashMap<String, TryableSemaphore>();
+    /* Fallback chain depth tracking to prevent infinite loops */
+    protected static final ThreadLocal<Integer> fallbackChainDepth = new ThreadLocal<Integer>() {
+        @Override
+        protected Integer initialValue() {
+            return 0;
+        }
+    };
     /* END FALLBACK Semaphore */
 
     /* EXECUTION Semaphore */
@@ -776,6 +783,15 @@ import java.util.concurrent.atomic.AtomicReference;
             if (properties.fallbackEnabled().get()) {
                 /* fallback behavior is permitted so attempt */
 
+                // Check fallback chain depth to prevent infinite loops
+                final int currentDepth = fallbackChainDepth.get();
+                final int maxDepth = properties.fallbackMaxChainDepth().get();
+                if (currentDepth >= maxDepth) {
+                    logger.warn("Fallback chain depth limit reached (" + currentDepth + " >= " + maxDepth + "). Rejecting fallback to prevent infinite loop.");
+                    Exception e = wrapWithOnErrorHook(failureType, originalException);
+                    return Observable.error(new HystrixRuntimeException(failureType, this.getClass(), getLogMessagePrefix() + " " + message + " and fallback chain depth limit exceeded.", e, null));
+                }
+
                 final Action1<Notification<? super R>> setRequestContext = new Action1<Notification<? super R>>() {
                     @Override
                     public void call(Notification<? super R> rNotification) {
@@ -851,6 +867,9 @@ import java.util.concurrent.atomic.AtomicReference;
                 // acquire a permit
                 if (fallbackSemaphore.tryAcquire()) {
                     try {
+                        // Increment fallback chain depth before executing fallback
+                        fallbackChainDepth.set(currentDepth + 1);
+
                         if (isFallbackUserDefined()) {
                             executionHook.onFallbackStart(this);
                             fallbackExecutionChain = getFallbackObservable();
@@ -863,6 +882,14 @@ import java.util.concurrent.atomic.AtomicReference;
                         fallbackExecutionChain = Observable.error(ex);
                     }
 
+                    // Action to decrement depth counter when fallback completes
+                    final Action0 decrementDepth = new Action0() {
+                        @Override
+                        public void call() {
+                            fallbackChainDepth.set(currentDepth);
+                        }
+                    };
+
                     return fallbackExecutionChain
                             .doOnEach(setRequestContext)
                             .lift(new FallbackHookApplication(_cmd))
@@ -871,7 +898,9 @@ import java.util.concurrent.atomic.AtomicReference;
                             .doOnCompleted(markFallbackCompleted)
                             .onErrorResumeNext(handleFallbackError)
                             .doOnTerminate(singleSemaphoreRelease)
-                            .doOnUnsubscribe(singleSemaphoreRelease);
+                            .doOnTerminate(decrementDepth)
+                            .doOnUnsubscribe(singleSemaphoreRelease)
+                            .doOnUnsubscribe(decrementDepth);
                 } else {
                    return handleFallbackRejectionByEmittingError();
                 }
@@ -1967,6 +1996,11 @@ import java.util.concurrent.atomic.AtomicReference;
     @Override
     public ExecutionResult.EventCounts getEventCounts() {
         return getCommandResult().getEventCounts();
+    }
+
+    @Override
+    public int getCurrentFallbackChainDepth() {
+        return fallbackChainDepth.get();
     }
 
     protected Exception getExceptionFromThrowable(Throwable t) {

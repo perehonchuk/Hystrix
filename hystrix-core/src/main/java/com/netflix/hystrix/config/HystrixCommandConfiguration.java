@@ -53,6 +53,7 @@ public class HystrixCommandConfiguration {
                 commandProperties.executionTimeoutInMilliseconds().get(),
                 commandProperties.fallbackEnabled().get(),
                 commandProperties.fallbackIsolationSemaphoreMaxConcurrentRequests().get(),
+                commandProperties.fallbackMaxChainDepth().get(),
                 commandProperties.requestCacheEnabled().get(),
                 commandProperties.requestLogEnabled().get()
         );
@@ -151,13 +152,14 @@ public class HystrixCommandConfiguration {
         private final int timeoutInMilliseconds;
         private final boolean fallbackEnabled;
         private final int fallbackMaxConcurrentRequest;
+        private final int fallbackMaxChainDepth;
         private final boolean requestCacheEnabled;
         private final boolean requestLogEnabled;
 
         public HystrixCommandExecutionConfig(int semaphoreMaxConcurrentRequests, HystrixCommandProperties.ExecutionIsolationStrategy isolationStrategy,
                                              boolean threadInterruptOnTimeout, String threadPoolKeyOverride, boolean timeoutEnabled,
                                              int timeoutInMilliseconds, boolean fallbackEnabled, int fallbackMaxConcurrentRequests,
-                                             boolean requestCacheEnabled, boolean requestLogEnabled) {
+                                             int fallbackMaxChainDepth, boolean requestCacheEnabled, boolean requestLogEnabled) {
             this.semaphoreMaxConcurrentRequests = semaphoreMaxConcurrentRequests;
             this.isolationStrategy = isolationStrategy;
             this.threadInterruptOnTimeout = threadInterruptOnTimeout;
@@ -166,6 +168,7 @@ public class HystrixCommandConfiguration {
             this.timeoutInMilliseconds = timeoutInMilliseconds;
             this.fallbackEnabled = fallbackEnabled;
             this.fallbackMaxConcurrentRequest = fallbackMaxConcurrentRequests;
+            this.fallbackMaxChainDepth = fallbackMaxChainDepth;
             this.requestCacheEnabled = requestCacheEnabled;
             this.requestLogEnabled = requestLogEnabled;
 
@@ -197,6 +200,10 @@ public class HystrixCommandConfiguration {
 
         public boolean isFallbackEnabled() {
             return fallbackEnabled;
+        }
+
+        public int getFallbackMaxChainDepth() {
+            return fallbackMaxChainDepth;
         }
 
         public int getFallbackMaxConcurrentRequest() {

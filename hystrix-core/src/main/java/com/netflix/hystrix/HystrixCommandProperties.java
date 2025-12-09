@@ -55,6 +55,7 @@ public abstract class HystrixCommandProperties {
     private static final Boolean default_requestCacheEnabled = true;
     private static final Integer default_fallbackIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_fallbackEnabled = true;
+    private static final Integer default_fallbackMaxChainDepth = 3; // default max depth of fallback chains to prevent infinite loops
     private static final Integer default_executionIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_requestLogEnabled = true;
     private static final Boolean default_circuitBreakerEnabled = true;
@@ -77,6 +78,7 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> executionIsolationSemaphoreMaxConcurrentRequests; // Number of permits for execution semaphore
     private final HystrixProperty<Integer> fallbackIsolationSemaphoreMaxConcurrentRequests; // Number of permits for fallback semaphore
     private final HystrixProperty<Boolean> fallbackEnabled; // Whether fallback should be attempted.
+    private final HystrixProperty<Integer> fallbackMaxChainDepth; // Maximum depth of fallback command chains to prevent infinite loops
     private final HystrixProperty<Boolean> executionIsolationThreadInterruptOnTimeout; // Whether an underlying Future/Thread (when runInSeparateThread == true) should be interrupted after a timeout
     private final HystrixProperty<Boolean> executionIsolationThreadInterruptOnFutureCancel; // Whether canceling an underlying Future/Thread (when runInSeparateThread == true) should interrupt the execution thread
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
@@ -127,6 +129,7 @@ public abstract class HystrixCommandProperties {
         this.executionIsolationSemaphoreMaxConcurrentRequests = getProperty(propertyPrefix, key, "execution.isolation.semaphore.maxConcurrentRequests", builder.getExecutionIsolationSemaphoreMaxConcurrentRequests(), default_executionIsolationSemaphoreMaxConcurrentRequests);
         this.fallbackIsolationSemaphoreMaxConcurrentRequests = getProperty(propertyPrefix, key, "fallback.isolation.semaphore.maxConcurrentRequests", builder.getFallbackIsolationSemaphoreMaxConcurrentRequests(), default_fallbackIsolationSemaphoreMaxConcurrentRequests);
         this.fallbackEnabled = getProperty(propertyPrefix, key, "fallback.enabled", builder.getFallbackEnabled(), default_fallbackEnabled);
+        this.fallbackMaxChainDepth = getProperty(propertyPrefix, key, "fallback.maxChainDepth", builder.getFallbackMaxChainDepth(), default_fallbackMaxChainDepth);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -331,6 +334,23 @@ public abstract class HystrixCommandProperties {
      */
     public HystrixProperty<Boolean> fallbackEnabled() {
         return fallbackEnabled;
+    }
+
+    /**
+     * Maximum depth of fallback command chains allowed to prevent infinite fallback loops.
+     * <p>
+     * When a fallback is implemented using another HystrixCommand, and that command has its own fallback,
+     * and so on, this property limits how deep the chain can go. Once the limit is reached, no further
+     * fallbacks will be attempted and the command will fail with HystrixRuntimeException.
+     * <p>
+     * Default value is 3.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     *
+     * @since 1.6.0
+     */
+    public HystrixProperty<Integer> fallbackMaxChainDepth() {
+        return fallbackMaxChainDepth;
     }
 
     /**
@@ -550,6 +570,7 @@ public abstract class HystrixCommandProperties {
         private Boolean executionTimeoutEnabled = null;
         private Integer fallbackIsolationSemaphoreMaxConcurrentRequests = null;
         private Boolean fallbackEnabled = null;
+        private Integer fallbackMaxChainDepth = null;
         private Integer metricsHealthSnapshotIntervalInMilliseconds = null;
         private Integer metricsRollingPercentileBucketSize = null;
         private Boolean metricsRollingPercentileEnabled = null;
@@ -626,6 +647,10 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getFallbackEnabled() {
             return fallbackEnabled;
+        }
+
+        public Integer getFallbackMaxChainDepth() {
+            return fallbackMaxChainDepth;
         }
 
         public Integer getMetricsHealthSnapshotIntervalInMilliseconds() {
@@ -740,6 +765,11 @@ public abstract class HystrixCommandProperties {
 
         public Setter withFallbackEnabled(boolean value) {
             this.fallbackEnabled = value;
+            return this;
+        }
+
+        public Setter withFallbackMaxChainDepth(int value) {
+            this.fallbackMaxChainDepth = value;
             return this;
         }
 
