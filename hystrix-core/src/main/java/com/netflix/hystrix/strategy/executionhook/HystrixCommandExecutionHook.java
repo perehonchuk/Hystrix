@@ -228,6 +228,50 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked when the command is short-circuited due to the circuit breaker being OPEN.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onShortCircuit(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the command is rejected by the thread pool.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onThreadPoolRejection(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the command is rejected by the semaphore.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onSemaphoreRejection(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when a timeout occurs during command execution.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onTimeout(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
      * DEPRECATED: Change usages of this to {@link #onExecutionStart}.
      *
      * Invoked before {@link HystrixCommand#run()} is about to be executed.
