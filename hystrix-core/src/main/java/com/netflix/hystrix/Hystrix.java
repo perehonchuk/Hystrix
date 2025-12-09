@@ -87,17 +87,41 @@ public class Hystrix {
     };
 
     /**
+     * Register a circuit breaker listener for a specific command.
+     * <p>
+     * The listener will receive notifications when the circuit breaker for the specified command
+     * transitions between states (CLOSED, OPEN, HALF_OPEN).
+     *
+     * @param commandKey The command key to monitor
+     * @param listener The listener to register
+     */
+    public static void registerCircuitBreakerListener(HystrixCommandKey commandKey, HystrixCircuitBreakerListener listener) {
+        HystrixCircuitBreaker.Factory.registerListener(commandKey, listener);
+    }
+
+    /**
+     * Unregister a previously registered circuit breaker listener.
+     *
+     * @param commandKey The command key
+     * @param listener The listener to unregister
+     * @return true if the listener was removed, false if it was not found
+     */
+    public static boolean unregisterCircuitBreakerListener(HystrixCommandKey commandKey, HystrixCircuitBreakerListener listener) {
+        return HystrixCircuitBreaker.Factory.unregisterListener(commandKey, listener);
+    }
+
+    /**
      * Allows a thread to query whether it's current point of execution is within the scope of a HystrixCommand.
      * <p>
      * When ExecutionIsolationStrategy is THREAD then this applies to the isolation (child/worker) thread not the calling thread.
      * <p>
      * When ExecutionIsolationStrategy is SEMAPHORE this applies to the calling thread.
-     * 
+     *
      * @return HystrixCommandKey of current command being executed or null if none.
      */
     public static HystrixCommandKey getCurrentThreadExecutingCommand() {
         if (currentCommand == null) {
-            // statics do "interesting" things across classloaders apparently so this can somehow be null ... 
+            // statics do "interesting" things across classloaders apparently so this can somehow be null ...
             return null;
         }
         return currentCommand.get().peek();

@@ -18,6 +18,8 @@ package com.netflix.hystrix;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.List;
 
 import com.netflix.hystrix.HystrixCommandMetrics.HealthCounts;
 import rx.Subscriber;
@@ -70,12 +72,13 @@ public interface HystrixCircuitBreaker {
     class Factory {
         // String is HystrixCommandKey.name() (we can't use HystrixCommandKey directly as we can't guarantee it implements hashcode/equals correctly)
         private static ConcurrentHashMap<String, HystrixCircuitBreaker> circuitBreakersByCommand = new ConcurrentHashMap<String, HystrixCircuitBreaker>();
+        private static ConcurrentHashMap<String, CopyOnWriteArrayList<HystrixCircuitBreakerListener>> listenersByCommand = new ConcurrentHashMap<String, CopyOnWriteArrayList<HystrixCircuitBreakerListener>>();
 
         /**
          * Get the {@link HystrixCircuitBreaker} instance for a given {@link HystrixCommandKey}.
          * <p>
          * This is thread-safe and ensures only 1 {@link HystrixCircuitBreaker} per {@link HystrixCommandKey}.
-         * 
+         *
          * @param key
          *            {@link HystrixCommandKey} of {@link HystrixCommand} instance requesting the {@link HystrixCircuitBreaker}
          * @param group
@@ -111,7 +114,7 @@ public interface HystrixCircuitBreaker {
 
         /**
          * Get the {@link HystrixCircuitBreaker} instance for a given {@link HystrixCommandKey} or null if none exists.
-         * 
+         *
          * @param key
          *            {@link HystrixCommandKey} of {@link HystrixCommand} instance requesting the {@link HystrixCircuitBreaker}
          * @return {@link HystrixCircuitBreaker} for {@link HystrixCommandKey}
@@ -121,10 +124,52 @@ public interface HystrixCircuitBreaker {
         }
 
         /**
+         * Register a listener to receive circuit breaker state change notifications for a specific command.
+         *
+         * @param key The command key to listen to
+         * @param listener The listener to register
+         */
+        public static void registerListener(HystrixCommandKey key, HystrixCircuitBreakerListener listener) {
+            String commandName = key.name();
+            listenersByCommand.putIfAbsent(commandName, new CopyOnWriteArrayList<HystrixCircuitBreakerListener>());
+            listenersByCommand.get(commandName).add(listener);
+        }
+
+        /**
+         * Unregister a previously registered listener for a specific command.
+         *
+         * @param key The command key
+         * @param listener The listener to unregister
+         * @return true if the listener was removed, false if it was not found
+         */
+        public static boolean unregisterListener(HystrixCommandKey key, HystrixCircuitBreakerListener listener) {
+            CopyOnWriteArrayList<HystrixCircuitBreakerListener> listeners = listenersByCommand.get(key.name());
+            if (listeners != null) {
+                return listeners.remove(listener);
+            }
+            return false;
+        }
+
+        /**
+         * Get all registered listeners for a specific command.
+         *
+         * @param key The command key
+         * @return List of registered listeners, or empty list if none registered
+         */
+        /* package */ static List<HystrixCircuitBreakerListener> getListeners(HystrixCommandKey key) {
+            CopyOnWriteArrayList<HystrixCircuitBreakerListener> listeners = listenersByCommand.get(key.name());
+            if (listeners != null) {
+                return listeners;
+            }
+            return new CopyOnWriteArrayList<HystrixCircuitBreakerListener>();
+        }
+
+        /**
          * Clears all circuit breakers. If new requests come in instances will be recreated.
          */
         /* package */static void reset() {
             circuitBreakersByCommand.clear();
+            listenersByCommand.clear();
         }
     }
 
@@ -138,6 +183,7 @@ public interface HystrixCircuitBreaker {
     /* package */class HystrixCircuitBreakerImpl implements HystrixCircuitBreaker {
         private final HystrixCommandProperties properties;
         private final HystrixCommandMetrics metrics;
+        private final HystrixCommandKey commandKey;
 
         enum Status {
             CLOSED, OPEN, HALF_OPEN;
@@ -150,10 +196,41 @@ public interface HystrixCircuitBreaker {
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
             this.metrics = metrics;
+            this.commandKey = key;
 
             //On a timer, this will set the circuit between OPEN/CLOSED as command executions occur
             Subscription s = subscribeToStream();
             activeSubscription.set(s);
+        }
+
+        private void notifyListeners(Status fromState, Status toState) {
+            List<HystrixCircuitBreakerListener> listeners = Factory.getListeners(commandKey);
+            if (listeners.isEmpty()) {
+                return;
+            }
+
+            try {
+                if (fromState == Status.CLOSED && toState == Status.OPEN) {
+                    for (HystrixCircuitBreakerListener listener : listeners) {
+                        listener.onCircuitOpened(commandKey);
+                    }
+                } else if (fromState == Status.OPEN && toState == Status.HALF_OPEN) {
+                    for (HystrixCircuitBreakerListener listener : listeners) {
+                        listener.onCircuitHalfOpen(commandKey);
+                    }
+                } else if (fromState == Status.HALF_OPEN && toState == Status.CLOSED) {
+                    for (HystrixCircuitBreakerListener listener : listeners) {
+                        listener.onCircuitClosed(commandKey);
+                    }
+                } else if (fromState == Status.HALF_OPEN && toState == Status.OPEN) {
+                    for (HystrixCircuitBreakerListener listener : listeners) {
+                        listener.onCircuitReopened(commandKey);
+                    }
+                }
+            } catch (Exception e) {
+                // Don't let listener exceptions break circuit breaker functionality
+                // Log but continue
+            }
         }
 
         private Subscription subscribeToStream() {
@@ -193,6 +270,7 @@ public interface HystrixCircuitBreaker {
                                     // our failure rate is too high, we need to set the state to OPEN
                                     if (status.compareAndSet(Status.CLOSED, Status.OPEN)) {
                                         circuitOpened.set(System.currentTimeMillis());
+                                        notifyListeners(Status.CLOSED, Status.OPEN);
                                     }
                                 }
                             }
@@ -212,6 +290,7 @@ public interface HystrixCircuitBreaker {
                 Subscription newSubscription = subscribeToStream();
                 activeSubscription.set(newSubscription);
                 circuitOpened.set(-1L);
+                notifyListeners(Status.HALF_OPEN, Status.CLOSED);
             }
         }
 
@@ -220,6 +299,7 @@ public interface HystrixCircuitBreaker {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+                notifyListeners(Status.HALF_OPEN, Status.OPEN);
             }
         }
 
@@ -277,6 +357,7 @@ public interface HystrixCircuitBreaker {
                     //if the executing command fails, the status will transition to OPEN
                     //if the executing command gets unsubscribed, the status will transition to OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        notifyListeners(Status.OPEN, Status.HALF_OPEN);
                         return true;
                     } else {
                         return false;
