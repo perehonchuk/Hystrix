@@ -15,6 +15,8 @@
  */
 package com.netflix.hystrix.strategy;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
 import java.util.concurrent.atomic.AtomicReference;
@@ -27,6 +29,7 @@ import com.netflix.hystrix.strategy.concurrency.HystrixConcurrencyStrategyDefaul
 import com.netflix.hystrix.strategy.eventnotifier.HystrixEventNotifier;
 import com.netflix.hystrix.strategy.eventnotifier.HystrixEventNotifierDefault;
 import com.netflix.hystrix.strategy.executionhook.HystrixCommandExecutionHook;
+import com.netflix.hystrix.strategy.executionhook.HystrixCommandExecutionHookChain;
 import com.netflix.hystrix.strategy.executionhook.HystrixCommandExecutionHookDefault;
 import com.netflix.hystrix.strategy.metrics.HystrixMetricsPublisher;
 import com.netflix.hystrix.strategy.metrics.HystrixMetricsPublisherDefault;
@@ -61,6 +64,7 @@ public class HystrixPlugins {
     /* package */ final AtomicReference<HystrixMetricsPublisher> metricsPublisher = new AtomicReference<HystrixMetricsPublisher>();
     /* package */ final AtomicReference<HystrixPropertiesStrategy> propertiesFactory = new AtomicReference<HystrixPropertiesStrategy>();
     /* package */ final AtomicReference<HystrixCommandExecutionHook> commandExecutionHook = new AtomicReference<HystrixCommandExecutionHook>();
+    /* package */ final List<HystrixCommandExecutionHook> commandExecutionHooks = new ArrayList<HystrixCommandExecutionHook>();
     private final HystrixDynamicProperties dynamicProperties;
 
     
@@ -112,6 +116,9 @@ public class HystrixPlugins {
         getInstance().metricsPublisher.set(null);
         getInstance().propertiesFactory.set(null);
         getInstance().commandExecutionHook.set(null);
+        synchronized (getInstance().commandExecutionHooks) {
+            getInstance().commandExecutionHooks.clear();
+        }
         HystrixMetricsPublisherFactory.reset();
     }
 
@@ -292,12 +299,24 @@ public class HystrixPlugins {
      * Override default by using {@link #registerCommandExecutionHook(HystrixCommandExecutionHook)} or setting property (via Archaius): <code>hystrix.plugin.HystrixCommandExecutionHook.implementation</code> with the
      * full classname to
      * load.
-     * 
+     * <p>
+     * If multiple hooks have been registered via {@link #addCommandExecutionHook(HystrixCommandExecutionHook)}, this will return a {@link HystrixCommandExecutionHookChain} that executes all hooks in registration order.
+     *
      * @return {@link HystrixCommandExecutionHook} implementation to use
-     * 
+     *
      * @since 1.2
      */
     public HystrixCommandExecutionHook getCommandExecutionHook() {
+        synchronized (commandExecutionHooks) {
+            if (!commandExecutionHooks.isEmpty()) {
+                // Multiple hooks registered, return chain
+                if (commandExecutionHook.get() == null || !(commandExecutionHook.get() instanceof HystrixCommandExecutionHookChain)) {
+                    commandExecutionHook.set(new HystrixCommandExecutionHookChain(commandExecutionHooks));
+                }
+                return commandExecutionHook.get();
+            }
+        }
+
         if (commandExecutionHook.get() == null) {
             // check for an implementation from Archaius first
             Object impl = getPluginImplementation(HystrixCommandExecutionHook.class);
@@ -315,17 +334,45 @@ public class HystrixPlugins {
 
     /**
      * Register a {@link HystrixCommandExecutionHook} implementation as a global override of any injected or default implementations.
-     * 
+     *
      * @param impl
      *            {@link HystrixCommandExecutionHook} implementation
      * @throws IllegalStateException
      *             if called more than once or after the default was initialized (if usage occurs before trying to register)
-     * 
+     *
      * @since 1.2
      */
     public void registerCommandExecutionHook(HystrixCommandExecutionHook impl) {
         if (!commandExecutionHook.compareAndSet(null, impl)) {
             throw new IllegalStateException("Another strategy was already registered.");
+        }
+    }
+
+    /**
+     * Add a {@link HystrixCommandExecutionHook} implementation to the chain of hooks.
+     * Unlike {@link #registerCommandExecutionHook(HystrixCommandExecutionHook)}, this method allows registering
+     * multiple hooks that will be executed in the order they were added.
+     * <p>
+     * All registered hooks are chained together and executed sequentially. For methods that transform values
+     * (like onEmit, onExecutionEmit, etc.), the output of one hook becomes the input to the next hook in the chain.
+     *
+     * @param impl
+     *            {@link HystrixCommandExecutionHook} implementation to add to the chain
+     * @throws IllegalStateException
+     *             if called after a hook has been retrieved via {@link #getCommandExecutionHook()}
+     *
+     * @since 1.6
+     */
+    public void addCommandExecutionHook(HystrixCommandExecutionHook impl) {
+        synchronized (commandExecutionHooks) {
+            if (commandExecutionHook.get() != null && commandExecutionHooks.isEmpty()) {
+                throw new IllegalStateException("Cannot add hook after getCommandExecutionHook() has been called with a single registered hook.");
+            }
+            commandExecutionHooks.add(impl);
+            // Invalidate cached chain to force recreation with new hook
+            if (commandExecutionHook.get() instanceof HystrixCommandExecutionHookChain) {
+                commandExecutionHook.set(null);
+            }
         }
     }
 
