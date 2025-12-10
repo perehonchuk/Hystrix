@@ -163,9 +163,17 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
-                // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
+                // first apply automatic batch size splitting if configured
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> autoShards = autoSplitBatch(argumentMap.values());
+
+                // then apply user-defined sharding logic to each auto-shard
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = new java.util.ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+                for (Collection<CollapsedRequest<ResponseType, RequestArgumentType>> autoShard : autoShards) {
+                    Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> userShards = commandCollapser.shardRequests(autoShard);
+                    shards.addAll(userShards);
+                }
+
+                // for each shard execute its requests
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests
@@ -285,5 +293,40 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     public int getSize() {
         return argumentMap.size();
+    }
+
+    /**
+     * Automatically split a batch into smaller chunks based on the autoShardBatchSize property.
+     * This happens before user-defined sharding logic is applied.
+     */
+    private Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> autoSplitBatch(
+            Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        int autoShardSize = properties.autoShardBatchSize().get();
+
+        // if auto-sharding is disabled (Integer.MAX_VALUE) or batch is already small enough, return as-is
+        if (autoShardSize == Integer.MAX_VALUE || requests.size() <= autoShardSize) {
+            return java.util.Collections.singletonList(requests);
+        }
+
+        // split into multiple chunks
+        java.util.List<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> chunks =
+                new java.util.ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+        java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>> currentChunk =
+                new java.util.ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+
+        for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+            currentChunk.add(request);
+            if (currentChunk.size() >= autoShardSize) {
+                chunks.add(currentChunk);
+                currentChunk = new java.util.ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+            }
+        }
+
+        // add remaining requests
+        if (!currentChunk.isEmpty()) {
+            chunks.add(currentChunk);
+        }
+
+        return chunks;
     }
 }
