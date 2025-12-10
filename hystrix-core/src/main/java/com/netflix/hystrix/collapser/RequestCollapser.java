@@ -68,13 +68,27 @@ public class RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType
 
     /**
      * Submit a request to a batch. If the batch maxSize is hit trigger the batch immediately.
-     * 
+     *
      * @param arg argument to a {@link RequestCollapser}
      * @return Observable<ResponseType>
      * @throws IllegalStateException
      *             if submitting after shutdown
      */
     public Observable<ResponseType> submitRequest(final RequestArgumentType arg) {
+        return submitRequest(arg, 0);
+    }
+
+    /**
+     * Submit a request to a batch with a specified priority. If the batch maxSize is hit trigger the batch immediately.
+     * Higher priority requests are executed first within the batch.
+     *
+     * @param arg argument to a {@link RequestCollapser}
+     * @param priority the priority of this request (higher values = higher priority, default 0)
+     * @return Observable<ResponseType>
+     * @throws IllegalStateException
+     *             if submitting after shutdown
+     */
+    public Observable<ResponseType> submitRequest(final RequestArgumentType arg, final int priority) {
         /*
          * We only want the timer ticking if there are actually things to do so we register it the first time something is added.
          */
@@ -92,9 +106,9 @@ public class RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType
 
             final Observable<ResponseType> response;
             if (arg != null) {
-                response = b.offer(arg);
+                response = b.offer(arg, priority);
             } else {
-                response = b.offer( (RequestArgumentType) NULL_SENTINEL);
+                response = b.offer( (RequestArgumentType) NULL_SENTINEL, priority);
             }
             // it will always get an Observable unless we hit the max batch size
             if (response != null) {

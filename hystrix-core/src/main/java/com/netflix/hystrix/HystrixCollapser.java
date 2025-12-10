@@ -227,10 +227,24 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * Typically this means to take the argument(s) provided to the constructor and return it here.
      * <p>
      * If there are multiple arguments that need to be bundled, create a single object to contain them, or use a Tuple.
-     * 
+     *
      * @return RequestArgumentType
      */
     public abstract RequestArgumentType getRequestArgument();
+
+    /**
+     * The priority of this request for batch execution ordering.
+     * <p>
+     * Requests within a batch are sorted by priority (higher values execute first) before being
+     * passed to createCommand. This allows critical requests to be processed before less important ones.
+     * <p>
+     * Override this method to provide custom priority logic. Default priority is 0.
+     *
+     * @return int priority value (higher values = higher priority, default 0)
+     */
+    protected int getRequestPriority() {
+        return 0;
+    }
 
     /**
      * Factory method to create a new {@link HystrixCommand}{@code <BatchReturnType>} command object each time a batch needs to be executed.
@@ -395,7 +409,7 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
                 }
 
                 RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType> requestCollapser = collapserFactory.getRequestCollapser(collapserInstanceWrapper);
-                Observable<ResponseType> response = requestCollapser.submitRequest(getRequestArgument());
+                Observable<ResponseType> response = requestCollapser.submitRequest(getRequestArgument(), getRequestPriority());
 
                 if (isRequestCacheEnabled && cacheKey != null) {
                     HystrixCachedObservable<ResponseType> toCache = HystrixCachedObservable.from(response);

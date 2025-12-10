@@ -15,7 +15,11 @@
  */
 package com.netflix.hystrix.collapser;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -48,6 +52,8 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
             new ConcurrentHashMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>();
+    private final ConcurrentMap<RequestArgumentType, Integer> priorityMap =
+            new ConcurrentHashMap<RequestArgumentType, Integer>();
     private final HystrixCollapserProperties properties;
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
@@ -62,6 +68,15 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
      * @return Observable if offer accepted, null if batch is full, already started or completed
      */
     public Observable<ResponseType> offer(RequestArgumentType arg) {
+        return offer(arg, 0);
+    }
+
+    /**
+     * @param arg the request argument to add to the batch
+     * @param priority the priority of this request (higher values = higher priority, default 0)
+     * @return Observable if offer accepted, null if batch is full, already started or completed
+     */
+    public Observable<ResponseType> offer(RequestArgumentType arg, int priority) {
         /* short-cut - if the batch is started we reject the offer */
         if (batchStarted.get()) {
             return null;
@@ -96,6 +111,12 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                      * See https://github.com/Netflix/Hystrix/pull/1176 for further discussion.
                      */
                     if (existing != null) {
+                        // Update priority if this request has higher priority than the existing one
+                        Integer existingPriority = priorityMap.get(arg);
+                        if (existingPriority == null || priority > existingPriority) {
+                            priorityMap.put(arg, priority);
+                        }
+
                         boolean requestCachingEnabled = properties.requestCacheEnabled().get();
                         if (requestCachingEnabled) {
                             return existing.toObservable();
@@ -103,6 +124,8 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                             return Observable.error(new IllegalArgumentException("Duplicate argument in collapser batch : [" + arg + "]  This is not supported.  Please turn request-caching on for HystrixCollapser:" + commandCollapser.getCollapserKey().name() + " or prevent duplicates from making it into the batch!"));
                         }
                     } else {
+                        // Store the priority for this request
+                        priorityMap.put(arg, priority);
                         return collapsedRequest.toObservable();
                     }
 
@@ -163,8 +186,22 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
-                // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
+                // Sort requests by priority before sharding (higher priority first)
+                List<CollapsedRequest<ResponseType, RequestArgumentType>> sortedRequests = new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>(argumentMap.values());
+                Collections.sort(sortedRequests, new Comparator<CollapsedRequest<ResponseType, RequestArgumentType>>() {
+                    @Override
+                    public int compare(CollapsedRequest<ResponseType, RequestArgumentType> r1, CollapsedRequest<ResponseType, RequestArgumentType> r2) {
+                        Integer p1 = priorityMap.get(r1.getArgument());
+                        Integer p2 = priorityMap.get(r2.getArgument());
+                        if (p1 == null) p1 = 0;
+                        if (p2 == null) p2 = 0;
+                        // Sort in descending order (higher priority first)
+                        return p2.compareTo(p1);
+                    }
+                });
+
+                // shard batches with priority-sorted requests
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(sortedRequests);
                 // for each shard execute its requests 
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
