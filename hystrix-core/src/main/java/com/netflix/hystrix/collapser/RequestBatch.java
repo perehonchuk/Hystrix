@@ -83,6 +83,15 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
                             new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
+
+                    // Check if diversity threshold has been reached
+                    if (existing == null && properties.batchDiversityTriggerEnabled().get()) {
+                        int diversityThreshold = properties.batchDiversityThreshold().get();
+                        if (argumentMap.size() >= diversityThreshold) {
+                            // Trigger early execution due to batch diversity
+                            executeBatchIfNotAlreadyStarted();
+                        }
+                    }
                     /**
                      * If the argument already exists in the batch, then there are 2 options:
                      * A) If request caching is ON (the default): only keep 1 argument in the batch and let all responses
