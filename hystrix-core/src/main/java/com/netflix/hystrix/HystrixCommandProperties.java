@@ -55,6 +55,8 @@ public abstract class HystrixCommandProperties {
     private static final Boolean default_requestCacheEnabled = true;
     private static final Integer default_fallbackIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_fallbackEnabled = true;
+    private static final Integer default_fallbackRetryAttempts = 3; // default => retry fallback up to 3 times on failure
+    private static final Integer default_fallbackRetryDelayInMilliseconds = 100; // default => wait 100ms between retry attempts
     private static final Integer default_executionIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_requestLogEnabled = true;
     private static final Boolean default_circuitBreakerEnabled = true;
@@ -77,6 +79,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> executionIsolationSemaphoreMaxConcurrentRequests; // Number of permits for execution semaphore
     private final HystrixProperty<Integer> fallbackIsolationSemaphoreMaxConcurrentRequests; // Number of permits for fallback semaphore
     private final HystrixProperty<Boolean> fallbackEnabled; // Whether fallback should be attempted.
+    private final HystrixProperty<Integer> fallbackRetryAttempts; // Number of times to retry fallback on failure
+    private final HystrixProperty<Integer> fallbackRetryDelayInMilliseconds; // Delay between fallback retry attempts
     private final HystrixProperty<Boolean> executionIsolationThreadInterruptOnTimeout; // Whether an underlying Future/Thread (when runInSeparateThread == true) should be interrupted after a timeout
     private final HystrixProperty<Boolean> executionIsolationThreadInterruptOnFutureCancel; // Whether canceling an underlying Future/Thread (when runInSeparateThread == true) should interrupt the execution thread
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
@@ -127,6 +131,8 @@ public abstract class HystrixCommandProperties {
         this.executionIsolationSemaphoreMaxConcurrentRequests = getProperty(propertyPrefix, key, "execution.isolation.semaphore.maxConcurrentRequests", builder.getExecutionIsolationSemaphoreMaxConcurrentRequests(), default_executionIsolationSemaphoreMaxConcurrentRequests);
         this.fallbackIsolationSemaphoreMaxConcurrentRequests = getProperty(propertyPrefix, key, "fallback.isolation.semaphore.maxConcurrentRequests", builder.getFallbackIsolationSemaphoreMaxConcurrentRequests(), default_fallbackIsolationSemaphoreMaxConcurrentRequests);
         this.fallbackEnabled = getProperty(propertyPrefix, key, "fallback.enabled", builder.getFallbackEnabled(), default_fallbackEnabled);
+        this.fallbackRetryAttempts = getProperty(propertyPrefix, key, "fallback.retry.attempts", builder.getFallbackRetryAttempts(), default_fallbackRetryAttempts);
+        this.fallbackRetryDelayInMilliseconds = getProperty(propertyPrefix, key, "fallback.retry.delayInMilliseconds", builder.getFallbackRetryDelayInMilliseconds(), default_fallbackRetryDelayInMilliseconds);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -334,10 +340,37 @@ public abstract class HystrixCommandProperties {
     }
 
     /**
+     * Number of times to retry fallback execution if it fails.
+     * <p>
+     * Default Value: 3
+     * <p>
+     * This allows fallback logic to have multiple chances to succeed before ultimately failing.
+     * The fallback will be retried up to this many times if it throws an exception.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> fallbackRetryAttempts() {
+        return fallbackRetryAttempts;
+    }
+
+    /**
+     * Time in milliseconds to delay between fallback retry attempts.
+     * <p>
+     * Default Value: 100
+     * <p>
+     * This delay is applied between consecutive retry attempts when fallback execution fails.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> fallbackRetryDelayInMilliseconds() {
+        return fallbackRetryDelayInMilliseconds;
+    }
+
+    /**
      * Time in milliseconds to wait between allowing health snapshots to be taken that calculate success and error percentages and affect {@link HystrixCircuitBreaker#isOpen()} status.
      * <p>
      * On high-volume circuits the continual calculation of error percentage can become CPU intensive thus this controls how often it is calculated.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds() {
@@ -550,6 +583,8 @@ public abstract class HystrixCommandProperties {
         private Boolean executionTimeoutEnabled = null;
         private Integer fallbackIsolationSemaphoreMaxConcurrentRequests = null;
         private Boolean fallbackEnabled = null;
+        private Integer fallbackRetryAttempts = null;
+        private Integer fallbackRetryDelayInMilliseconds = null;
         private Integer metricsHealthSnapshotIntervalInMilliseconds = null;
         private Integer metricsRollingPercentileBucketSize = null;
         private Boolean metricsRollingPercentileEnabled = null;
@@ -626,6 +661,14 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getFallbackEnabled() {
             return fallbackEnabled;
+        }
+
+        public Integer getFallbackRetryAttempts() {
+            return fallbackRetryAttempts;
+        }
+
+        public Integer getFallbackRetryDelayInMilliseconds() {
+            return fallbackRetryDelayInMilliseconds;
         }
 
         public Integer getMetricsHealthSnapshotIntervalInMilliseconds() {
@@ -740,6 +783,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withFallbackEnabled(boolean value) {
             this.fallbackEnabled = value;
+            return this;
+        }
+
+        public Setter withFallbackRetryAttempts(int value) {
+            this.fallbackRetryAttempts = value;
+            return this;
+        }
+
+        public Setter withFallbackRetryDelayInMilliseconds(int value) {
+            this.fallbackRetryDelayInMilliseconds = value;
             return this;
         }
 

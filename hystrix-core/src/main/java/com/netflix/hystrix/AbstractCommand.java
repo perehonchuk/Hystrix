@@ -340,6 +340,65 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getFallbackObservable();
 
     /**
+     * Wraps fallback execution with retry logic based on configured retry attempts and delay.
+     * This method will retry the fallback if it fails, up to the configured number of attempts.
+     *
+     * @return {@code Observable<R>} that will retry fallback execution on failure
+     */
+    protected Observable<R> getFallbackObservableWithRetry() {
+        final int maxAttempts = properties.fallbackRetryAttempts().get();
+        final int retryDelay = properties.fallbackRetryDelayInMilliseconds().get();
+
+        if (maxAttempts <= 0) {
+            // No retry, return original
+            return getFallbackObservable();
+        }
+
+        return Observable.defer(new Func0<Observable<R>>() {
+            @Override
+            public Observable<R> call() {
+                return retryFallback(1, maxAttempts, retryDelay);
+            }
+        });
+    }
+
+    /**
+     * Recursively retries fallback execution.
+     */
+    private Observable<R> retryFallback(final int currentAttempt, final int maxAttempts, final int retryDelay) {
+        return getFallbackObservable().onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+            @Override
+            public Observable<R> call(Throwable throwable) {
+                if (currentAttempt < maxAttempts) {
+                    logger.debug("Fallback attempt {} failed, retrying after {}ms delay (max attempts: {})",
+                                 currentAttempt, retryDelay, maxAttempts);
+
+                    // Mark retry event
+                    executionResult = executionResult.addEvent(HystrixEventType.FALLBACK_RETRY);
+                    eventNotifier.markEvent(HystrixEventType.FALLBACK_RETRY, commandKey);
+
+                    // Wait before retry if delay is configured
+                    if (retryDelay > 0) {
+                        try {
+                            Thread.sleep(retryDelay);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return Observable.error(e);
+                        }
+                    }
+
+                    // Retry
+                    return retryFallback(currentAttempt + 1, maxAttempts, retryDelay);
+                } else {
+                    // Max attempts reached, propagate error
+                    logger.debug("Fallback failed after {} attempts", maxAttempts);
+                    return Observable.error(throwable);
+                }
+            }
+        });
+    }
+
+    /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
      * <p>
      * This lazily starts execution of the command once the {@link Observable} is subscribed to.
@@ -853,10 +912,10 @@ import java.util.concurrent.atomic.AtomicReference;
                     try {
                         if (isFallbackUserDefined()) {
                             executionHook.onFallbackStart(this);
-                            fallbackExecutionChain = getFallbackObservable();
+                            fallbackExecutionChain = getFallbackObservableWithRetry();
                         } else {
                             //same logic as above without the hook invocation
-                            fallbackExecutionChain = getFallbackObservable();
+                            fallbackExecutionChain = getFallbackObservableWithRetry();
                         }
                     } catch (Throwable ex) {
                         //If hook or user-fallback throws, then use that as the result of the fallback lookup
