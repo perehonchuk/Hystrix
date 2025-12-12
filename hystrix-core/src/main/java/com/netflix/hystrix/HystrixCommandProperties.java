@@ -62,6 +62,9 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Integer default_requestCacheMaxAgeInMilliseconds = 0; // default to 0 = disabled (no max age for cache entries)
+    private static final Integer default_requestCacheMaxIdleInMilliseconds = 0; // default to 0 = disabled (no max idle time for cache entries)
+    private static final Boolean default_requestCacheExpirationEnabled = false; // default to false = cache expiration tracking disabled
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +91,9 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Integer> requestCacheMaxAgeInMilliseconds; // Maximum age in milliseconds for cache entries before expiration
+    private final HystrixProperty<Integer> requestCacheMaxIdleInMilliseconds; // Maximum idle time in milliseconds for cache entries before expiration
+    private final HystrixProperty<Boolean> requestCacheExpirationEnabled; // Whether cache expiration tracking is enabled
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -135,6 +141,9 @@ public abstract class HystrixCommandProperties {
         this.metricsRollingPercentileBucketSize = getProperty(propertyPrefix, key, "metrics.rollingPercentile.bucketSize", builder.getMetricsRollingPercentileBucketSize(), default_metricsRollingPercentileBucketSize);
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
+        this.requestCacheMaxAgeInMilliseconds = getProperty(propertyPrefix, key, "requestCache.maxAgeInMilliseconds", builder.getRequestCacheMaxAgeInMilliseconds(), default_requestCacheMaxAgeInMilliseconds);
+        this.requestCacheMaxIdleInMilliseconds = getProperty(propertyPrefix, key, "requestCache.maxIdleInMilliseconds", builder.getRequestCacheMaxIdleInMilliseconds(), default_requestCacheMaxIdleInMilliseconds);
+        this.requestCacheExpirationEnabled = getProperty(propertyPrefix, key, "requestCache.expirationEnabled", builder.getRequestCacheExpirationEnabled(), default_requestCacheExpirationEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
 
         // threadpool doesn't have a global override, only instance level makes sense
@@ -418,8 +427,35 @@ public abstract class HystrixCommandProperties {
     }
 
     /**
+     * Maximum age in milliseconds for cache entries before expiration.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> requestCacheMaxAgeInMilliseconds() {
+        return requestCacheMaxAgeInMilliseconds;
+    }
+
+    /**
+     * Maximum idle time in milliseconds for cache entries before expiration.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> requestCacheMaxIdleInMilliseconds() {
+        return requestCacheMaxIdleInMilliseconds;
+    }
+
+    /**
+     * Whether cache expiration tracking is enabled.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> requestCacheExpirationEnabled() {
+        return requestCacheExpirationEnabled;
+    }
+
+    /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
@@ -559,6 +595,9 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
+        private Integer requestCacheMaxAgeInMilliseconds = null;
+        private Integer requestCacheMaxIdleInMilliseconds = null;
+        private Boolean requestCacheExpirationEnabled = null;
         private Boolean requestLogEnabled = null;
 
         /* package */ Setter() {
@@ -658,6 +697,18 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestCacheEnabled() {
             return requestCacheEnabled;
+        }
+
+        public Integer getRequestCacheMaxAgeInMilliseconds() {
+            return requestCacheMaxAgeInMilliseconds;
+        }
+
+        public Integer getRequestCacheMaxIdleInMilliseconds() {
+            return requestCacheMaxIdleInMilliseconds;
+        }
+
+        public Boolean getRequestCacheExpirationEnabled() {
+            return requestCacheExpirationEnabled;
         }
 
         public Boolean getRequestLogEnabled() {
@@ -780,6 +831,21 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestCacheEnabled(boolean value) {
             this.requestCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withRequestCacheMaxAgeInMilliseconds(int value) {
+            this.requestCacheMaxAgeInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withRequestCacheMaxIdleInMilliseconds(int value) {
+            this.requestCacheMaxIdleInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withRequestCacheExpirationEnabled(boolean value) {
+            this.requestCacheExpirationEnabled = value;
             return this;
         }
 

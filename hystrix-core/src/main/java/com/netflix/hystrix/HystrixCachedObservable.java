@@ -9,8 +9,12 @@ public class HystrixCachedObservable<R> {
     protected final Subscription originalSubscription;
     protected final Observable<R> cachedObservable;
     private volatile int outstandingSubscriptions = 0;
+    private final long creationTimestamp;
+    private volatile long lastAccessTimestamp;
 
     protected HystrixCachedObservable(final Observable<R> originalObservable) {
+        this.creationTimestamp = System.currentTimeMillis();
+        this.lastAccessTimestamp = this.creationTimestamp;
         ReplaySubject<R> replaySubject = ReplaySubject.create();
         this.originalSubscription = originalObservable
                 .subscribe(replaySubject);
@@ -29,6 +33,7 @@ public class HystrixCachedObservable<R> {
                     @Override
                     public void call() {
                         outstandingSubscriptions++;
+                        lastAccessTimestamp = System.currentTimeMillis();
                     }
                 });
     }
@@ -47,5 +52,29 @@ public class HystrixCachedObservable<R> {
 
     public void unsubscribe() {
         originalSubscription.unsubscribe();
+    }
+
+    public long getCreationTimestamp() {
+        return creationTimestamp;
+    }
+
+    public long getLastAccessTimestamp() {
+        return lastAccessTimestamp;
+    }
+
+    public long getAgeInMilliseconds() {
+        return System.currentTimeMillis() - creationTimestamp;
+    }
+
+    public long getIdleTimeInMilliseconds() {
+        return System.currentTimeMillis() - lastAccessTimestamp;
+    }
+
+    public boolean isExpired(long maxAgeMillis) {
+        return maxAgeMillis > 0 && getAgeInMilliseconds() > maxAgeMillis;
+    }
+
+    public boolean isIdle(long maxIdleMillis) {
+        return maxIdleMillis > 0 && getIdleTimeInMilliseconds() > maxIdleMillis;
     }
 }
