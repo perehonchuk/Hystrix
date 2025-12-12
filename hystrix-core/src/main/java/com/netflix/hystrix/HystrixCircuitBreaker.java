@@ -140,7 +140,7 @@ public interface HystrixCircuitBreaker {
         private final HystrixCommandMetrics metrics;
 
         enum Status {
-            CLOSED, OPEN, HALF_OPEN;
+            CLOSED, OPEN, HALF_OPEN, THROTTLED;
         }
 
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
@@ -182,6 +182,7 @@ public interface HystrixCircuitBreaker {
                                 // if it was CLOSED, it stays CLOSED
                                 // if it was half-open, we need to wait for a successful command execution
                                 // if it was open, we need to wait for sleep window to elapse
+                                // if it was throttled, we need to wait for sleep window to elapse
                             } else {
                                 if (hc.getErrorPercentage() < properties.circuitBreakerErrorThresholdPercentage().get()) {
                                     //we are not past the minimum error threshold for the stat window,
@@ -189,10 +190,19 @@ public interface HystrixCircuitBreaker {
                                     // if it was CLOSED, it stays CLOSED
                                     // if it was half-open, we need to wait for a successful command execution
                                     // if it was open, we need to wait for sleep window to elapse
+                                    // if it was throttled, we need to wait for sleep window to elapse
                                 } else {
-                                    // our failure rate is too high, we need to set the state to OPEN
-                                    if (status.compareAndSet(Status.CLOSED, Status.OPEN)) {
-                                        circuitOpened.set(System.currentTimeMillis());
+                                    // our failure rate is too high, we need to set the state to THROTTLED or OPEN
+                                    if (properties.circuitBreakerThrottleEnabled().get()) {
+                                        // Throttled mode is enabled, transition to THROTTLED instead of OPEN
+                                        if (status.compareAndSet(Status.CLOSED, Status.THROTTLED)) {
+                                            circuitOpened.set(System.currentTimeMillis());
+                                        }
+                                    } else {
+                                        // Standard behavior: transition to OPEN
+                                        if (status.compareAndSet(Status.CLOSED, Status.OPEN)) {
+                                            circuitOpened.set(System.currentTimeMillis());
+                                        }
                                     }
                                 }
                             }
@@ -220,6 +230,12 @@ public interface HystrixCircuitBreaker {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+            }
+            // Also handle transition from HALF_OPEN back to THROTTLED if throttling is enabled
+            if (properties.circuitBreakerThrottleEnabled().get()) {
+                if (status.compareAndSet(Status.HALF_OPEN, Status.THROTTLED)) {
+                    circuitOpened.set(System.currentTimeMillis());
+                }
             }
         }
 
@@ -271,12 +287,22 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
+                // Check if we're in THROTTLED state - allow a percentage of requests through
+                if (status.get().equals(Status.THROTTLED)) {
+                    // Use a probabilistic approach to allow throttlePercentage of requests
+                    int throttlePercentage = properties.circuitBreakerThrottlePercentage().get();
+                    // Generate random number between 0-99 and allow if less than throttlePercentage
+                    return (System.nanoTime() % 100) < throttlePercentage;
+                }
+
                 if (isAfterSleepWindow()) {
                     //only the first request after sleep window should execute
                     //if the executing command succeeds, the status will transition to CLOSED
-                    //if the executing command fails, the status will transition to OPEN
-                    //if the executing command gets unsubscribed, the status will transition to OPEN
+                    //if the executing command fails, the status will transition to OPEN or THROTTLED
+                    //if the executing command gets unsubscribed, the status will transition to OPEN or THROTTLED
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        return true;
+                    } else if (status.compareAndSet(Status.THROTTLED, Status.HALF_OPEN)) {
                         return true;
                     } else {
                         return false;

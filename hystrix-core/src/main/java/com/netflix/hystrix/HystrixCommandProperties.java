@@ -45,7 +45,9 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_circuitBreakerSleepWindowInMilliseconds = 5000;// default => sleepWindow: 5000 = 5 seconds that we will sleep before trying again after tripping the circuit
     private static final Integer default_circuitBreakerErrorThresholdPercentage = 50;// default => errorThresholdPercentage = 50 = if 50%+ of requests in 10 seconds are failures or latent then we will trip the circuit
     private static final Boolean default_circuitBreakerForceOpen = false;// default => forceCircuitOpen = false (we want to allow traffic)
-    /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false 
+    /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false
+    private static final Boolean default_circuitBreakerThrottleEnabled = true;// default => circuitBreakerThrottleEnabled = true (use THROTTLED state instead of OPEN)
+    private static final Integer default_circuitBreakerThrottlePercentage = 20;// default => circuitBreakerThrottlePercentage = 20 (allow 20% of requests through when throttled) 
     private static final Integer default_executionTimeoutInMilliseconds = 1000; // default => executionTimeoutInMilliseconds: 1000 = 1 second
     private static final Boolean default_executionTimeoutEnabled = true;
     private static final ExecutionIsolationStrategy default_executionIsolationStrategy = ExecutionIsolationStrategy.THREAD;
@@ -70,6 +72,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> circuitBreakerErrorThresholdPercentage; // % of 'marks' that must be failed to trip the circuit
     private final HystrixProperty<Boolean> circuitBreakerForceOpen; // a property to allow forcing the circuit open (stopping all requests)
     private final HystrixProperty<Boolean> circuitBreakerForceClosed; // a property to allow ignoring errors and therefore never trip 'open' (ie. allow all traffic through)
+    private final HystrixProperty<Boolean> circuitBreakerThrottleEnabled; // a property to enable throttled mode instead of fully opening the circuit
+    private final HystrixProperty<Integer> circuitBreakerThrottlePercentage; // percentage of requests to allow through when circuit is in THROTTLED state
     private final HystrixProperty<ExecutionIsolationStrategy> executionIsolationStrategy; // Whether a command should be executed in a separate thread or not.
     private final HystrixProperty<Integer> executionTimeoutInMilliseconds; // Timeout value in milliseconds for a command
     private final HystrixProperty<Boolean> executionTimeoutEnabled; //Whether timeout should be triggered
@@ -118,6 +122,8 @@ public abstract class HystrixCommandProperties {
         this.circuitBreakerErrorThresholdPercentage = getProperty(propertyPrefix, key, "circuitBreaker.errorThresholdPercentage", builder.getCircuitBreakerErrorThresholdPercentage(), default_circuitBreakerErrorThresholdPercentage);
         this.circuitBreakerForceOpen = getProperty(propertyPrefix, key, "circuitBreaker.forceOpen", builder.getCircuitBreakerForceOpen(), default_circuitBreakerForceOpen);
         this.circuitBreakerForceClosed = getProperty(propertyPrefix, key, "circuitBreaker.forceClosed", builder.getCircuitBreakerForceClosed(), default_circuitBreakerForceClosed);
+        this.circuitBreakerThrottleEnabled = getProperty(propertyPrefix, key, "circuitBreaker.throttle.enabled", builder.getCircuitBreakerThrottleEnabled(), default_circuitBreakerThrottleEnabled);
+        this.circuitBreakerThrottlePercentage = getProperty(propertyPrefix, key, "circuitBreaker.throttle.percentage", builder.getCircuitBreakerThrottlePercentage(), default_circuitBreakerThrottlePercentage);
         this.executionIsolationStrategy = getProperty(propertyPrefix, key, "execution.isolation.strategy", builder.getExecutionIsolationStrategy(), default_executionIsolationStrategy);
         //this property name is now misleading.  //TODO figure out a good way to deprecate this property name
         this.executionTimeoutInMilliseconds = getProperty(propertyPrefix, key, "execution.isolation.thread.timeoutInMilliseconds", builder.getExecutionIsolationThreadTimeoutInMilliseconds(), default_executionTimeoutInMilliseconds);
@@ -186,6 +192,26 @@ public abstract class HystrixCommandProperties {
      */
     public HystrixProperty<Boolean> circuitBreakerForceOpen() {
         return circuitBreakerForceOpen;
+    }
+
+    /**
+     * If true the circuit breaker will transition to THROTTLED state instead of OPEN when error thresholds are exceeded.
+     * In THROTTLED state, a percentage of requests (defined by circuitBreakerThrottlePercentage) are allowed through.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> circuitBreakerThrottleEnabled() {
+        return circuitBreakerThrottleEnabled;
+    }
+
+    /**
+     * Percentage of requests to allow through when the circuit breaker is in THROTTLED state.
+     * Valid range is 0-100, where 0 means no requests allowed (equivalent to OPEN) and 100 means all requests allowed.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerThrottlePercentage() {
+        return circuitBreakerThrottlePercentage;
     }
 
     /**
@@ -542,6 +568,8 @@ public abstract class HystrixCommandProperties {
         private Boolean circuitBreakerForceOpen = null;
         private Integer circuitBreakerRequestVolumeThreshold = null;
         private Integer circuitBreakerSleepWindowInMilliseconds = null;
+        private Boolean circuitBreakerThrottleEnabled = null;
+        private Integer circuitBreakerThrottlePercentage = null;
         private Integer executionIsolationSemaphoreMaxConcurrentRequests = null;
         private ExecutionIsolationStrategy executionIsolationStrategy = null;
         private Boolean executionIsolationThreadInterruptOnTimeout = null;
@@ -586,6 +614,14 @@ public abstract class HystrixCommandProperties {
 
         public Integer getCircuitBreakerSleepWindowInMilliseconds() {
             return circuitBreakerSleepWindowInMilliseconds;
+        }
+
+        public Boolean getCircuitBreakerThrottleEnabled() {
+            return circuitBreakerThrottleEnabled;
+        }
+
+        public Integer getCircuitBreakerThrottlePercentage() {
+            return circuitBreakerThrottlePercentage;
         }
 
         public Integer getExecutionIsolationSemaphoreMaxConcurrentRequests() {
@@ -691,6 +727,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withCircuitBreakerSleepWindowInMilliseconds(int value) {
             this.circuitBreakerSleepWindowInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerThrottleEnabled(boolean value) {
+            this.circuitBreakerThrottleEnabled = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerThrottlePercentage(int value) {
+            this.circuitBreakerThrottlePercentage = value;
             return this;
         }
 
