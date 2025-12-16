@@ -54,7 +54,9 @@ public class HystrixCommandConfiguration {
                 commandProperties.fallbackEnabled().get(),
                 commandProperties.fallbackIsolationSemaphoreMaxConcurrentRequests().get(),
                 commandProperties.requestCacheEnabled().get(),
-                commandProperties.requestLogEnabled().get()
+                commandProperties.requestLogEnabled().get(),
+                commandProperties.executionRetryCount().get(),
+                commandProperties.executionRetryDelayInMilliseconds().get()
         );
 
         HystrixCommandCircuitBreakerConfig circuitBreakerConfig = new HystrixCommandCircuitBreakerConfig(
@@ -153,11 +155,14 @@ public class HystrixCommandConfiguration {
         private final int fallbackMaxConcurrentRequest;
         private final boolean requestCacheEnabled;
         private final boolean requestLogEnabled;
+        private final int retryCount;
+        private final int retryDelayInMilliseconds;
 
         public HystrixCommandExecutionConfig(int semaphoreMaxConcurrentRequests, HystrixCommandProperties.ExecutionIsolationStrategy isolationStrategy,
                                              boolean threadInterruptOnTimeout, String threadPoolKeyOverride, boolean timeoutEnabled,
                                              int timeoutInMilliseconds, boolean fallbackEnabled, int fallbackMaxConcurrentRequests,
-                                             boolean requestCacheEnabled, boolean requestLogEnabled) {
+                                             boolean requestCacheEnabled, boolean requestLogEnabled,
+                                             int retryCount, int retryDelayInMilliseconds) {
             this.semaphoreMaxConcurrentRequests = semaphoreMaxConcurrentRequests;
             this.isolationStrategy = isolationStrategy;
             this.threadInterruptOnTimeout = threadInterruptOnTimeout;
@@ -168,6 +173,8 @@ public class HystrixCommandConfiguration {
             this.fallbackMaxConcurrentRequest = fallbackMaxConcurrentRequests;
             this.requestCacheEnabled = requestCacheEnabled;
             this.requestLogEnabled = requestLogEnabled;
+            this.retryCount = retryCount;
+            this.retryDelayInMilliseconds = retryDelayInMilliseconds;
 
         }
 
@@ -209,6 +216,14 @@ public class HystrixCommandConfiguration {
 
         public boolean isRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public int getRetryCount() {
+            return retryCount;
+        }
+
+        public int getRetryDelayInMilliseconds() {
+            return retryDelayInMilliseconds;
         }
     }
 

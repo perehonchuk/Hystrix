@@ -45,6 +45,7 @@ import rx.functions.Action0;
 import rx.functions.Action1;
 import rx.functions.Func0;
 import rx.functions.Func1;
+import rx.functions.Func2;
 import rx.subjects.ReplaySubject;
 import rx.subscriptions.CompositeSubscription;
 
@@ -52,6 +53,7 @@ import java.lang.ref.Reference;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -890,6 +892,33 @@ import java.util.concurrent.atomic.AtomicReference;
             // the run() method is a user provided implementation so can throw instead of using Observable.onError
             // so we catch it here and turn it into Observable.error
             userObservable = Observable.error(ex);
+        }
+
+        // Apply retry logic if configured
+        final int retryCount = properties.executionRetryCount().get();
+        final int retryDelay = properties.executionRetryDelayInMilliseconds().get();
+
+        if (retryCount > 0) {
+            userObservable = userObservable.retryWhen(new Func1<Observable<? extends Throwable>, Observable<?>>() {
+                @Override
+                public Observable<?> call(Observable<? extends Throwable> attempts) {
+                    return attempts.zipWith(Observable.range(1, retryCount + 1), new Func2<Throwable, Integer, Integer>() {
+                        @Override
+                        public Integer call(Throwable throwable, Integer attempt) {
+                            return attempt;
+                        }
+                    }).flatMap(new Func1<Integer, Observable<?>>() {
+                        @Override
+                        public Observable<?> call(Integer attemptNumber) {
+                            if (attemptNumber <= retryCount) {
+                                logger.debug("Retrying execution attempt " + attemptNumber + " after delay of " + retryDelay + "ms");
+                                return Observable.timer(retryDelay, TimeUnit.MILLISECONDS);
+                            }
+                            return Observable.error(new RuntimeException("Retry limit exceeded"));
+                        }
+                    });
+                }
+            });
         }
 
         return userObservable
