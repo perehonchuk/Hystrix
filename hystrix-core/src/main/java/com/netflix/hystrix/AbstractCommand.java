@@ -640,10 +640,73 @@ import java.util.concurrent.atomic.AtomicReference;
             execution = executeCommandWithSpecifiedIsolation(_cmd);
         }
 
+        // Wrap execution with retry logic if enabled
+        if (properties.retryEnabled().get()) {
+            final int maxAttempts = properties.retryMaxAttempts().get();
+            final int retryDelay = properties.retryDelayInMilliseconds().get();
+            final AtomicInteger attemptCount = new AtomicInteger(0);
+
+            execution = execution.onErrorResumeNext(new Func1<Throwable, Observable<? extends R>>() {
+                @Override
+                public Observable<? extends R> call(final Throwable t) {
+                    int currentAttempt = attemptCount.incrementAndGet();
+
+                    // If we haven't exceeded max retry attempts and it's a retriable error
+                    if (currentAttempt <= maxAttempts && isRetriableError(t)) {
+                        // Mark retry event
+                        executionResult = executionResult.addEvent(HystrixEventType.RETRY);
+                        eventNotifier.markEvent(HystrixEventType.RETRY, commandKey);
+
+                        // Delay before retry
+                        if (retryDelay > 0) {
+                            try {
+                                Thread.sleep(retryDelay);
+                            } catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                            }
+                        }
+
+                        // Retry the execution
+                        Observable<R> retryExecution;
+                        if (properties.executionTimeoutEnabled().get()) {
+                            retryExecution = executeCommandWithSpecifiedIsolation(_cmd)
+                                    .lift(new HystrixObservableTimeoutOperator<R>(_cmd));
+                        } else {
+                            retryExecution = executeCommandWithSpecifiedIsolation(_cmd);
+                        }
+
+                        return retryExecution.onErrorResumeNext(this);
+                    } else {
+                        // Max retries exceeded or non-retriable error, propagate error
+                        return Observable.error(t);
+                    }
+                }
+            });
+        }
+
         return execution.doOnNext(markEmits)
                 .doOnCompleted(markOnCompleted)
                 .onErrorResumeNext(handleFallback)
                 .doOnEach(setRequestContext);
+    }
+
+    /**
+     * Determines if an error is retriable.
+     * HystrixBadRequestException is not retriable as it indicates a problem with the request itself.
+     * HystrixTimeoutException and other failures are retriable.
+     */
+    private boolean isRetriableError(Throwable t) {
+        // Don't retry bad requests
+        if (t instanceof HystrixBadRequestException) {
+            return false;
+        }
+        // Don't retry if exception is explicitly marked as non-retriable
+        Exception e = getExceptionFromThrowable(t);
+        if (e instanceof HystrixBadRequestException) {
+            return false;
+        }
+        // Retry all other errors (timeouts, failures, etc.)
+        return true;
     }
 
     private Observable<R> executeCommandWithSpecifiedIsolation(final AbstractCommand<R> _cmd) {
