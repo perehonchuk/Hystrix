@@ -29,6 +29,7 @@ public enum HystrixEventType {
     EMIT(false),
     SUCCESS(true),
     FAILURE(false),
+    IGNORED_FAILURE(false),
     TIMEOUT(false),
     BAD_REQUEST(true),
     SHORT_CIRCUITED(false),

@@ -423,11 +423,13 @@ public class HystrixCommandMetrics extends HystrixMetrics {
 
             long successCount = eventTypeCounts[HystrixEventType.SUCCESS.ordinal()];
             long failureCount = eventTypeCounts[HystrixEventType.FAILURE.ordinal()];
+            long ignoredFailureCount = eventTypeCounts[HystrixEventType.IGNORED_FAILURE.ordinal()];
             long timeoutCount = eventTypeCounts[HystrixEventType.TIMEOUT.ordinal()];
             long threadPoolRejectedCount = eventTypeCounts[HystrixEventType.THREAD_POOL_REJECTED.ordinal()];
             long semaphoreRejectedCount = eventTypeCounts[HystrixEventType.SEMAPHORE_REJECTED.ordinal()];
 
-            updatedTotalCount += (successCount + failureCount + timeoutCount + threadPoolRejectedCount + semaphoreRejectedCount);
+            // IGNORED_FAILURE counts toward total requests but NOT toward error count
+            updatedTotalCount += (successCount + failureCount + ignoredFailureCount + timeoutCount + threadPoolRejectedCount + semaphoreRejectedCount);
             updatedErrorCount += (failureCount + timeoutCount + threadPoolRejectedCount + semaphoreRejectedCount);
             return new HealthCounts(updatedTotalCount, updatedErrorCount);
         }

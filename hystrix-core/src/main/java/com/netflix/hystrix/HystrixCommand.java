@@ -286,11 +286,41 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * Determines whether a given exception should be ignored for circuit breaker health calculations.
+     * <p>
+     * By default, all exceptions from {@link #run()} count toward circuit breaker error percentage.
+     * Override this method to exclude specific exception types from triggering circuit breaker state changes.
+     * <p>
+     * Ignored failures are tracked separately as IGNORED_FAILURE events and do not affect:
+     * <ul>
+     * <li>Circuit breaker error percentage calculations</li>
+     * <li>Circuit breaker state transitions (CLOSED to OPEN)</li>
+     * <li>Health metrics used to determine when to trip the circuit</li>
+     * </ul>
+     * <p>
+     * Use cases include:
+     * <ul>
+     * <li>Client validation errors that don't indicate service health issues</li>
+     * <li>Expected business exceptions that should not trip the circuit</li>
+     * <li>Transient errors that are known to be temporary</li>
+     * </ul>
+     * <p>
+     * DEFAULT BEHAVIOR: Returns false (all errors count toward circuit breaking).
+     *
+     * @param exception
+     *            The exception thrown by {@link #run()}
+     * @return true if this exception should be ignored for circuit breaker calculations, false otherwise
+     */
+    protected boolean isErrorIgnoredForCircuitBreaker(Throwable exception) {
+        return false;
     }
 
     @Override

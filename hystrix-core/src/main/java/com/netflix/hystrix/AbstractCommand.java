@@ -1027,12 +1027,24 @@ import java.util.concurrent.atomic.AtomicReference;
          */
         logger.debug("Error executing HystrixCommand.run(). Proceeding to fallback logic ...", underlying);
 
-        // report failure
-        eventNotifier.markEvent(HystrixEventType.FAILURE, commandKey);
+        // Check if this error should be ignored for circuit breaker calculations
+        boolean isIgnored = isErrorIgnoredForCircuitBreaker(underlying);
+        HystrixEventType eventType = isIgnored ? HystrixEventType.IGNORED_FAILURE : HystrixEventType.FAILURE;
+
+        // report failure (either regular or ignored)
+        eventNotifier.markEvent(eventType, commandKey);
 
         // record the exception
         executionResult = executionResult.setException(underlying);
-        return getFallbackOrThrowException(this, HystrixEventType.FAILURE, FailureType.COMMAND_EXCEPTION, "failed", underlying);
+        return getFallbackOrThrowException(this, eventType, FailureType.COMMAND_EXCEPTION, "failed", underlying);
+    }
+
+    /**
+     * Override in subclass to provide custom error classification for circuit breaker.
+     * Defaults to false (all errors count toward circuit breaking).
+     */
+    protected boolean isErrorIgnoredForCircuitBreaker(Throwable exception) {
+        return false;
     }
 
     private Observable<R> handleFallbackRejectionByEmittingError() {
