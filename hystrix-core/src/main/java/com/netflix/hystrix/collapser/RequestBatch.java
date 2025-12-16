@@ -80,8 +80,9 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 if (argumentMap.size() >= maxBatchSize) {
                     return null;
                 } else {
+                    int priority = commandCollapser.getRequestPriority(arg);
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
-                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
+                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this, priority);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
                     /**
                      * If the argument already exists in the batch, then there are 2 options:

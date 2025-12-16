@@ -44,6 +44,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 /* package */class CollapsedRequestSubject<T, R> implements CollapsedRequest<T, R> {
     private final R argument;
+    private final int priority;
 
     private AtomicBoolean valueSet = new AtomicBoolean(false);
     private final ReplaySubject<T> subject = ReplaySubject.create();
@@ -51,12 +52,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
     private volatile int outstandingSubscriptions = 0;
 
-    public CollapsedRequestSubject(final R arg, final RequestBatch<?, T, R> containingBatch) {
+    public CollapsedRequestSubject(final R arg, final RequestBatch<?, T, R> containingBatch, int priority) {
         if (arg == RequestCollapser.NULL_SENTINEL) {
             this.argument = null;
         } else {
             this.argument = arg;
         }
+        this.priority = priority;
         this.subjectWithAccounting = subject
                 .doOnSubscribe(new Action0() {
                     @Override
@@ -75,19 +77,38 @@ import java.util.concurrent.atomic.AtomicBoolean;
                 });
     }
 
-    public CollapsedRequestSubject(final R arg) {
+    public CollapsedRequestSubject(final R arg, int priority) {
         this.subjectWithAccounting = subject;
         this.argument = arg;
+        this.priority = priority;
+    }
+
+    public CollapsedRequestSubject(final R arg, final RequestBatch<?, T, R> containingBatch) {
+        this(arg, containingBatch, 0);
+    }
+
+    public CollapsedRequestSubject(final R arg) {
+        this(arg, 0);
     }
 
     /**
      * The request argument.
-     * 
+     *
      * @return request argument
      */
     @Override
     public R getArgument() {
         return argument;
+    }
+
+    /**
+     * The priority level of this collapsed request.
+     *
+     * @return int representing the priority level
+     */
+    @Override
+    public int getPriority() {
+        return priority;
     }
 
     /**

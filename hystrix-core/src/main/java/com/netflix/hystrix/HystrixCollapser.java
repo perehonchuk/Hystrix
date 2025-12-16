@@ -178,6 +178,11 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
                 return self.getCollapserKey();
             }
 
+            @Override
+            public int getRequestPriority(RequestArgumentType arg) {
+                return self.getRequestPriority();
+            }
+
         };
     }
 
@@ -227,10 +232,32 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * Typically this means to take the argument(s) provided to the constructor and return it here.
      * <p>
      * If there are multiple arguments that need to be bundled, create a single object to contain them, or use a Tuple.
-     * 
+     *
      * @return RequestArgumentType
      */
     public abstract RequestArgumentType getRequestArgument();
+
+    /**
+     * The priority level of this request for priority-based batch grouping.
+     * <p>
+     * Requests with the same priority will be grouped together into separate batches before execution.
+     * This allows high-priority requests to be batched and executed separately from low-priority requests,
+     * providing better isolation and service quality differentiation.
+     * <p>
+     * By default this returns 0 (normal priority). Override to provide custom priority logic.
+     * <p>
+     * Common priority values:
+     * <ul>
+     * <li>-1 or negative: Low priority requests (bulk operations, background jobs)</li>
+     * <li>0: Normal priority (default)</li>
+     * <li>1 or positive: High priority requests (interactive user requests, critical operations)</li>
+     * </ul>
+     *
+     * @return int representing the priority level (higher values = higher priority)
+     */
+    protected int getRequestPriority() {
+        return 0;
+    }
 
     /**
      * Factory method to create a new {@link HystrixCommand}{@code <BatchReturnType>} command object each time a batch needs to be executed.
@@ -257,15 +284,46 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * For example, a batch of 100 requests could be split into 4 different batches sharded on name (ie. a-g, h-n, o-t, u-z) that each result in a separate {@link HystrixCommand} being created and
      * executed for them.
      * <p>
-     * By default this method does nothing to the Collection and is a pass-thru.
-     * 
+     * By default, this method now groups requests by priority level as returned by {@link #getRequestPriority()}.
+     * Requests with the same priority are batched together into separate command executions.
+     * This provides better isolation between high-priority and low-priority requests.
+     * <p>
+     * To disable priority-based grouping and return to the original pass-through behavior, override {@link #getRequestPriority()} to always return the same value.
+     *
      * @param requests
      *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects containing the arguments of each request collapsed in this batch.
      * @return Collection of {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} objects sharded according to business rules.
      *         <p>The CollapsedRequest instances should not be modified or wrapped as the CollapsedRequest instance object contains state information needed to complete the execution.
      */
     protected Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
-        return Collections.singletonList(requests);
+        // Group requests by priority level
+        java.util.Map<Integer, java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>>> priorityGroups =
+            new java.util.HashMap<Integer, java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+
+        for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+            // Get the priority from the collapsed request
+            int priority = request.getPriority();
+
+            java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>> priorityGroup = priorityGroups.get(priority);
+            if (priorityGroup == null) {
+                priorityGroup = new java.util.ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+                priorityGroups.put(priority, priorityGroup);
+            }
+            priorityGroup.add(request);
+        }
+
+        // Return groups sorted by priority (highest first) for execution ordering
+        java.util.List<Integer> priorities = new java.util.ArrayList<Integer>(priorityGroups.keySet());
+        java.util.Collections.sort(priorities, java.util.Collections.reverseOrder());
+
+        java.util.List<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards =
+            new java.util.ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+
+        for (Integer priority : priorities) {
+            shards.add(priorityGroups.get(priority));
+        }
+
+        return shards;
     }
 
     /**
@@ -504,10 +562,20 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
     public interface CollapsedRequest<ResponseType, RequestArgumentType> {
         /**
          * The request argument passed into the {@link HystrixCollapser} instance constructor which was then collapsed.
-         * 
+         *
          * @return RequestArgumentType
          */
         RequestArgumentType getArgument();
+
+        /**
+         * The priority level of this collapsed request.
+         * <p>
+         * Used for priority-based batch grouping where requests with the same priority
+         * are batched together separately from requests with different priorities.
+         *
+         * @return int representing the priority level
+         */
+        int getPriority();
 
         /**
          * This corresponds in a OnNext(Response); OnCompleted pair of emissions.  It represents a single-value usecase.
@@ -529,7 +597,7 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
 
         /**
          * When set, any Observer will be OnErrored this exception
-         * 
+         *
          * @param exception exception to set on response
          * @throws IllegalStateException
          *             if called more than once or after setResponse/setComplete.
