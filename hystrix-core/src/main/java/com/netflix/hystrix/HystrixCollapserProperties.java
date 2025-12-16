@@ -35,6 +35,8 @@ public abstract class HystrixCollapserProperties {
     private static final Integer default_maxRequestsInBatch = Integer.MAX_VALUE;
     private static final Integer default_timerDelayInMilliseconds = 10;
     private static final Boolean default_requestCacheEnabled = true;
+    private static final Integer default_maxBatchShardSize = 50; // default maximum shard size for automatic batch splitting
+    private static final Boolean default_autoShardingEnabled = true; // enable automatic batch sharding by default
     /* package */ static final Integer default_metricsRollingStatisticalWindow = 10000;// default => statisticalWindow: 10000 = 10 seconds (and default of 10 buckets so each bucket is 1 second)
     private static final Integer default_metricsRollingStatisticalWindowBuckets = 10;// default => statisticalWindowBuckets: 10 = 10 buckets in a 10 second window so each bucket is 1 second
     private static final Boolean default_metricsRollingPercentileEnabled = true;
@@ -45,6 +47,8 @@ public abstract class HystrixCollapserProperties {
     private final HystrixProperty<Integer> maxRequestsInBatch;
     private final HystrixProperty<Integer> timerDelayInMilliseconds;
     private final HystrixProperty<Boolean> requestCacheEnabled;
+    private final HystrixProperty<Integer> maxBatchShardSize; // maximum size of each shard when auto-sharding is enabled
+    private final HystrixProperty<Boolean> autoShardingEnabled; // whether automatic batch sharding is enabled
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowBuckets; // number of buckets in the statisticalWindow
     private final HystrixProperty<Boolean> metricsRollingPercentileEnabled; // Whether monitoring should be enabled
@@ -64,6 +68,8 @@ public abstract class HystrixCollapserProperties {
         this.maxRequestsInBatch = getProperty(propertyPrefix, key, "maxRequestsInBatch", builder.getMaxRequestsInBatch(), default_maxRequestsInBatch);
         this.timerDelayInMilliseconds = getProperty(propertyPrefix, key, "timerDelayInMilliseconds", builder.getTimerDelayInMilliseconds(), default_timerDelayInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
+        this.maxBatchShardSize = getProperty(propertyPrefix, key, "maxBatchShardSize", builder.getMaxBatchShardSize(), default_maxBatchShardSize);
+        this.autoShardingEnabled = getProperty(propertyPrefix, key, "autoSharding.enabled", builder.getAutoShardingEnabled(), default_autoShardingEnabled);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -120,11 +126,31 @@ public abstract class HystrixCollapserProperties {
 
     /**
      * The number of milliseconds between batch executions (unless {@link #maxRequestsInBatch} is hit which will cause a batch to execute early.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> timerDelayInMilliseconds() {
         return timerDelayInMilliseconds;
+    }
+
+    /**
+     * The maximum size of each shard when automatic batch sharding is enabled.
+     * When a batch exceeds this size, it will be automatically split into multiple shards.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> maxBatchShardSize() {
+        return maxBatchShardSize;
+    }
+
+    /**
+     * Whether automatic batch sharding is enabled. When enabled, batches larger than
+     * maxBatchShardSize will be automatically split into smaller shards for processing.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> autoShardingEnabled() {
+        return autoShardingEnabled;
     }
 
     /**
@@ -217,6 +243,8 @@ public abstract class HystrixCollapserProperties {
         private Integer maxRequestsInBatch = null;
         private Integer timerDelayInMilliseconds = null;
         private Boolean requestCacheEnabled = null;
+        private Integer maxBatchShardSize = null;
+        private Boolean autoShardingEnabled = null;
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Integer metricsRollingPercentileBucketSize = null;
@@ -245,6 +273,14 @@ public abstract class HystrixCollapserProperties {
 
         public Boolean getRequestCacheEnabled() {
             return requestCacheEnabled;
+        }
+
+        public Integer getMaxBatchShardSize() {
+            return maxBatchShardSize;
+        }
+
+        public Boolean getAutoShardingEnabled() {
+            return autoShardingEnabled;
         }
 
         public Integer getMetricsRollingStatisticalWindowInMilliseconds() {
@@ -292,6 +328,16 @@ public abstract class HystrixCollapserProperties {
 
         public Setter withRequestCacheEnabled(boolean value) {
             this.requestCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withMaxBatchShardSize(int value) {
+            this.maxBatchShardSize = value;
+            return this;
+        }
+
+        public Setter withAutoShardingEnabled(boolean value) {
+            this.autoShardingEnabled = value;
             return this;
         }
 
@@ -358,6 +404,16 @@ public abstract class HystrixCollapserProperties {
                 @Override
                 public HystrixProperty<Integer> timerDelayInMilliseconds() {
                     return HystrixProperty.Factory.asProperty(builder.timerDelayInMilliseconds);
+                }
+
+                @Override
+                public HystrixProperty<Integer> maxBatchShardSize() {
+                    return HystrixProperty.Factory.asProperty(builder.maxBatchShardSize);
+                }
+
+                @Override
+                public HystrixProperty<Boolean> autoShardingEnabled() {
+                    return HystrixProperty.Factory.asProperty(builder.autoShardingEnabled);
                 }
 
             };

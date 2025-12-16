@@ -15,7 +15,9 @@
  */
 package com.netflix.hystrix.collapser;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -165,6 +167,13 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             try {
                 // shard batches
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
+
+                // Apply automatic sharding if enabled
+                if (properties.autoShardingEnabled().get()) {
+                    int maxShardSize = properties.maxBatchShardSize().get();
+                    shards = applyAutomaticSharding(shards, maxShardSize);
+                }
+
                 // for each shard execute its requests 
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
@@ -246,6 +255,49 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 batchLock.writeLock().unlock();
             }
         }
+    }
+
+    /**
+     * Applies automatic sharding to split large shards into smaller ones based on maxShardSize.
+     * This method takes the shards produced by the user's shardRequests method and further
+     * subdivides any shard that exceeds maxShardSize into multiple smaller shards.
+     *
+     * @param shards the original collection of shards
+     * @param maxShardSize the maximum size each shard should be
+     * @return a new collection with shards split to respect maxShardSize
+     */
+    private Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> applyAutomaticSharding(
+            Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards,
+            int maxShardSize) {
+
+        List<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> result = new ArrayList<>();
+
+        for (Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shard : shards) {
+            if (shard.size() <= maxShardSize) {
+                // Shard is within size limit, add as-is
+                result.add(shard);
+            } else {
+                // Shard exceeds limit, split it into multiple smaller shards
+                List<CollapsedRequest<ResponseType, RequestArgumentType>> currentShard = new ArrayList<>();
+                for (CollapsedRequest<ResponseType, RequestArgumentType> request : shard) {
+                    currentShard.add(request);
+                    if (currentShard.size() >= maxShardSize) {
+                        // Current shard reached max size, add to result and start a new one
+                        result.add(new ArrayList<>(currentShard));
+                        currentShard.clear();
+                    }
+                }
+                // Add any remaining requests as final shard
+                if (!currentShard.isEmpty()) {
+                    result.add(currentShard);
+                }
+            }
+        }
+
+        logger.debug("Automatic sharding applied: {} original shards split into {} shards with max size {}",
+                shards.size(), result.size(), maxShardSize);
+
+        return result;
     }
 
     public void shutdown() {
