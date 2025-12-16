@@ -41,6 +41,7 @@ public abstract class HystrixCollapserProperties {
     private static final Integer default_metricsRollingPercentileWindow = 60000; // default to 1 minute for RollingPercentile
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
+    private static final Integer default_requestCacheTTLInMilliseconds = 5000; // default to 5 seconds TTL for cached responses
 
     private final HystrixProperty<Integer> maxRequestsInBatch;
     private final HystrixProperty<Integer> timerDelayInMilliseconds;
@@ -51,6 +52,7 @@ public abstract class HystrixCollapserProperties {
     private final HystrixProperty<Integer> metricsRollingPercentileWindowInMilliseconds; // number of milliseconds that will be tracked in RollingPercentile
     private final HystrixProperty<Integer> metricsRollingPercentileWindowBuckets; // number of buckets percentileWindow will be divided into
     private final HystrixProperty<Integer> metricsRollingPercentileBucketSize; // how many values will be stored in each percentileWindowBucket
+    private final HystrixProperty<Integer> requestCacheTTLInMilliseconds; // TTL for cached responses in milliseconds
 
     protected HystrixCollapserProperties(HystrixCollapserKey collapserKey) {
         this(collapserKey, new Setter(), "hystrix");
@@ -70,6 +72,7 @@ public abstract class HystrixCollapserProperties {
         this.metricsRollingPercentileWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingPercentile.timeInMilliseconds", builder.getMetricsRollingPercentileWindowInMilliseconds(), default_metricsRollingPercentileWindow);
         this.metricsRollingPercentileWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingPercentile.numBuckets", builder.getMetricsRollingPercentileWindowBuckets(), default_metricsRollingPercentileWindowBuckets);
         this.metricsRollingPercentileBucketSize = getProperty(propertyPrefix, key, "metrics.rollingPercentile.bucketSize", builder.getMetricsRollingPercentileBucketSize(), default_metricsRollingPercentileBucketSize);
+        this.requestCacheTTLInMilliseconds = getProperty(propertyPrefix, key, "requestCache.ttlInMilliseconds", builder.getRequestCacheTTLInMilliseconds(), default_requestCacheTTLInMilliseconds);
     }
 
     private static HystrixProperty<Integer> getProperty(String propertyPrefix, HystrixCollapserKey key, String instanceProperty, Integer builderOverrideValue, Integer defaultValue) {
@@ -107,6 +110,18 @@ public abstract class HystrixCollapserProperties {
      */
     public HystrixProperty<Boolean> requestCacheEnabled() {
         return requestCacheEnabled;
+    }
+
+    /**
+     * Time-to-live (TTL) in milliseconds for cached responses in {@link HystrixRequestCache}.
+     * <p>
+     * Cached responses older than this TTL will be automatically invalidated and evicted from the cache.
+     * A value of 0 or negative means TTL is disabled and cache entries live for the duration of the request.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> requestCacheTTLInMilliseconds() {
+        return requestCacheTTLInMilliseconds;
     }
 
     /**
@@ -223,6 +238,7 @@ public abstract class HystrixCollapserProperties {
         private Boolean metricsRollingPercentileEnabled = null;
         private Integer metricsRollingPercentileWindowInMilliseconds = null;
         private Integer metricsRollingPercentileWindowBuckets = null;
+        private Integer requestCacheTTLInMilliseconds = null;
 
         private Setter() {
         }
@@ -271,6 +287,10 @@ public abstract class HystrixCollapserProperties {
             return metricsRollingPercentileWindowBuckets;
         }
 
+        public Integer getRequestCacheTTLInMilliseconds() {
+            return requestCacheTTLInMilliseconds;
+        }
+
         /**
          * Deprecated because the collapsingEnabled setting doesn't do anything.
          */
@@ -292,6 +312,11 @@ public abstract class HystrixCollapserProperties {
 
         public Setter withRequestCacheEnabled(boolean value) {
             this.requestCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withRequestCacheTTLInMilliseconds(int value) {
+            this.requestCacheTTLInMilliseconds = value;
             return this;
         }
 

@@ -97,6 +97,10 @@ public class HystrixRequestCache {
     // suppressing warnings because we are using a raw Future since it's in a heterogeneous ConcurrentHashMap cache
     @SuppressWarnings({ "unchecked" })
     /* package */<T> HystrixCachedObservable<T> get(String cacheKey) {
+        return get(cacheKey, 0);
+    }
+
+    /* package */<T> HystrixCachedObservable<T> get(String cacheKey, long ttlMillis) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
             ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
@@ -104,7 +108,19 @@ public class HystrixRequestCache {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }
             /* look for the stored value */
-            return (HystrixCachedObservable<T>) cacheInstance.get(key);
+            HystrixCachedObservable<T> cached = (HystrixCachedObservable<T>) cacheInstance.get(key);
+
+            // Check if cached value is expired based on TTL
+            if (cached != null && ttlMillis > 0) {
+                long currentTime = System.currentTimeMillis();
+                if (cached.isExpired(currentTime, ttlMillis)) {
+                    // Remove expired entry
+                    cacheInstance.remove(key);
+                    return null;
+                }
+            }
+
+            return cached;
         }
         return null;
     }
