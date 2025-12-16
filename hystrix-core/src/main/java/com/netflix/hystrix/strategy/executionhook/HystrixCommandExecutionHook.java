@@ -53,6 +53,36 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked when a command is queued for execution with priority information.
+     * <p>
+     * This hook allows implementations to track or react to commands based on their priority.
+     * It is called after the command is assigned to a thread pool queue but before actual execution begins.
+     *
+     * @param commandInstance The HystrixInvokable instance being queued.
+     * @param priority The priority level assigned to this command.
+     *
+     * @since 1.6
+     */
+    public <T> void onPriorityQueued(HystrixInvokable<T> commandInstance, com.netflix.hystrix.HystrixCommandPriority priority) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when a higher-priority command preempts or delays a lower-priority command.
+     * <p>
+     * This hook is called when priority-based scheduling causes a command to wait
+     * or be deprioritized in favor of a higher-priority command.
+     *
+     * @param waitingCommand The lower-priority command that is waiting.
+     * @param preemptingPriority The priority level that caused the delay.
+     *
+     * @since 1.6
+     */
+    public <T> void onPriorityDelay(HystrixInvokable<T> waitingCommand, com.netflix.hystrix.HystrixCommandPriority preemptingPriority) {
+        //do nothing by default
+    }
+
+    /**
      * Invoked when {@link HystrixInvokable} emits a value.
      *
      * @param commandInstance The executing HystrixInvokable instance.

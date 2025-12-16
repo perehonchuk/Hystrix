@@ -82,6 +82,11 @@ import java.util.concurrent.atomic.AtomicReference;
     protected final HystrixCommandGroupKey commandGroup;
 
     /**
+     * Command priority level - determines execution order when resources are constrained
+     */
+    protected final HystrixCommandPriority priority;
+
+    /**
      * Plugin implementations
      */
     protected final HystrixEventNotifier eventNotifier;
@@ -172,6 +177,9 @@ import java.util.concurrent.atomic.AtomicReference;
         this.concurrencyStrategy = HystrixPlugins.getInstance().getConcurrencyStrategy();
         HystrixMetricsPublisherFactory.createOrRetrievePublisherForCommand(this.commandKey, this.commandGroup, this.metrics, this.circuitBreaker, this.properties);
         this.executionHook = initExecutionHook(executionHook);
+
+        // Initialize priority - default to NORMAL, can be overridden via getPriority() method
+        this.priority = initPriority();
 
         this.requestCache = HystrixRequestCache.getInstance(this.commandKey, this.concurrencyStrategy);
         this.currentRequestLog = initRequestLog(this.properties.requestLogEnabled().get(), this.concurrencyStrategy);
@@ -290,8 +298,49 @@ import java.util.concurrent.atomic.AtomicReference;
     }
 
     /**
+     * Initialize the command priority.
+     * <p>
+     * By default, returns NORMAL priority. Subclasses can override {@link #getPriority()} to provide custom priority.
+     *
+     * @return the command priority level
+     */
+    private HystrixCommandPriority initPriority() {
+        try {
+            HystrixCommandPriority customPriority = getPriority();
+            return customPriority != null ? customPriority : HystrixCommandPriority.NORMAL;
+        } catch (Exception e) {
+            // If getPriority() throws an exception, default to NORMAL
+            logger.warn("Failed to get command priority, defaulting to NORMAL", e);
+            return HystrixCommandPriority.NORMAL;
+        }
+    }
+
+    /**
+     * Override this method to provide a custom priority for this command.
+     * <p>
+     * Priority affects execution order when thread pool queues are full,
+     * semaphore acquisition order, and fallback execution scheduling.
+     * <p>
+     * Default implementation returns NORMAL priority.
+     *
+     * @return the priority level for this command (default: NORMAL)
+     */
+    protected HystrixCommandPriority getPriority() {
+        return HystrixCommandPriority.NORMAL;
+    }
+
+    /**
+     * Returns the configured priority for this command instance.
+     *
+     * @return the command priority level
+     */
+    public HystrixCommandPriority getCommandPriority() {
+        return this.priority;
+    }
+
+    /**
      * Allow the Collapser to mark this command instance as being used for a collapsed request and how many requests were collapsed.
-     * 
+     *
      * @param sizeOfBatch number of commands in request batch
      */
     /* package */void markAsCollapsedCommand(HystrixCollapserKey collapserKey, int sizeOfBatch) {
@@ -519,6 +568,9 @@ import java.util.concurrent.atomic.AtomicReference;
         // mark that we're starting execution on the ExecutionHook
         // if this hook throws an exception, then a fast-fail occurs with no fallback.  No state is left inconsistent
         executionHook.onStart(_cmd);
+
+        // Notify execution hook about command priority for tracking/monitoring
+        executionHook.onPriorityQueued(_cmd, _cmd.priority);
 
         /* determine if we're allowed to execute */
         if (circuitBreaker.attemptExecution()) {
