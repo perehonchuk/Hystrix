@@ -149,6 +149,11 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
         collapserInstanceWrapper = new HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType>() {
 
             @Override
+            public Collection<CollapsedRequest<ResponseType, RequestArgumentType>> sortBatchRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+                return self.sortBatchRequests(requests);
+            }
+
+            @Override
             public Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = self.shardRequests(requests);
                 self.metrics.markShards(shards.size());
@@ -335,6 +340,33 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      */
     protected Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
         return Collections.singletonList(requests);
+    }
+
+    /**
+     * Override to sort/prioritize requests within a batch before they are executed.
+     * <p>
+     * This method is called before batch execution and allows you to control the order in which
+     * requests are processed. This can be useful for:
+     * <ul>
+     * <li>Prioritizing high-priority requests to be processed first</li>
+     * <li>Grouping similar requests together for better cache locality</li>
+     * <li>Implementing custom ordering logic based on request arguments</li>
+     * </ul>
+     * <p>
+     * By default this method returns the requests in their natural (insertion) order without sorting.
+     * <p>
+     * IMPORTANT: The order returned by this method affects the order in which requests are processed.
+     * <p>
+     * Note: This sorting happens BEFORE {@link #shardRequests}, so if you implement both methods,
+     * sorting will be applied to the full batch first, then sharding will split the sorted batch.
+     *
+     * @param requests
+     *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects to be sorted.
+     * @return Collection of {@code CollapsedRequest<ResponseType, RequestArgumentType>} objects in the desired execution order.
+     *         <p>The CollapsedRequest instances should not be modified or wrapped as the CollapsedRequest instance object contains state information needed to complete the execution.
+     */
+    protected Collection<CollapsedRequest<ResponseType, RequestArgumentType>> sortBatchRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        return requests;
     }
 
     /**

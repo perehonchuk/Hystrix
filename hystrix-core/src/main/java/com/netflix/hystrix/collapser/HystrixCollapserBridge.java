@@ -31,6 +31,8 @@ import com.netflix.hystrix.HystrixCollapserKey;
  */
 public interface HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> {
 
+    Collection<CollapsedRequest<ResponseType, RequestArgumentType>> sortBatchRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
+
     Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
 
     Observable<BatchReturnType> createObservableCommand(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
