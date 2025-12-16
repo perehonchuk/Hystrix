@@ -19,6 +19,7 @@ import com.netflix.hystrix.strategy.concurrency.HystrixConcurrencyStrategy;
 import com.netflix.hystrix.strategy.concurrency.HystrixRequestVariableDefault;
 import com.netflix.hystrix.strategy.concurrency.HystrixRequestVariableHolder;
 import com.netflix.hystrix.strategy.concurrency.HystrixRequestVariableLifecycle;
+import com.netflix.hystrix.util.HystrixRollingNumberEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import rx.Observable;
@@ -143,7 +144,7 @@ public class HystrixRequestCache {
 
     /**
      * Clear the cache for a given cacheKey.
-     * 
+     *
      * @param cacheKey
      *            key as defined by {@link HystrixCommand#getCacheKey()}
      */
@@ -156,8 +157,27 @@ public class HystrixRequestCache {
             }
 
             /* remove this cache key */
-            cacheInstance.remove(key);
+            HystrixCachedObservable<?> removed = cacheInstance.remove(key);
+
+            /* emit cache eviction event if something was actually removed */
+            if (removed != null) {
+                HystrixCommandKey commandKey = getCommandKey();
+                if (commandKey != null) {
+                    // Notify via the event notifier when cache entry is evicted
+                    HystrixPlugins.getInstance().getEventNotifier().markEvent(HystrixEventType.CACHE_EVICTED, commandKey);
+                }
+            }
         }
+    }
+
+    /**
+     * Get the HystrixCommandKey for this cache instance
+     */
+    private HystrixCommandKey getCommandKey() {
+        if (rcKey != null && rcKey.type == 1 && rcKey.key != null) {
+            return HystrixCommandKey.Factory.asKey(rcKey.key);
+        }
+        return null;
     }
 
     /**
