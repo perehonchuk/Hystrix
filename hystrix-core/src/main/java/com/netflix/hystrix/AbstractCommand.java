@@ -897,6 +897,77 @@ import java.util.concurrent.atomic.AtomicReference;
                 .lift(new DeprecatedOnRunHookApplication(_cmd));
     }
 
+    private Observable<R> getUserExecutionObservableWithRetry(final AbstractCommand<R> _cmd) {
+        if (!properties.executionRetryEnabled().get()) {
+            return getUserExecutionObservable(_cmd);
+        }
+
+        final int maxRetries = properties.executionMaxRetryAttempts().get();
+        final int retryDelay = properties.executionRetryDelayInMilliseconds().get();
+        final AtomicInteger attemptNumber = new AtomicInteger(0);
+
+        return getUserExecutionObservable(_cmd)
+                .onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                    @Override
+                    public Observable<R> call(Throwable throwable) {
+                        int currentAttempt = attemptNumber.incrementAndGet();
+
+                        if (currentAttempt <= maxRetries) {
+                            // Retry logic - invoke hook and retry
+                            final Exception ex = getExceptionFromThrowable(throwable);
+                            try {
+                                executionHook.onRetryAttempt(_cmd, currentAttempt, ex);
+                            } catch (Throwable hookEx) {
+                                logger.warn("Error calling HystrixCommandExecutionHook.onRetryAttempt", hookEx);
+                            }
+
+                            eventNotifier.markEvent(HystrixEventType.RETRY_ATTEMPT, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.RETRY_ATTEMPT);
+
+                            // Delay before retry
+                            return Observable.timer(retryDelay, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                    .flatMap(new Func1<Long, Observable<R>>() {
+                                        @Override
+                                        public Observable<R> call(Long aLong) {
+                                            return getUserExecutionObservable(_cmd);
+                                        }
+                                    })
+                                    .onErrorResumeNext(this); // Recursively retry
+                        } else {
+                            // Exhausted all retries
+                            final Exception ex = getExceptionFromThrowable(throwable);
+                            try {
+                                executionHook.onRetryExhausted(_cmd, attemptNumber.get(), ex);
+                            } catch (Throwable hookEx) {
+                                logger.warn("Error calling HystrixCommandExecutionHook.onRetryExhausted", hookEx);
+                            }
+
+                            eventNotifier.markEvent(HystrixEventType.RETRY_EXHAUSTED, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.RETRY_EXHAUSTED);
+
+                            return Observable.error(throwable);
+                        }
+                    }
+                })
+                .doOnNext(new Action1<R>() {
+                    @Override
+                    public void call(R r) {
+                        int currentAttempt = attemptNumber.get();
+                        if (currentAttempt > 0) {
+                            // Success after retry
+                            try {
+                                executionHook.onRetrySuccess(_cmd, currentAttempt);
+                            } catch (Throwable hookEx) {
+                                logger.warn("Error calling HystrixCommandExecutionHook.onRetrySuccess", hookEx);
+                            }
+
+                            eventNotifier.markEvent(HystrixEventType.RETRY_SUCCESS, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.RETRY_SUCCESS);
+                        }
+                    }
+                });
+    }
+
     private Observable<R> handleRequestCacheHitAndEmitValues(final HystrixCommandResponseFromCache<R> fromCache, final AbstractCommand<R> _cmd) {
         try {
             executionHook.onCacheHit(this);

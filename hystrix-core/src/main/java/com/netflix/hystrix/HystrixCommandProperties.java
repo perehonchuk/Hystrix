@@ -62,6 +62,9 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Boolean default_executionRetryEnabled = false; // default => retry disabled
+    private static final Integer default_executionMaxRetryAttempts = 2; // default => maximum 2 retry attempts (3 total attempts including initial)
+    private static final Integer default_executionRetryDelayInMilliseconds = 100; // default => 100ms delay between retry attempts
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +91,9 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> executionRetryEnabled; // Whether automatic retry on execution failure is enabled.
+    private final HystrixProperty<Integer> executionMaxRetryAttempts; // Maximum number of retry attempts (excluding initial execution).
+    private final HystrixProperty<Integer> executionRetryDelayInMilliseconds; // Delay in milliseconds between retry attempts.
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -136,6 +142,9 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.executionRetryEnabled = getProperty(propertyPrefix, key, "execution.retry.enabled", builder.getExecutionRetryEnabled(), default_executionRetryEnabled);
+        this.executionMaxRetryAttempts = getProperty(propertyPrefix, key, "execution.retry.maxAttempts", builder.getExecutionMaxRetryAttempts(), default_executionMaxRetryAttempts);
+        this.executionRetryDelayInMilliseconds = getProperty(propertyPrefix, key, "execution.retry.delayInMilliseconds", builder.getExecutionRetryDelayInMilliseconds(), default_executionRetryDelayInMilliseconds);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -419,11 +428,43 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
         return requestLogEnabled;
+    }
+
+    /**
+     * Whether automatic retry on execution failure is enabled.
+     * When enabled, failed executions will be retried up to the maximum number of attempts
+     * specified by {@link #executionMaxRetryAttempts()} before falling back.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> executionRetryEnabled() {
+        return executionRetryEnabled;
+    }
+
+    /**
+     * Maximum number of retry attempts (excluding the initial execution).
+     * For example, a value of 2 means up to 3 total attempts (1 initial + 2 retries).
+     * Only applicable when {@link #executionRetryEnabled()} is true.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> executionMaxRetryAttempts() {
+        return executionMaxRetryAttempts;
+    }
+
+    /**
+     * Delay in milliseconds between retry attempts.
+     * Only applicable when {@link #executionRetryEnabled()} is true.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> executionRetryDelayInMilliseconds() {
+        return executionRetryDelayInMilliseconds;
     }
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
@@ -560,6 +601,9 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Boolean executionRetryEnabled = null;
+        private Integer executionMaxRetryAttempts = null;
+        private Integer executionRetryDelayInMilliseconds = null;
 
         /* package */ Setter() {
         }
@@ -662,6 +706,18 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Boolean getExecutionRetryEnabled() {
+            return executionRetryEnabled;
+        }
+
+        public Integer getExecutionMaxRetryAttempts() {
+            return executionMaxRetryAttempts;
+        }
+
+        public Integer getExecutionRetryDelayInMilliseconds() {
+            return executionRetryDelayInMilliseconds;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -785,6 +841,21 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withExecutionRetryEnabled(boolean value) {
+            this.executionRetryEnabled = value;
+            return this;
+        }
+
+        public Setter withExecutionMaxRetryAttempts(int value) {
+            this.executionMaxRetryAttempts = value;
+            return this;
+        }
+
+        public Setter withExecutionRetryDelayInMilliseconds(int value) {
+            this.executionRetryDelayInMilliseconds = value;
             return this;
         }
     }
