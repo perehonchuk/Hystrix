@@ -640,6 +640,43 @@ import java.util.concurrent.atomic.AtomicReference;
             execution = executeCommandWithSpecifiedIsolation(_cmd);
         }
 
+        // Add retry logic if enabled
+        if (properties.executionRetryEnabled().get()) {
+            final int maxAttempts = properties.executionRetryMaxAttempts().get();
+            final int retryDelay = properties.executionRetryDelayMilliseconds().get();
+
+            execution = execution.retryWhen(new Func1<Observable<? extends Throwable>, Observable<?>>() {
+                private final AtomicInteger attemptCount = new AtomicInteger(0);
+
+                @Override
+                public Observable<?> call(Observable<? extends Throwable> attempts) {
+                    return attempts.flatMap(new Func1<Throwable, Observable<?>>() {
+                        @Override
+                        public Observable<?> call(Throwable throwable) {
+                            int currentAttempt = attemptCount.incrementAndGet();
+
+                            // Don't retry HystrixBadRequestException or if we've exceeded max attempts
+                            if (throwable instanceof HystrixBadRequestException || currentAttempt > maxAttempts) {
+                                return Observable.error(throwable);
+                            }
+
+                            // Log retry attempt
+                            logger.debug("Retrying command execution, attempt {}/{}", currentAttempt, maxAttempts);
+                            eventNotifier.markEvent(HystrixEventType.RETRY, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.RETRY);
+
+                            // Delay before retry
+                            if (retryDelay > 0) {
+                                return Observable.timer(retryDelay, java.util.concurrent.TimeUnit.MILLISECONDS);
+                            } else {
+                                return Observable.just(null);
+                            }
+                        }
+                    });
+                }
+            });
+        }
+
         return execution.doOnNext(markEmits)
                 .doOnCompleted(markOnCompleted)
                 .onErrorResumeNext(handleFallback)
