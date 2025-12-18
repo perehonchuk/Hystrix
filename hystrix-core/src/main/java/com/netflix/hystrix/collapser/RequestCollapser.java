@@ -151,7 +151,9 @@ public class RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType
                         RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> currentBatch = batch.get();
                         // 1) it can be null if it got shutdown
                         // 2) we don't execute this batch if it has no requests and let it wait until next tick to be executed
-                        if (currentBatch != null && currentBatch.getSize() > 0) {
+                        // 3) NEW: we also check if the batch has met the minimum size requirement before executing
+                        int minBatchSize = properties.minRequestsInBatch().get();
+                        if (currentBatch != null && currentBatch.getSize() >= minBatchSize) {
                             // do execution within context of wrapped Callable
                             createNewBatchAndExecutePreviousIfNeeded(currentBatch);
                         }

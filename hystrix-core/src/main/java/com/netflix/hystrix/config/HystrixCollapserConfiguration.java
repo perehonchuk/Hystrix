@@ -21,14 +21,16 @@ import com.netflix.hystrix.HystrixCollapserProperties;
 public class HystrixCollapserConfiguration {
     private final HystrixCollapserKey collapserKey;
     private final int maxRequestsInBatch;
+    private final int minRequestsInBatch;
     private final int timerDelayInMilliseconds;
     private final boolean requestCacheEnabled;
     private final CollapserMetricsConfig collapserMetricsConfig;
 
-    public HystrixCollapserConfiguration(HystrixCollapserKey collapserKey, int maxRequestsInBatch, int timerDelayInMilliseconds,
+    public HystrixCollapserConfiguration(HystrixCollapserKey collapserKey, int maxRequestsInBatch, int minRequestsInBatch, int timerDelayInMilliseconds,
                                          boolean requestCacheEnabled, CollapserMetricsConfig collapserMetricsConfig) {
         this.collapserKey = collapserKey;
         this.maxRequestsInBatch = maxRequestsInBatch;
+        this.minRequestsInBatch = minRequestsInBatch;
         this.timerDelayInMilliseconds = timerDelayInMilliseconds;
         this.requestCacheEnabled = requestCacheEnabled;
         this.collapserMetricsConfig = collapserMetricsConfig;
@@ -46,6 +48,7 @@ public class HystrixCollapserConfiguration {
         return new HystrixCollapserConfiguration(
                 collapserKey,
                 collapserProperties.maxRequestsInBatch().get(),
+                collapserProperties.minRequestsInBatch().get(),
                 collapserProperties.timerDelayInMilliseconds().get(),
                 collapserProperties.requestCacheEnabled().get(),
                 collapserMetricsConfig
@@ -58,6 +61,10 @@ public class HystrixCollapserConfiguration {
 
     public int getMaxRequestsInBatch() {
         return maxRequestsInBatch;
+    }
+
+    public int getMinRequestsInBatch() {
+        return minRequestsInBatch;
     }
 
     public int getTimerDelayInMilliseconds() {

@@ -33,6 +33,7 @@ public abstract class HystrixCollapserProperties {
 
     /* defaults */
     private static final Integer default_maxRequestsInBatch = Integer.MAX_VALUE;
+    private static final Integer default_minRequestsInBatch = 1;
     private static final Integer default_timerDelayInMilliseconds = 10;
     private static final Boolean default_requestCacheEnabled = true;
     /* package */ static final Integer default_metricsRollingStatisticalWindow = 10000;// default => statisticalWindow: 10000 = 10 seconds (and default of 10 buckets so each bucket is 1 second)
@@ -43,6 +44,7 @@ public abstract class HystrixCollapserProperties {
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
 
     private final HystrixProperty<Integer> maxRequestsInBatch;
+    private final HystrixProperty<Integer> minRequestsInBatch;
     private final HystrixProperty<Integer> timerDelayInMilliseconds;
     private final HystrixProperty<Boolean> requestCacheEnabled;
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
@@ -62,6 +64,7 @@ public abstract class HystrixCollapserProperties {
 
     protected HystrixCollapserProperties(HystrixCollapserKey key, Setter builder, String propertyPrefix) {
         this.maxRequestsInBatch = getProperty(propertyPrefix, key, "maxRequestsInBatch", builder.getMaxRequestsInBatch(), default_maxRequestsInBatch);
+        this.minRequestsInBatch = getProperty(propertyPrefix, key, "minRequestsInBatch", builder.getMinRequestsInBatch(), default_minRequestsInBatch);
         this.timerDelayInMilliseconds = getProperty(propertyPrefix, key, "timerDelayInMilliseconds", builder.getTimerDelayInMilliseconds(), default_timerDelayInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
@@ -111,7 +114,7 @@ public abstract class HystrixCollapserProperties {
 
     /**
      * The maximum number of requests allowed in a batch before triggering a batch execution.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> maxRequestsInBatch() {
@@ -119,8 +122,19 @@ public abstract class HystrixCollapserProperties {
     }
 
     /**
+     * The minimum number of requests required in a batch before execution is triggered.
+     * Even if the timer expires, the batch will not execute until at least this many
+     * requests have been accumulated.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> minRequestsInBatch() {
+        return minRequestsInBatch;
+    }
+
+    /**
      * The number of milliseconds between batch executions (unless {@link #maxRequestsInBatch} is hit which will cause a batch to execute early.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> timerDelayInMilliseconds() {
@@ -215,6 +229,7 @@ public abstract class HystrixCollapserProperties {
     public static class Setter {
         @Deprecated private Boolean collapsingEnabled = null;
         private Integer maxRequestsInBatch = null;
+        private Integer minRequestsInBatch = null;
         private Integer timerDelayInMilliseconds = null;
         private Boolean requestCacheEnabled = null;
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
@@ -237,6 +252,10 @@ public abstract class HystrixCollapserProperties {
 
         public Integer getMaxRequestsInBatch() {
             return maxRequestsInBatch;
+        }
+
+        public Integer getMinRequestsInBatch() {
+            return minRequestsInBatch;
         }
 
         public Integer getTimerDelayInMilliseconds() {
@@ -282,6 +301,11 @@ public abstract class HystrixCollapserProperties {
 
         public Setter withMaxRequestsInBatch(int value) {
             this.maxRequestsInBatch = value;
+            return this;
+        }
+
+        public Setter withMinRequestsInBatch(int value) {
+            this.minRequestsInBatch = value;
             return this;
         }
 
@@ -331,6 +355,7 @@ public abstract class HystrixCollapserProperties {
         /* package */static Setter getUnitTestPropertiesBuilder() {
             return new Setter()
                     .withMaxRequestsInBatch(Integer.MAX_VALUE)
+                    .withMinRequestsInBatch(1)
                     .withTimerDelayInMilliseconds(10)
                     .withRequestCacheEnabled(true);
         }
@@ -353,6 +378,11 @@ public abstract class HystrixCollapserProperties {
                 @Override
                 public HystrixProperty<Integer> maxRequestsInBatch() {
                     return HystrixProperty.Factory.asProperty(builder.maxRequestsInBatch);
+                }
+
+                @Override
+                public HystrixProperty<Integer> minRequestsInBatch() {
+                    return HystrixProperty.Factory.asProperty(builder.minRequestsInBatch);
                 }
 
                 @Override
