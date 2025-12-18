@@ -44,6 +44,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private final HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser;
     private final int maxBatchSize;
+    private final int minBatchSizeForAutoExecution;
     private final AtomicBoolean batchStarted = new AtomicBoolean();
 
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
@@ -56,6 +57,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
         this.maxBatchSize = maxBatchSize;
+        this.minBatchSizeForAutoExecution = properties.minBatchSizeForAutoExecution().get();
     }
 
     /**
@@ -103,6 +105,12 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                             return Observable.error(new IllegalArgumentException("Duplicate argument in collapser batch : [" + arg + "]  This is not supported.  Please turn request-caching on for HystrixCollapser:" + commandCollapser.getCollapserKey().name() + " or prevent duplicates from making it into the batch!"));
                         }
                     } else {
+                        // Check if minimum batch size has been reached for auto-execution
+                        int currentSize = argumentMap.size();
+                        if (currentSize >= minBatchSizeForAutoExecution && currentSize < maxBatchSize) {
+                            // Trigger early batch execution before timer expires
+                            executeBatchIfNotAlreadyStarted();
+                        }
                         return collapsedRequest.toObservable();
                     }
 
