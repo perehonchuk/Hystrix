@@ -228,6 +228,50 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked when the command execution is rejected by the thread pool due to queue saturation or pool exhaustion.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6
+     */
+    public <T> void onThreadPoolRejected(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the command execution is rejected by the semaphore due to reaching the configured concurrency limit.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6
+     */
+    public <T> void onSemaphoreRejected(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the command is short-circuited and not attempted due to the circuit breaker being open.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6
+     */
+    public <T> void onShortCircuited(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the fallback execution is rejected by the fallback semaphore due to reaching the configured concurrency limit.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6
+     */
+    public <T> void onFallbackRejected(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
      * DEPRECATED: Change usages of this to {@link #onExecutionStart}.
      *
      * Invoked before {@link HystrixCommand#run()} is about to be executed.
