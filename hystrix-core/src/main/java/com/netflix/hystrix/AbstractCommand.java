@@ -125,6 +125,9 @@ import java.util.concurrent.atomic.AtomicReference;
     protected final AtomicReference<TimedOutStatus> isCommandTimedOut = new AtomicReference<TimedOutStatus>(TimedOutStatus.NOT_EXECUTED);
     protected volatile Action0 endCurrentThreadExecutingCommand;
 
+    /* Tracks whether retry before fallback has been attempted */
+    protected final AtomicBoolean hasAttemptedRetryBeforeFallback = new AtomicBoolean(false);
+
     /**
      * Instance of RequestCache logic
      */
@@ -995,7 +998,44 @@ import java.util.concurrent.atomic.AtomicReference;
     }
 
     private Observable<R> handleTimeoutViaFallback() {
-        return getFallbackOrThrowException(this, HystrixEventType.TIMEOUT, FailureType.TIMEOUT, "timed-out", new TimeoutException());
+        final TimeoutException timeoutException = new TimeoutException();
+
+        // Check if we should retry before fallback
+        if (properties.executionRetryBeforeFallbackEnabled().get() &&
+            hasAttemptedRetryBeforeFallback.compareAndSet(false, true)) {
+            logger.debug("Attempting retry after timeout before fallback with delay of {}ms",
+                properties.executionRetryDelayInMilliseconds().get());
+
+            final int retryDelay = properties.executionRetryDelayInMilliseconds().get();
+            final AbstractCommand<R> cmd = this;
+
+            return Observable.timer(retryDelay, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .flatMap(new Func1<Long, Observable<R>>() {
+                    @Override
+                    public Observable<R> call(Long tick) {
+                        logger.debug("Executing retry attempt after timeout with {}ms delay", retryDelay);
+                        return getExecutionObservable()
+                            .doOnError(new Action1<Throwable>() {
+                                @Override
+                                public void call(Throwable t) {
+                                    Exception e = getExceptionFromThrowable(t);
+                                    executionResult = executionResult.setExecutionException(e);
+                                }
+                            })
+                            .onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                                @Override
+                                public Observable<R> call(Throwable retryError) {
+                                    logger.debug("Retry attempt after timeout failed, proceeding to fallback", retryError);
+                                    return getFallbackOrThrowException(cmd, HystrixEventType.TIMEOUT,
+                                        FailureType.TIMEOUT, "timed-out after retry",
+                                        getExceptionFromThrowable(retryError));
+                                }
+                            });
+                    }
+                });
+        }
+
+        return getFallbackOrThrowException(this, HystrixEventType.TIMEOUT, FailureType.TIMEOUT, "timed-out", timeoutException);
     }
 
     private Observable<R> handleBadRequestByEmittingError(Exception underlying) {
@@ -1032,6 +1072,42 @@ import java.util.concurrent.atomic.AtomicReference;
 
         // record the exception
         executionResult = executionResult.setException(underlying);
+
+        // Check if we should retry before fallback
+        if (properties.executionRetryBeforeFallbackEnabled().get() &&
+            hasAttemptedRetryBeforeFallback.compareAndSet(false, true)) {
+            logger.debug("Attempting retry before fallback with delay of {}ms",
+                properties.executionRetryDelayInMilliseconds().get());
+
+            final int retryDelay = properties.executionRetryDelayInMilliseconds().get();
+            final AbstractCommand<R> cmd = this;
+
+            return Observable.timer(retryDelay, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .flatMap(new Func1<Long, Observable<R>>() {
+                    @Override
+                    public Observable<R> call(Long tick) {
+                        logger.debug("Executing retry attempt after {}ms delay", retryDelay);
+                        return getExecutionObservable()
+                            .doOnError(new Action1<Throwable>() {
+                                @Override
+                                public void call(Throwable t) {
+                                    Exception e = getExceptionFromThrowable(t);
+                                    executionResult = executionResult.setExecutionException(e);
+                                }
+                            })
+                            .onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                                @Override
+                                public Observable<R> call(Throwable retryError) {
+                                    logger.debug("Retry attempt failed, proceeding to fallback", retryError);
+                                    return getFallbackOrThrowException(cmd, HystrixEventType.FAILURE,
+                                        FailureType.COMMAND_EXCEPTION, "failed after retry",
+                                        getExceptionFromThrowable(retryError));
+                                }
+                            });
+                    }
+                });
+        }
+
         return getFallbackOrThrowException(this, HystrixEventType.FAILURE, FailureType.COMMAND_EXCEPTION, "failed", underlying);
     }
 

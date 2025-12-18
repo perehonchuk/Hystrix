@@ -21,18 +21,24 @@ import org.junit.Test;
 
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
+import com.netflix.hystrix.HystrixCommandProperties;
 import com.netflix.hystrix.exception.HystrixRuntimeException;
 
 /**
  * Sample {@link HystrixCommand} that does not have a fallback implemented
  * so will "fail fast" when failures, rejections, short-circuiting etc occur.
+ * With retry-before-fallback enabled, the command will attempt one retry with
+ * a delay before ultimately throwing the exception.
  */
 public class CommandThatFailsFast extends HystrixCommand<String> {
 
     private final boolean throwException;
 
     public CommandThatFailsFast(boolean throwException) {
-        super(HystrixCommandGroupKey.Factory.asKey("ExampleGroup"));
+        super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("ExampleGroup"))
+                .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
+                        .withExecutionRetryBeforeFallbackEnabled(true)
+                        .withExecutionRetryDelayInMilliseconds(100)));
         this.throwException = throwException;
     }
 

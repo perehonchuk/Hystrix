@@ -21,12 +21,15 @@ import org.junit.Test;
 
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
+import com.netflix.hystrix.HystrixCommandProperties;
 import com.netflix.hystrix.examples.basic.CommandWithStubbedFallback.UserAccount;
 
 /**
  * Sample {@link HystrixCommand} that implements a fallback that returns an object
  * combining defaults and injected values from elsewhere in the system (such as
  * HTTP request headers, arguments and cookies or other services previously executed).
+ * This example shows retry-before-fallback where a transient failure may be recovered
+ * before resorting to the stubbed fallback response.
  */
 public class CommandWithStubbedFallback extends HystrixCommand<UserAccount> {
 
@@ -40,7 +43,10 @@ public class CommandWithStubbedFallback extends HystrixCommand<UserAccount> {
      *            The default country code from the HTTP request geo code lookup used for fallback.
      */
     protected CommandWithStubbedFallback(int customerId, String countryCodeFromGeoLookup) {
-        super(HystrixCommandGroupKey.Factory.asKey("ExampleGroup"));
+        super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("ExampleGroup"))
+                .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
+                        .withExecutionRetryBeforeFallbackEnabled(true)
+                        .withExecutionRetryDelayInMilliseconds(100)));
         this.customerId = customerId;
         this.countryCodeFromGeoLookup = countryCodeFromGeoLookup;
     }

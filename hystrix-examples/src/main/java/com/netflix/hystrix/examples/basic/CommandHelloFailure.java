@@ -23,16 +23,22 @@ import org.junit.Test;
 
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
+import com.netflix.hystrix.HystrixCommandProperties;
 
 /**
  * Sample {@link HystrixCommand} showing a basic fallback implementation.
+ * This example demonstrates the retry-before-fallback feature which attempts
+ * to execute the command once more with a delay before invoking fallback.
  */
 public class CommandHelloFailure extends HystrixCommand<String> {
 
     private final String name;
 
     public CommandHelloFailure(String name) {
-        super(HystrixCommandGroupKey.Factory.asKey("ExampleGroup"));
+        super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("ExampleGroup"))
+                .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
+                        .withExecutionRetryBeforeFallbackEnabled(true)
+                        .withExecutionRetryDelayInMilliseconds(50)));
         this.name = name;
     }
 

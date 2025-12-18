@@ -62,6 +62,8 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Boolean default_executionRetryBeforeFallbackEnabled = true; // default => retry once before fallback
+    private static final Integer default_executionRetryDelayInMilliseconds = 100; // default => 100ms delay before retry
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +90,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> executionRetryBeforeFallbackEnabled; // Whether to retry execution once with delay before invoking fallback
+    private final HystrixProperty<Integer> executionRetryDelayInMilliseconds; // Delay in milliseconds before retrying execution
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -136,6 +140,8 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.executionRetryBeforeFallbackEnabled = getProperty(propertyPrefix, key, "execution.retryBeforeFallback.enabled", builder.getExecutionRetryBeforeFallbackEnabled(), default_executionRetryBeforeFallbackEnabled);
+        this.executionRetryDelayInMilliseconds = getProperty(propertyPrefix, key, "execution.retryBeforeFallback.delayInMilliseconds", builder.getExecutionRetryDelayInMilliseconds(), default_executionRetryDelayInMilliseconds);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -419,11 +425,34 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
         return requestLogEnabled;
+    }
+
+    /**
+     * Whether to attempt retrying command execution with a short delay before invoking fallback.
+     * When enabled, on execution failure, the command will wait for the configured delay period
+     * and retry execution once before proceeding to fallback logic. This can help recover from
+     * transient failures without immediately falling back to degraded functionality.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> executionRetryBeforeFallbackEnabled() {
+        return executionRetryBeforeFallbackEnabled;
+    }
+
+    /**
+     * Time in milliseconds to wait before retrying command execution prior to fallback invocation.
+     * This delay allows transient issues to resolve before the retry attempt.
+     * Only applies when executionRetryBeforeFallbackEnabled is true.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> executionRetryDelayInMilliseconds() {
+        return executionRetryDelayInMilliseconds;
     }
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
@@ -560,6 +589,8 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Boolean executionRetryBeforeFallbackEnabled = null;
+        private Integer executionRetryDelayInMilliseconds = null;
 
         /* package */ Setter() {
         }
@@ -662,6 +693,14 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Boolean getExecutionRetryBeforeFallbackEnabled() {
+            return executionRetryBeforeFallbackEnabled;
+        }
+
+        public Integer getExecutionRetryDelayInMilliseconds() {
+            return executionRetryDelayInMilliseconds;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -785,6 +824,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withExecutionRetryBeforeFallbackEnabled(boolean value) {
+            this.executionRetryBeforeFallbackEnabled = value;
+            return this;
+        }
+
+        public Setter withExecutionRetryDelayInMilliseconds(int value) {
+            this.executionRetryDelayInMilliseconds = value;
             return this;
         }
     }
