@@ -339,6 +339,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
     protected abstract Observable<R> getFallbackObservable();
 
+    protected abstract Observable<R> getSecondaryFallbackObservable();
+
+    protected abstract boolean isSecondaryFallbackUserDefined();
+
+    protected abstract String getSecondaryFallbackMethodName();
+
     /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
      * <p>
@@ -810,19 +816,28 @@ import java.util.concurrent.atomic.AtomicReference;
                         Exception fe = getExceptionFromThrowable(t);
 
                         long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
-                        Exception toEmit;
 
                         if (fe instanceof UnsupportedOperationException) {
                             logger.debug("No fallback for HystrixCommand. ", fe); // debug only since we're throwing the exception and someone higher will do something with it
                             eventNotifier.markEvent(HystrixEventType.FALLBACK_MISSING, commandKey);
                             executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_MISSING);
-
-                            toEmit = new HystrixRuntimeException(failureType, _cmd.getClass(), getLogMessagePrefix() + " " + message + " and no fallback available.", e, fe);
                         } else {
                             logger.debug("HystrixCommand execution " + failureType.name() + " and fallback failed.", fe);
                             eventNotifier.markEvent(HystrixEventType.FALLBACK_FAILURE, commandKey);
                             executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_FAILURE);
+                        }
 
+                        // Try secondary fallback if available
+                        if (isSecondaryFallbackUserDefined()) {
+                            logger.debug("Primary fallback failed, attempting secondary fallback.");
+                            return getSecondaryFallbackOrThrowException(_cmd, e, fe);
+                        }
+
+                        // No secondary fallback available, throw exception
+                        Exception toEmit;
+                        if (fe instanceof UnsupportedOperationException) {
+                            toEmit = new HystrixRuntimeException(failureType, _cmd.getClass(), getLogMessagePrefix() + " " + message + " and no fallback available.", e, fe);
+                        } else {
                             toEmit = new HystrixRuntimeException(failureType, _cmd.getClass(), getLogMessagePrefix() + " " + message + " and fallback failed.", e, fe);
                         }
 
@@ -879,6 +894,78 @@ import java.util.concurrent.atomic.AtomicReference;
                 return handleFallbackDisabledByEmittingError(originalException, failureType, message);
             }
         }
+    }
+
+    private Observable<R> getSecondaryFallbackOrThrowException(final AbstractCommand<R> _cmd, final Exception originalException, final Exception fallbackException) {
+        final HystrixRequestContext requestContext = HystrixRequestContext.getContextForCurrentThread();
+
+        final Action1<Notification<? super R>> setRequestContext = new Action1<Notification<? super R>>() {
+            @Override
+            public void call(Notification<? super R> rNotification) {
+                setRequestContextIfNeeded(requestContext);
+            }
+        };
+
+        final Action1<R> markSecondaryFallbackEmit = new Action1<R>() {
+            @Override
+            public void call(R r) {
+                if (shouldOutputOnNextEvents()) {
+                    executionResult = executionResult.addEvent(HystrixEventType.SECONDARY_FALLBACK_EMIT);
+                    eventNotifier.markEvent(HystrixEventType.SECONDARY_FALLBACK_EMIT, commandKey);
+                }
+            }
+        };
+
+        final Action0 markSecondaryFallbackCompleted = new Action0() {
+            @Override
+            public void call() {
+                long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+                eventNotifier.markEvent(HystrixEventType.SECONDARY_FALLBACK_SUCCESS, commandKey);
+                executionResult = executionResult.addEvent((int) latency, HystrixEventType.SECONDARY_FALLBACK_SUCCESS);
+            }
+        };
+
+        final Func1<Throwable, Observable<R>> handleSecondaryFallbackError = new Func1<Throwable, Observable<R>>() {
+            @Override
+            public Observable<R> call(Throwable t) {
+                Exception sfe = getExceptionFromThrowable(t);
+                long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+                Exception toEmit;
+
+                if (sfe instanceof UnsupportedOperationException) {
+                    logger.debug("No secondary fallback for HystrixCommand. ", sfe);
+                    eventNotifier.markEvent(HystrixEventType.SECONDARY_FALLBACK_MISSING, commandKey);
+                    executionResult = executionResult.addEvent((int) latency, HystrixEventType.SECONDARY_FALLBACK_MISSING);
+
+                    toEmit = new HystrixRuntimeException(FailureType.COMMAND_EXCEPTION, _cmd.getClass(), getLogMessagePrefix() + " fallback failed and no secondary fallback available.", originalException, fallbackException);
+                } else {
+                    logger.debug("HystrixCommand secondary fallback failed.", sfe);
+                    eventNotifier.markEvent(HystrixEventType.SECONDARY_FALLBACK_FAILURE, commandKey);
+                    executionResult = executionResult.addEvent((int) latency, HystrixEventType.SECONDARY_FALLBACK_FAILURE);
+
+                    toEmit = new HystrixRuntimeException(FailureType.COMMAND_EXCEPTION, _cmd.getClass(), getLogMessagePrefix() + " fallback and secondary fallback failed.", originalException, fallbackException);
+                }
+
+                if (shouldNotBeWrapped(originalException)) {
+                    return Observable.error(originalException);
+                }
+
+                return Observable.error(toEmit);
+            }
+        };
+
+        Observable<R> secondaryFallbackChain;
+        try {
+            secondaryFallbackChain = getSecondaryFallbackObservable();
+        } catch (Throwable ex) {
+            secondaryFallbackChain = Observable.error(ex);
+        }
+
+        return secondaryFallbackChain
+                .doOnEach(setRequestContext)
+                .doOnNext(markSecondaryFallbackEmit)
+                .doOnCompleted(markSecondaryFallbackCompleted)
+                .onErrorResumeNext(handleSecondaryFallbackError);
     }
 
     private Observable<R> getUserExecutionObservable(final AbstractCommand<R> _cmd) {

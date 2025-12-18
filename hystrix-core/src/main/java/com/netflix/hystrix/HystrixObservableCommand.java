@@ -240,20 +240,56 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or UnsupportedOperationException if not implemented
      */
     protected Observable<R> resumeWithFallback() {
         return Observable.error(new UnsupportedOperationException("No fallback available."));
     }
 
+    /**
+     * If {@link #resumeWithFallback()} fails in any way then this method will be invoked to provide a secondary fallback response.
+     * <p>
+     * This provides an additional layer of resilience by allowing a secondary fallback when the primary fallback fails.
+     * <p>
+     * Like the primary fallback, this should do work that does not require network transport to produce.
+     * This should be an even simpler or more reliable fallback than the primary fallback.
+     * <p>
+     * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
+     *
+     * @return R or UnsupportedOperationException if not implemented
+     */
+    protected Observable<R> resumeWithSecondaryFallback() {
+        return Observable.error(new UnsupportedOperationException("No secondary fallback available."));
+    }
+
     @Override
     final protected Observable<R> getExecutionObservable() {
         return construct();
     }
-    
+
     @Override
     final protected Observable<R> getFallbackObservable() {
         return resumeWithFallback();
+    }
+
+    @Override
+    final protected Observable<R> getSecondaryFallbackObservable() {
+        return resumeWithSecondaryFallback();
+    }
+
+    @Override
+    protected String getSecondaryFallbackMethodName() {
+        return "resumeWithSecondaryFallback";
+    }
+
+    @Override
+    protected boolean isSecondaryFallbackUserDefined() {
+        try {
+            getClass().getDeclaredMethod("resumeWithSecondaryFallback");
+            return true;
+        } catch (NoSuchMethodException nsme) {
+            return false;
+        }
     }
 }
