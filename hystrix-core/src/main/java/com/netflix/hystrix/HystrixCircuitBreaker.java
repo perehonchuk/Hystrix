@@ -146,6 +146,7 @@ public interface HystrixCircuitBreaker {
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicLong consecutiveSuccessCount = new AtomicLong(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -202,16 +203,25 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            if (status.get() == Status.HALF_OPEN) {
+                long currentCount = consecutiveSuccessCount.incrementAndGet();
+                int threshold = properties.circuitBreakerHalfOpenSuccessThreshold().get();
+
+                if (currentCount >= threshold) {
+                    // Reached the threshold - close the circuit
+                    if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
+                        //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+                        consecutiveSuccessCount.set(0);
+                    }
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
             }
         }
 
@@ -220,6 +230,7 @@ public interface HystrixCircuitBreaker {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+                consecutiveSuccessCount.set(0);
             }
         }
 
@@ -246,7 +257,9 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (status.get().equals(Status.HALF_OPEN)) {
-                    return false;
+                    // In HALF_OPEN state, allow requests through up to the threshold
+                    // This enables testing multiple requests before closing the circuit
+                    return consecutiveSuccessCount.get() < properties.circuitBreakerHalfOpenSuccessThreshold().get();
                 } else {
                     return isAfterSleepWindow();
                 }
@@ -277,9 +290,11 @@ public interface HystrixCircuitBreaker {
                     //if the executing command fails, the status will transition to OPEN
                     //if the executing command gets unsubscribed, the status will transition to OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        consecutiveSuccessCount.set(0);
                         return true;
                     } else {
-                        return false;
+                        // Already in HALF_OPEN state, allow execution if under threshold
+                        return consecutiveSuccessCount.get() < properties.circuitBreakerHalfOpenSuccessThreshold().get();
                     }
                 } else {
                     return false;
