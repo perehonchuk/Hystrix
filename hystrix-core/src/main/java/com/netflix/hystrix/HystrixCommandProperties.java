@@ -62,6 +62,8 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final RequestLogPriority default_requestLogPriority = RequestLogPriority.NORMAL; // default priority for request log inclusion
+    private static final RequestLogPriority default_requestLogMinimumPriority = RequestLogPriority.LOW; // default minimum priority to log
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +90,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<RequestLogPriority> requestLogPriority; // priority level for this command in request log
+    private final HystrixProperty<RequestLogPriority> requestLogMinimumPriority; // minimum priority threshold for logging commands
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -99,6 +103,34 @@ public abstract class HystrixCommandProperties {
      */
     public static enum ExecutionIsolationStrategy {
         THREAD, SEMAPHORE
+    }
+
+    /**
+     * Priority level for request log inclusion filtering.
+     * <p>
+     * Commands with priority below the configured minimum threshold will be excluded from the request log.
+     * <ul>
+     * <li>HIGH: Critical commands that should always be logged</li>
+     * <li>NORMAL: Standard commands logged by default</li>
+     * <li>LOW: Low-priority commands that may be excluded from logs in high-throughput scenarios</li>
+     * </ul>
+     */
+    public static enum RequestLogPriority {
+        HIGH(3), NORMAL(2), LOW(1);
+
+        private final int priority;
+
+        RequestLogPriority(int priority) {
+            this.priority = priority;
+        }
+
+        public int getPriority() {
+            return priority;
+        }
+
+        public boolean meetsThreshold(RequestLogPriority minimumPriority) {
+            return this.priority >= minimumPriority.priority;
+        }
     }
 
     protected HystrixCommandProperties(HystrixCommandKey key) {
@@ -136,6 +168,8 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.requestLogPriority = getProperty(propertyPrefix, key, "requestLog.priority", builder.getRequestLogPriority(), default_requestLogPriority);
+        this.requestLogMinimumPriority = getProperty(propertyPrefix, key, "requestLog.minimumPriority", builder.getRequestLogMinimumPriority(), default_requestLogMinimumPriority);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -419,11 +453,31 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
         return requestLogEnabled;
+    }
+
+    /**
+     * Priority level for this command in the request log.
+     * Commands with priority below requestLogMinimumPriority() will be excluded from logging.
+     *
+     * @return {@code HystrixProperty<RequestLogPriority>}
+     */
+    public HystrixProperty<RequestLogPriority> requestLogPriority() {
+        return requestLogPriority;
+    }
+
+    /**
+     * Minimum priority threshold for including commands in the request log.
+     * Only commands with priority >= this threshold will be logged.
+     *
+     * @return {@code HystrixProperty<RequestLogPriority>}
+     */
+    public HystrixProperty<RequestLogPriority> requestLogMinimumPriority() {
+        return requestLogMinimumPriority;
     }
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
@@ -451,6 +505,10 @@ public abstract class HystrixCommandProperties {
     private static HystrixProperty<ExecutionIsolationStrategy> getProperty(final String propertyPrefix, final HystrixCommandKey key, final String instanceProperty, final ExecutionIsolationStrategy builderOverrideValue, final ExecutionIsolationStrategy defaultValue) {
         return new ExecutionIsolationStrategyHystrixProperty(builderOverrideValue, key, propertyPrefix, defaultValue, instanceProperty);
 
+    }
+
+    private static HystrixProperty<RequestLogPriority> getProperty(final String propertyPrefix, final HystrixCommandKey key, final String instanceProperty, final RequestLogPriority builderOverrideValue, final RequestLogPriority defaultValue) {
+        return new RequestLogPriorityHystrixProperty(builderOverrideValue, key, propertyPrefix, defaultValue, instanceProperty);
     }
 
     /**
@@ -497,6 +555,56 @@ public abstract class HystrixCommandProperties {
                 value = ExecutionIsolationStrategy.valueOf(property.get());
             } catch (Exception e) {
                 logger.error("Unable to derive ExecutionIsolationStrategy from property value: " + property.get(), e);
+                // use the default value
+                value = defaultValue;
+            }
+        }
+    }
+
+    /**
+     * HystrixProperty that converts a String to RequestLogPriority so we remain TypeSafe.
+     */
+    private static final class RequestLogPriorityHystrixProperty implements HystrixProperty<RequestLogPriority> {
+        private final HystrixDynamicProperty<String> property;
+        private volatile RequestLogPriority value;
+        private final RequestLogPriority defaultValue;
+
+        private RequestLogPriorityHystrixProperty(RequestLogPriority builderOverrideValue, HystrixCommandKey key, String propertyPrefix, RequestLogPriority defaultValue, String instanceProperty) {
+            this.defaultValue = defaultValue;
+            String overrideValue = null;
+            if (builderOverrideValue != null) {
+                overrideValue = builderOverrideValue.name();
+            }
+            property = forString()
+                    .add(propertyPrefix + ".command." + key.name() + "." + instanceProperty, overrideValue)
+                    .add(propertyPrefix + ".command.default." + instanceProperty, defaultValue.name())
+                    .build();
+
+            // initialize the enum value from the property
+            parseProperty();
+
+            // use a callback to handle changes so we only handle the parse cost on updates rather than every fetch
+            property.addCallback(new Runnable() {
+
+                @Override
+                public void run() {
+                    // when the property value changes we'll update the value
+                    parseProperty();
+                }
+
+            });
+        }
+
+        @Override
+        public RequestLogPriority get() {
+            return value;
+        }
+
+        private void parseProperty() {
+            try {
+                value = RequestLogPriority.valueOf(property.get());
+            } catch (Exception e) {
+                logger.error("Unable to derive RequestLogPriority from property value: " + property.get(), e);
                 // use the default value
                 value = defaultValue;
             }
@@ -560,6 +668,8 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private RequestLogPriority requestLogPriority = null;
+        private RequestLogPriority requestLogMinimumPriority = null;
 
         /* package */ Setter() {
         }
@@ -662,6 +772,14 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public RequestLogPriority getRequestLogPriority() {
+            return requestLogPriority;
+        }
+
+        public RequestLogPriority getRequestLogMinimumPriority() {
+            return requestLogMinimumPriority;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -785,6 +903,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withRequestLogPriority(RequestLogPriority value) {
+            this.requestLogPriority = value;
+            return this;
+        }
+
+        public Setter withRequestLogMinimumPriority(RequestLogPriority value) {
+            this.requestLogMinimumPriority = value;
             return this;
         }
     }

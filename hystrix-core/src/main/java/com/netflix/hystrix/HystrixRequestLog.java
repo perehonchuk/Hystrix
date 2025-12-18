@@ -118,11 +118,24 @@ public class HystrixRequestLog {
 
     /**
      * Add {@link HystrixCommand} instance to the request log.
-     * 
+     * <p>
+     * Commands are filtered based on their request log priority. Only commands with priority
+     * greater than or equal to the configured minimum priority threshold will be logged.
+     *
      * @param command
      *            {@code HystrixCommand<?>}
      */
     /* package */void addExecutedCommand(HystrixInvokableInfo<?> command) {
+        // Check if command meets the minimum priority threshold for logging
+        HystrixCommandProperties properties = command.getProperties();
+        HystrixCommandProperties.RequestLogPriority commandPriority = properties.requestLogPriority().get();
+        HystrixCommandProperties.RequestLogPriority minimumPriority = properties.requestLogMinimumPriority().get();
+
+        if (!commandPriority.meetsThreshold(minimumPriority)) {
+            // Command priority is below threshold, skip logging
+            return;
+        }
+
         if (!allExecutedCommands.offer(command)) {
             // see RequestLog: Reduce Chance of Memory Leak https://github.com/Netflix/Hystrix/issues/53
             logger.warn("RequestLog ignoring command after reaching limit of " + MAX_STORAGE + ". See https://github.com/Netflix/Hystrix/issues/53 for more information.");
