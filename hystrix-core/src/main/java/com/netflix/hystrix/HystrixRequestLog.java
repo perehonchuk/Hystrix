@@ -27,10 +27,12 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
@@ -38,6 +40,36 @@ import java.util.concurrent.LinkedBlockingQueue;
  */
 public class HystrixRequestLog {
     private static final Logger logger = LoggerFactory.getLogger(HystrixRequestLog.class);
+
+    /**
+     * Event categories for filtering command executions
+     */
+    public enum EventCategory {
+        /**
+         * Commands that completed successfully without errors or failures
+         */
+        SUCCESS,
+        /**
+         * Commands that failed or threw exceptions
+         */
+        FAILURE,
+        /**
+         * Commands that timed out
+         */
+        TIMEOUT,
+        /**
+         * Commands that were rejected (thread pool, semaphore, or short-circuited)
+         */
+        REJECTED,
+        /**
+         * Commands that used cached responses
+         */
+        CACHED,
+        /**
+         * Commands that used fallback logic
+         */
+        FALLBACK
+    }
 
     /**
      * RequestLog: Reduce Chance of Memory Leak
@@ -109,11 +141,138 @@ public class HystrixRequestLog {
 
     /**
      * Retrieve {@link HystrixCommand} instances that were executed during this {@link HystrixRequestContext}.
-     * 
+     *
      * @return {@code Collection<HystrixCommand<?>>}
      */
     public Collection<HystrixInvokableInfo<?>> getAllExecutedCommands() {
         return Collections.unmodifiableCollection(allExecutedCommands);
+    }
+
+    /**
+     * Retrieve commands filtered by event categories.
+     * This allows selective retrieval of commands based on their execution outcomes.
+     *
+     * @param categories the event categories to filter by
+     * @return collection of commands matching the specified categories
+     */
+    public Collection<HystrixInvokableInfo<?>> getExecutedCommandsByCategory(EventCategory... categories) {
+        if (categories == null || categories.length == 0) {
+            return Collections.emptyList();
+        }
+
+        Set<EventCategory> categorySet = EnumSet.noneOf(EventCategory.class);
+        for (EventCategory category : categories) {
+            categorySet.add(category);
+        }
+
+        List<HystrixInvokableInfo<?>> filtered = new ArrayList<HystrixInvokableInfo<?>>();
+        for (HystrixInvokableInfo<?> command : allExecutedCommands) {
+            if (matchesCategory(command, categorySet)) {
+                filtered.add(command);
+            }
+        }
+        return Collections.unmodifiableCollection(filtered);
+    }
+
+    /**
+     * Retrieve commands filtered by a single event category.
+     *
+     * @param category the event category to filter by
+     * @return collection of commands matching the specified category
+     */
+    public Collection<HystrixInvokableInfo<?>> getExecutedCommandsByCategory(EventCategory category) {
+        return getExecutedCommandsByCategory(new EventCategory[]{category});
+    }
+
+    /**
+     * Get count of commands by event category.
+     * Useful for quick metrics without iterating through all commands.
+     *
+     * @param category the event category to count
+     * @return number of commands in the specified category
+     */
+    public int getCommandCountByCategory(EventCategory category) {
+        int count = 0;
+        Set<EventCategory> categorySet = EnumSet.of(category);
+        for (HystrixInvokableInfo<?> command : allExecutedCommands) {
+            if (matchesCategory(command, categorySet)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Get a summary map of command counts grouped by event category.
+     *
+     * @return map of category to command count
+     */
+    public Map<EventCategory, Integer> getCommandCountsByCategory() {
+        Map<EventCategory, Integer> counts = new HashMap<EventCategory, Integer>();
+        for (EventCategory category : EventCategory.values()) {
+            counts.put(category, 0);
+        }
+
+        for (HystrixInvokableInfo<?> command : allExecutedCommands) {
+            for (EventCategory category : EventCategory.values()) {
+                if (matchesCategory(command, EnumSet.of(category))) {
+                    counts.put(category, counts.get(category) + 1);
+                }
+            }
+        }
+        return counts;
+    }
+
+    /**
+     * Check if a command matches any of the specified event categories
+     */
+    private boolean matchesCategory(HystrixInvokableInfo<?> command, Set<EventCategory> categories) {
+        Collection<HystrixEventType> events = command.getExecutionEvents();
+
+        for (EventCategory category : categories) {
+            switch (category) {
+                case SUCCESS:
+                    if (events.contains(HystrixEventType.SUCCESS)) {
+                        return true;
+                    }
+                    break;
+                case FAILURE:
+                    if (events.contains(HystrixEventType.FAILURE) ||
+                        events.contains(HystrixEventType.FALLBACK_FAILURE) ||
+                        events.contains(HystrixEventType.FALLBACK_MISSING) ||
+                        events.contains(HystrixEventType.EXCEPTION_THROWN)) {
+                        return true;
+                    }
+                    break;
+                case TIMEOUT:
+                    if (events.contains(HystrixEventType.TIMEOUT)) {
+                        return true;
+                    }
+                    break;
+                case REJECTED:
+                    if (events.contains(HystrixEventType.THREAD_POOL_REJECTED) ||
+                        events.contains(HystrixEventType.SEMAPHORE_REJECTED) ||
+                        events.contains(HystrixEventType.SHORT_CIRCUITED) ||
+                        events.contains(HystrixEventType.FALLBACK_REJECTION)) {
+                        return true;
+                    }
+                    break;
+                case CACHED:
+                    if (events.contains(HystrixEventType.RESPONSE_FROM_CACHE)) {
+                        return true;
+                    }
+                    break;
+                case FALLBACK:
+                    if (events.contains(HystrixEventType.FALLBACK_SUCCESS) ||
+                        events.contains(HystrixEventType.FALLBACK_FAILURE) ||
+                        events.contains(HystrixEventType.FALLBACK_REJECTION) ||
+                        events.contains(HystrixEventType.FALLBACK_EMIT)) {
+                        return true;
+                    }
+                    break;
+            }
+        }
+        return false;
     }
 
     /**
@@ -260,6 +419,106 @@ public class HystrixRequestLog {
         } catch (Exception e) {
             logger.error("Failed to create HystrixRequestLog response header string.", e);
             // don't let this cause the entire app to fail so just return "Unknown"
+            return "Unknown";
+        }
+    }
+
+    /**
+     * Formats the log of executed commands for a specific category into a string.
+     * This is useful for selective logging of commands based on their execution outcome.
+     *
+     * @param category the event category to filter by
+     * @return String request log filtered by category or "Unknown" if unable to format
+     */
+    public String getExecutedCommandsAsStringByCategory(EventCategory category) {
+        try {
+            LinkedHashMap<String, Integer> aggregatedCommandsExecuted = new LinkedHashMap<String, Integer>();
+            Map<String, Integer> aggregatedCommandExecutionTime = new HashMap<String, Integer>();
+
+            StringBuilder builder = new StringBuilder();
+            int estimatedLength = 0;
+            Set<EventCategory> categorySet = EnumSet.of(category);
+
+            for (HystrixInvokableInfo<?> command : allExecutedCommands) {
+                if (!matchesCategory(command, categorySet)) {
+                    continue;
+                }
+
+                builder.setLength(0);
+                builder.append(command.getCommandKey().name());
+
+                List<HystrixEventType> events = new ArrayList<HystrixEventType>(command.getExecutionEvents());
+                if (events.size() > 0) {
+                    Collections.sort(events);
+                    builder.append("[");
+                    for (HystrixEventType event : events) {
+                        switch (event) {
+                            case EMIT:
+                                int numEmissions = command.getNumberEmissions();
+                                if (numEmissions > 1) {
+                                    builder.append(event).append("x").append(numEmissions).append(", ");
+                                } else {
+                                    builder.append(event).append(", ");
+                                }
+                                break;
+                            case FALLBACK_EMIT:
+                                int numFallbackEmissions = command.getNumberFallbackEmissions();
+                                if (numFallbackEmissions > 1) {
+                                    builder.append(event).append("x").append(numFallbackEmissions).append(", ");
+                                } else {
+                                    builder.append(event).append(", ");
+                                }
+                                break;
+                            default:
+                                builder.append(event).append(", ");
+                        }
+                    }
+                    builder.setCharAt(builder.length() - 2, ']');
+                    builder.setLength(builder.length() - 1);
+                } else {
+                    builder.append("[Executed]");
+                }
+
+                String display = builder.toString();
+                estimatedLength += display.length() + 12;
+                Integer counter = aggregatedCommandsExecuted.get(display);
+                if (counter != null) {
+                    aggregatedCommandsExecuted.put(display, counter + 1);
+                } else {
+                    aggregatedCommandsExecuted.put(display, 1);
+                }
+
+                int executionTime = command.getExecutionTimeInMilliseconds();
+                if (executionTime < 0) {
+                    executionTime = 0;
+                }
+                counter = aggregatedCommandExecutionTime.get(display);
+                if (counter != null && executionTime > 0) {
+                    aggregatedCommandExecutionTime.put(display, aggregatedCommandExecutionTime.get(display) + executionTime);
+                } else {
+                    aggregatedCommandExecutionTime.put(display, executionTime);
+                }
+            }
+
+            builder.setLength(0);
+            builder.ensureCapacity(estimatedLength);
+            for (String displayString : aggregatedCommandsExecuted.keySet()) {
+                if (builder.length() > 0) {
+                    builder.append(", ");
+                }
+                builder.append(displayString);
+
+                int totalExecutionTime = aggregatedCommandExecutionTime.get(displayString);
+                builder.append("[").append(totalExecutionTime).append("ms]");
+
+                int count = aggregatedCommandsExecuted.get(displayString);
+                if (count > 1) {
+                    builder.append("x").append(count);
+                }
+            }
+            return builder.toString();
+        } catch (Exception e) {
+            logger.error("Failed to create HystrixRequestLog response header string for category: " + category, e);
             return "Unknown";
         }
     }

@@ -66,7 +66,13 @@ public class HystrixRequestLogViaResponseHeaderServletFilter implements Filter {
                 if (HystrixRequestContext.isCurrentThreadInitialized()) {
                     HystrixRequestLog log = HystrixRequestLog.getCurrentRequest();
                     if (log != null) {
-                        ((HttpServletResponse) response).addHeader("X-HystrixLog", log.getExecutedCommandsAsString());
+                        HttpServletResponse httpResponse = (HttpServletResponse) response;
+                        // Add the full execution log
+                        httpResponse.addHeader("X-HystrixLog", log.getExecutedCommandsAsString());
+                        // Add category-specific logs for easier filtering and monitoring
+                        httpResponse.addHeader("X-HystrixLog-Failures", log.getExecutedCommandsAsStringByCategory(HystrixRequestLog.EventCategory.FAILURE));
+                        httpResponse.addHeader("X-HystrixLog-Timeouts", log.getExecutedCommandsAsStringByCategory(HystrixRequestLog.EventCategory.TIMEOUT));
+                        httpResponse.addHeader("X-HystrixLog-Rejected", log.getExecutedCommandsAsStringByCategory(HystrixRequestLog.EventCategory.REJECTED));
                     }
                 }
             } catch (Exception e) {

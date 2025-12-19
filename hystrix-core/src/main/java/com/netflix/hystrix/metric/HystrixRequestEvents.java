@@ -18,13 +18,17 @@ package com.netflix.hystrix.metric;
 import com.netflix.hystrix.ExecutionResult;
 import com.netflix.hystrix.HystrixCollapserKey;
 import com.netflix.hystrix.HystrixCommandKey;
+import com.netflix.hystrix.HystrixEventType;
 import com.netflix.hystrix.HystrixInvokableInfo;
+import com.netflix.hystrix.HystrixRequestLog;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class HystrixRequestEvents {
     private final Collection<HystrixInvokableInfo<?>> executions;
@@ -35,6 +39,74 @@ public class HystrixRequestEvents {
 
     public Collection<HystrixInvokableInfo<?>> getExecutions() {
         return executions;
+    }
+
+    /**
+     * Get executions filtered by event category.
+     * This allows consumers to process only specific types of command executions.
+     *
+     * @param category the event category to filter by
+     * @return collection of executions matching the category
+     */
+    public Collection<HystrixInvokableInfo<?>> getExecutionsByCategory(HystrixRequestLog.EventCategory category) {
+        List<HystrixInvokableInfo<?>> filtered = new ArrayList<HystrixInvokableInfo<?>>();
+        for (HystrixInvokableInfo<?> execution : executions) {
+            if (matchesCategory(execution, category)) {
+                filtered.add(execution);
+            }
+        }
+        return filtered;
+    }
+
+    /**
+     * Get summary of execution counts by event category.
+     *
+     * @return map of category to execution count
+     */
+    public Map<HystrixRequestLog.EventCategory, Integer> getExecutionCountsByCategory() {
+        Map<HystrixRequestLog.EventCategory, Integer> counts = new HashMap<HystrixRequestLog.EventCategory, Integer>();
+        for (HystrixRequestLog.EventCategory category : HystrixRequestLog.EventCategory.values()) {
+            counts.put(category, 0);
+        }
+
+        for (HystrixInvokableInfo<?> execution : executions) {
+            for (HystrixRequestLog.EventCategory category : HystrixRequestLog.EventCategory.values()) {
+                if (matchesCategory(execution, category)) {
+                    counts.put(category, counts.get(category) + 1);
+                }
+            }
+        }
+        return counts;
+    }
+
+    private boolean matchesCategory(HystrixInvokableInfo<?> execution, HystrixRequestLog.EventCategory category) {
+        Collection<HystrixEventType> events = execution.getExecutionEvents();
+
+        switch (category) {
+            case SUCCESS:
+                return events.contains(HystrixEventType.SUCCESS);
+            case FAILURE:
+                return events.contains(HystrixEventType.FAILURE) ||
+                       events.contains(HystrixEventType.FALLBACK_FAILURE) ||
+                       events.contains(HystrixEventType.FALLBACK_MISSING) ||
+                       events.contains(HystrixEventType.EXCEPTION_THROWN);
+            case TIMEOUT:
+                return events.contains(HystrixEventType.TIMEOUT);
+            case REJECTED:
+                return events.contains(HystrixEventType.THREAD_POOL_REJECTED) ||
+                       events.contains(HystrixEventType.SEMAPHORE_REJECTED) ||
+                       events.contains(HystrixEventType.SHORT_CIRCUITED) ||
+                       events.contains(HystrixEventType.FALLBACK_REJECTION);
+            case CACHED:
+                return events.contains(HystrixEventType.RESPONSE_FROM_CACHE);
+            case FALLBACK:
+                return events.contains(HystrixEventType.FALLBACK_SUCCESS) ||
+                       events.contains(HystrixEventType.FALLBACK_FAILURE) ||
+                       events.contains(HystrixEventType.FALLBACK_REJECTION) ||
+                       events.contains(HystrixEventType.FALLBACK_EMIT);
+            default:
+                return false;
+        }
     }
 
     public Map<ExecutionSignature, List<Integer>> getExecutionsMappedToLatencies() {
