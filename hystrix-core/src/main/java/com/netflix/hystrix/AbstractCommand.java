@@ -1712,11 +1712,28 @@ import java.util.concurrent.atomic.AtomicReference;
      * To enable caching override this method and return a string key uniquely representing the state of a command instance.
      * <p>
      * If multiple command instances in the same request scope match keys then only the first will be executed and all others returned from cache.
-     * 
+     *
      * @return cacheKey
      */
     protected String getCacheKey() {
         return null;
+    }
+
+    /**
+     * Time-To-Live (TTL) in milliseconds for cached results.
+     * <p>
+     * By default this returns -1 which means "no TTL expiration" (cache entries live for the request scope only).
+     * <p>
+     * To enable TTL-based cache expiration, override this method and return a positive value representing
+     * the number of milliseconds a cached entry should remain valid. After this time, the cached entry
+     * will be automatically evicted and the command will be re-executed.
+     * <p>
+     * This allows fine-grained control over cache freshness within a request scope.
+     *
+     * @return TTL in milliseconds, or -1 to disable TTL expiration
+     */
+    protected long getCacheTtlInMillis() {
+        return -1;
     }
 
     public String getPublicCacheKey() {

@@ -10,7 +10,7 @@ public class HystrixCommandResponseFromCache<R> extends HystrixCachedObservable<
     private final AbstractCommand<R> originalCommand;
 
     /* package-private */ HystrixCommandResponseFromCache(Observable<R> originalObservable, final AbstractCommand<R> originalCommand) {
-        super(originalObservable);
+        super(originalObservable, originalCommand.getCacheTtlInMillis());
         this.originalCommand = originalCommand;
     }
 
