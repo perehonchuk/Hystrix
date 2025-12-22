@@ -64,6 +64,15 @@ public interface HystrixCircuitBreaker {
     boolean attemptExecution();
 
     /**
+     * Forces the circuit breaker into a half-open state to allow a health check probe, regardless of whether
+     * the sleep window has elapsed. This enables external monitoring systems to actively test circuit health
+     * without waiting for the natural sleep window expiration.
+     *
+     * @return true if the circuit was successfully forced into half-open state, false otherwise
+     */
+    boolean forceProbe();
+
+    /**
      * @ExcludeFromJavadoc
      * @ThreadSafe
      */
@@ -286,6 +295,31 @@ public interface HystrixCircuitBreaker {
                 }
             }
         }
+
+        @Override
+        public boolean forceProbe() {
+            if (properties.circuitBreakerForceOpen().get()) {
+                // Cannot force probe when circuit is force-opened
+                return false;
+            }
+            if (properties.circuitBreakerForceClosed().get()) {
+                // Circuit is force-closed, no need to probe
+                return false;
+            }
+            if (circuitOpened.get() == -1) {
+                // Circuit is already closed, no need to probe
+                return false;
+            }
+
+            // Attempt to transition from OPEN to HALF_OPEN, bypassing sleep window check
+            // This allows external monitoring systems to actively probe circuit health
+            if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                return true;
+            }
+
+            // Circuit is already in HALF_OPEN state or another thread won the race
+            return false;
+        }
     }
 
     /**
@@ -318,6 +352,11 @@ public interface HystrixCircuitBreaker {
         @Override
         public boolean attemptExecution() {
             return true;
+        }
+
+        @Override
+        public boolean forceProbe() {
+            return false;
         }
     }
 

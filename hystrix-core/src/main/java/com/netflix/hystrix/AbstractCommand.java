@@ -1315,6 +1315,17 @@ import java.util.concurrent.atomic.AtomicReference;
     }
 
     /**
+     * Forces the circuit breaker into half-open state to allow a health check probe,
+     * regardless of whether the sleep window has elapsed. This enables external monitoring
+     * systems to actively test circuit health without waiting for the natural sleep window expiration.
+     *
+     * @return true if the circuit was successfully forced into half-open state, false otherwise
+     */
+    public boolean forceCircuitBreakerProbe() {
+        return circuitBreaker.forceProbe();
+    }
+
+    /**
      * The {@link HystrixCommandMetrics} associated with this {@link AbstractCommand} instance.
      *
      * @return HystrixCommandMetrics

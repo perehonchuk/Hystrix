@@ -34,6 +34,25 @@ public class Hystrix {
     private static final Logger logger = LoggerFactory.getLogger(Hystrix.class);
 
     /**
+     * Forces a circuit breaker into half-open state for the specified command key, allowing
+     * external monitoring systems to probe circuit health without waiting for the sleep window.
+     * <p>
+     * This is useful for active health checking where you want to test if a downstream service
+     * has recovered before the natural sleep window expires.
+     * </p>
+     *
+     * @param commandKey the command whose circuit breaker should be probed
+     * @return true if the circuit breaker was successfully forced into half-open state, false otherwise
+     */
+    public static boolean forceCircuitBreakerProbe(HystrixCommandKey commandKey) {
+        HystrixCircuitBreaker circuitBreaker = HystrixCircuitBreaker.Factory.getInstance(commandKey);
+        if (circuitBreaker != null) {
+            return circuitBreaker.forceProbe();
+        }
+        return false;
+    }
+
+    /**
      * Reset state and release resources in use (such as thread-pools).
      * <p>
      * NOTE: This can result in race conditions if HystrixCommands are concurrently being executed.
