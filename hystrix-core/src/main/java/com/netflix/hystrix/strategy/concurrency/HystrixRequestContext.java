@@ -80,6 +80,29 @@ public class HystrixRequestContext implements Closeable {
         return context != null && context.state != null;
     }
 
+    /**
+     * Returns true if automatic context initialization is enabled (default: true).
+     * When enabled, HystrixRequestContext will be automatically initialized on first access
+     * if not already initialized, eliminating the need for explicit initializeContext() calls.
+     * <p>
+     * This can be disabled via system property: hystrix.request.context.autoInit=false
+     */
+    private static final boolean AUTO_INIT_ENABLED = Boolean.parseBoolean(
+        System.getProperty("hystrix.request.context.autoInit", "true"));
+
+    /**
+     * Auto-initializes context if not present and auto-init is enabled.
+     * Returns the current or newly created context.
+     */
+    private static HystrixRequestContext ensureContext() {
+        HystrixRequestContext context = getContextForCurrentThread();
+        if (context == null && AUTO_INIT_ENABLED) {
+            // Auto-initialize context for this thread
+            context = initializeContext();
+        }
+        return context;
+    }
+
     public static HystrixRequestContext getContextForCurrentThread() {
         HystrixRequestContext context = requestVariables.get();
         if (context != null && context.state != null) {
@@ -94,6 +117,26 @@ public class HystrixRequestContext implements Closeable {
 
     public static void setContextOnCurrentThread(HystrixRequestContext state) {
         requestVariables.set(state);
+    }
+
+    /**
+     * Returns the context for the current thread, automatically initializing it if
+     * auto-initialization is enabled and no context exists.
+     * <p>
+     * This method replaces the pattern of checking for null and throwing IllegalStateException.
+     * Instead, when auto-init is enabled (default), the context is created automatically.
+     *
+     * @return HystrixRequestContext for current thread (never null if auto-init enabled)
+     * @throws IllegalStateException if auto-init is disabled and context not initialized
+     */
+    public static HystrixRequestContext ensureContextForCurrentThread() {
+        HystrixRequestContext context = ensureContext();
+        if (context == null) {
+            throw new IllegalStateException(HystrixRequestContext.class.getSimpleName() +
+                ".initializeContext() must be called at the beginning of each request before " +
+                "RequestVariable functionality can be used, or enable auto-initialization.");
+        }
+        return context;
     }
 
     /**

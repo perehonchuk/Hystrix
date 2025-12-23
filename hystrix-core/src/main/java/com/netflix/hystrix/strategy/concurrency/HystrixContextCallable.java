@@ -38,7 +38,14 @@ public class HystrixContextCallable<K> implements Callable<K> {
 
     public HystrixContextCallable(HystrixConcurrencyStrategy concurrencyStrategy, Callable<K> actual) {
         this.actual = concurrencyStrategy.wrapCallable(actual);
-        this.parentThreadState = HystrixRequestContext.getContextForCurrentThread();
+        // Capture parent thread context, auto-initializing if needed and enabled
+        HystrixRequestContext existingContext = HystrixRequestContext.getContextForCurrentThread();
+        if (existingContext == null) {
+            // Auto-initialize parent context if enabled
+            this.parentThreadState = HystrixRequestContext.ensureContextForCurrentThread();
+        } else {
+            this.parentThreadState = existingContext;
+        }
     }
 
     @Override
