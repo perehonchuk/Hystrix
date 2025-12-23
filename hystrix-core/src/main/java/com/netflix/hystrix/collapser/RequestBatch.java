@@ -15,7 +15,11 @@
  */
 package com.netflix.hystrix.collapser;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -142,6 +146,43 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
     }
 
     /**
+     * Orders the shards based on the configured batch execution order strategy.
+     * Valid strategies: SEQUENTIAL, REVERSE, LARGEST_FIRST, SMALLEST_FIRST
+     *
+     * @param shards The collection of shards to order
+     * @return Ordered list of shards
+     */
+    private List<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> orderShards(
+            Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards) {
+
+        List<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> orderedList = new ArrayList<>(shards);
+        String executionOrder = properties.batchExecutionOrder().get();
+
+        if ("REVERSE".equals(executionOrder)) {
+            Collections.reverse(orderedList);
+        } else if ("LARGEST_FIRST".equals(executionOrder)) {
+            Collections.sort(orderedList, new Comparator<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>() {
+                @Override
+                public int compare(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> o1,
+                                   Collection<CollapsedRequest<ResponseType, RequestArgumentType>> o2) {
+                    return Integer.compare(o2.size(), o1.size()); // descending order
+                }
+            });
+        } else if ("SMALLEST_FIRST".equals(executionOrder)) {
+            Collections.sort(orderedList, new Comparator<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>() {
+                @Override
+                public int compare(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> o1,
+                                   Collection<CollapsedRequest<ResponseType, RequestArgumentType>> o2) {
+                    return Integer.compare(o1.size(), o2.size()); // ascending order
+                }
+            });
+        }
+        // SEQUENTIAL (default) - no ordering needed, use as-is
+
+        return orderedList;
+    }
+
+    /**
      * Collapsed requests are triggered for batch execution and the array of arguments is passed in.
      * <p>
      * IMPORTANT IMPLEMENTATION DETAILS => The expected contract (responsibilities) of this method implementation is:
@@ -151,7 +192,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
      * <li>Set ALL CollapsedRequest response values => Set the response values T on each CollapsedRequest<T, R>, even if the response is NULL otherwise the user thread waiting on the response will
      * think a response was never received and will either block indefinitely or will timeout while waiting.</li>
      * </ul>
-     * 
+     *
      */
     public void executeBatchIfNotAlreadyStarted() {
         /*
@@ -165,8 +206,12 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             try {
                 // shard batches
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
-                for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
+
+                // apply execution ordering strategy to shards
+                List<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> orderedShards = orderShards(shards);
+
+                // for each shard execute its requests
+                for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : orderedShards) {
                     try {
                         // create a new command to handle this batch of requests
                         Observable<BatchReturnType> o = commandCollapser.createObservableCommand(shardRequests);

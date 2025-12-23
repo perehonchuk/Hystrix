@@ -35,6 +35,7 @@ public abstract class HystrixCollapserProperties {
     private static final Integer default_maxRequestsInBatch = Integer.MAX_VALUE;
     private static final Integer default_timerDelayInMilliseconds = 10;
     private static final Boolean default_requestCacheEnabled = true;
+    private static final String default_batchExecutionOrder = "SEQUENTIAL";
     /* package */ static final Integer default_metricsRollingStatisticalWindow = 10000;// default => statisticalWindow: 10000 = 10 seconds (and default of 10 buckets so each bucket is 1 second)
     private static final Integer default_metricsRollingStatisticalWindowBuckets = 10;// default => statisticalWindowBuckets: 10 = 10 buckets in a 10 second window so each bucket is 1 second
     private static final Boolean default_metricsRollingPercentileEnabled = true;
@@ -45,6 +46,7 @@ public abstract class HystrixCollapserProperties {
     private final HystrixProperty<Integer> maxRequestsInBatch;
     private final HystrixProperty<Integer> timerDelayInMilliseconds;
     private final HystrixProperty<Boolean> requestCacheEnabled;
+    private final HystrixProperty<String> batchExecutionOrder;
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowBuckets; // number of buckets in the statisticalWindow
     private final HystrixProperty<Boolean> metricsRollingPercentileEnabled; // Whether monitoring should be enabled
@@ -64,6 +66,7 @@ public abstract class HystrixCollapserProperties {
         this.maxRequestsInBatch = getProperty(propertyPrefix, key, "maxRequestsInBatch", builder.getMaxRequestsInBatch(), default_maxRequestsInBatch);
         this.timerDelayInMilliseconds = getProperty(propertyPrefix, key, "timerDelayInMilliseconds", builder.getTimerDelayInMilliseconds(), default_timerDelayInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
+        this.batchExecutionOrder = getProperty(propertyPrefix, key, "batchExecutionOrder", builder.getBatchExecutionOrder(), default_batchExecutionOrder);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -83,6 +86,13 @@ public abstract class HystrixCollapserProperties {
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCollapserKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
         return forBoolean()
+                .add(propertyPrefix + ".collapser." + key.name() + "." + instanceProperty, builderOverrideValue)
+                .add(propertyPrefix + ".collapser.default." + instanceProperty, defaultValue)
+                .build();
+    }
+
+    private static HystrixProperty<String> getProperty(String propertyPrefix, HystrixCollapserKey key, String instanceProperty, String builderOverrideValue, String defaultValue) {
+        return forString()
                 .add(propertyPrefix + ".collapser." + key.name() + "." + instanceProperty, builderOverrideValue)
                 .add(propertyPrefix + ".collapser.default." + instanceProperty, defaultValue)
                 .build();
@@ -120,11 +130,21 @@ public abstract class HystrixCollapserProperties {
 
     /**
      * The number of milliseconds between batch executions (unless {@link #maxRequestsInBatch} is hit which will cause a batch to execute early.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> timerDelayInMilliseconds() {
         return timerDelayInMilliseconds;
+    }
+
+    /**
+     * The execution order strategy for batch shards. Determines how multiple shards created by shardRequests() are executed.
+     * Valid values: SEQUENTIAL, REVERSE, LARGEST_FIRST, SMALLEST_FIRST
+     *
+     * @return {@code HystrixProperty<String>}
+     */
+    public HystrixProperty<String> batchExecutionOrder() {
+        return batchExecutionOrder;
     }
 
     /**
@@ -217,6 +237,7 @@ public abstract class HystrixCollapserProperties {
         private Integer maxRequestsInBatch = null;
         private Integer timerDelayInMilliseconds = null;
         private Boolean requestCacheEnabled = null;
+        private String batchExecutionOrder = null;
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Integer metricsRollingPercentileBucketSize = null;
@@ -245,6 +266,10 @@ public abstract class HystrixCollapserProperties {
 
         public Boolean getRequestCacheEnabled() {
             return requestCacheEnabled;
+        }
+
+        public String getBatchExecutionOrder() {
+            return batchExecutionOrder;
         }
 
         public Integer getMetricsRollingStatisticalWindowInMilliseconds() {
@@ -292,6 +317,11 @@ public abstract class HystrixCollapserProperties {
 
         public Setter withRequestCacheEnabled(boolean value) {
             this.requestCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withBatchExecutionOrder(String value) {
+            this.batchExecutionOrder = value;
             return this;
         }
 
