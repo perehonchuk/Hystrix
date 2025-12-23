@@ -55,6 +55,9 @@ public abstract class HystrixCommandProperties {
     private static final Boolean default_requestCacheEnabled = true;
     private static final Integer default_fallbackIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_fallbackEnabled = true;
+    private static final Boolean default_fallbackOnTimeoutOnly = false;
+    private static final Boolean default_fallbackOnShortCircuitOnly = false;
+    private static final Boolean default_fallbackExcludeFailure = false;
     private static final Integer default_executionIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_requestLogEnabled = true;
     private static final Boolean default_circuitBreakerEnabled = true;
@@ -77,6 +80,9 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> executionIsolationSemaphoreMaxConcurrentRequests; // Number of permits for execution semaphore
     private final HystrixProperty<Integer> fallbackIsolationSemaphoreMaxConcurrentRequests; // Number of permits for fallback semaphore
     private final HystrixProperty<Boolean> fallbackEnabled; // Whether fallback should be attempted.
+    private final HystrixProperty<Boolean> fallbackOnTimeoutOnly; // Whether fallback should only be invoked on timeout (not on failure/rejection/short-circuit)
+    private final HystrixProperty<Boolean> fallbackOnShortCircuitOnly; // Whether fallback should only be invoked when circuit is open
+    private final HystrixProperty<Boolean> fallbackExcludeFailure; // Whether fallback should be skipped for regular failures (still invoked for timeout/rejection/short-circuit)
     private final HystrixProperty<Boolean> executionIsolationThreadInterruptOnTimeout; // Whether an underlying Future/Thread (when runInSeparateThread == true) should be interrupted after a timeout
     private final HystrixProperty<Boolean> executionIsolationThreadInterruptOnFutureCancel; // Whether canceling an underlying Future/Thread (when runInSeparateThread == true) should interrupt the execution thread
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
@@ -127,6 +133,9 @@ public abstract class HystrixCommandProperties {
         this.executionIsolationSemaphoreMaxConcurrentRequests = getProperty(propertyPrefix, key, "execution.isolation.semaphore.maxConcurrentRequests", builder.getExecutionIsolationSemaphoreMaxConcurrentRequests(), default_executionIsolationSemaphoreMaxConcurrentRequests);
         this.fallbackIsolationSemaphoreMaxConcurrentRequests = getProperty(propertyPrefix, key, "fallback.isolation.semaphore.maxConcurrentRequests", builder.getFallbackIsolationSemaphoreMaxConcurrentRequests(), default_fallbackIsolationSemaphoreMaxConcurrentRequests);
         this.fallbackEnabled = getProperty(propertyPrefix, key, "fallback.enabled", builder.getFallbackEnabled(), default_fallbackEnabled);
+        this.fallbackOnTimeoutOnly = getProperty(propertyPrefix, key, "fallback.onTimeoutOnly", builder.getFallbackOnTimeoutOnly(), default_fallbackOnTimeoutOnly);
+        this.fallbackOnShortCircuitOnly = getProperty(propertyPrefix, key, "fallback.onShortCircuitOnly", builder.getFallbackOnShortCircuitOnly(), default_fallbackOnShortCircuitOnly);
+        this.fallbackExcludeFailure = getProperty(propertyPrefix, key, "fallback.excludeFailure", builder.getFallbackExcludeFailure(), default_fallbackExcludeFailure);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -331,6 +340,42 @@ public abstract class HystrixCommandProperties {
      */
     public HystrixProperty<Boolean> fallbackEnabled() {
         return fallbackEnabled;
+    }
+
+    /**
+     * Whether fallback should only be invoked on timeout events (not on failure/rejection/short-circuit).
+     * When true, fallback is exclusively triggered by TIMEOUT events.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     *
+     * @since 1.6
+     */
+    public HystrixProperty<Boolean> fallbackOnTimeoutOnly() {
+        return fallbackOnTimeoutOnly;
+    }
+
+    /**
+     * Whether fallback should only be invoked when the circuit breaker is open (SHORT_CIRCUITED events).
+     * When true, fallback is exclusively triggered by SHORT_CIRCUITED events.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     *
+     * @since 1.6
+     */
+    public HystrixProperty<Boolean> fallbackOnShortCircuitOnly() {
+        return fallbackOnShortCircuitOnly;
+    }
+
+    /**
+     * Whether fallback should be skipped for regular FAILURE events.
+     * When true, fallback is NOT invoked for FAILURE events but still invoked for TIMEOUT, THREAD_POOL_REJECTED, SEMAPHORE_REJECTED, and SHORT_CIRCUITED.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     *
+     * @since 1.6
+     */
+    public HystrixProperty<Boolean> fallbackExcludeFailure() {
+        return fallbackExcludeFailure;
     }
 
     /**
@@ -550,6 +595,9 @@ public abstract class HystrixCommandProperties {
         private Boolean executionTimeoutEnabled = null;
         private Integer fallbackIsolationSemaphoreMaxConcurrentRequests = null;
         private Boolean fallbackEnabled = null;
+        private Boolean fallbackOnTimeoutOnly = null;
+        private Boolean fallbackOnShortCircuitOnly = null;
+        private Boolean fallbackExcludeFailure = null;
         private Integer metricsHealthSnapshotIntervalInMilliseconds = null;
         private Integer metricsRollingPercentileBucketSize = null;
         private Boolean metricsRollingPercentileEnabled = null;
@@ -626,6 +674,18 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getFallbackEnabled() {
             return fallbackEnabled;
+        }
+
+        public Boolean getFallbackOnTimeoutOnly() {
+            return fallbackOnTimeoutOnly;
+        }
+
+        public Boolean getFallbackOnShortCircuitOnly() {
+            return fallbackOnShortCircuitOnly;
+        }
+
+        public Boolean getFallbackExcludeFailure() {
+            return fallbackExcludeFailure;
         }
 
         public Integer getMetricsHealthSnapshotIntervalInMilliseconds() {
@@ -740,6 +800,21 @@ public abstract class HystrixCommandProperties {
 
         public Setter withFallbackEnabled(boolean value) {
             this.fallbackEnabled = value;
+            return this;
+        }
+
+        public Setter withFallbackOnTimeoutOnly(boolean value) {
+            this.fallbackOnTimeoutOnly = value;
+            return this;
+        }
+
+        public Setter withFallbackOnShortCircuitOnly(boolean value) {
+            this.fallbackOnShortCircuitOnly = value;
+            return this;
+        }
+
+        public Setter withFallbackExcludeFailure(boolean value) {
+            this.fallbackExcludeFailure = value;
             return this;
         }
 

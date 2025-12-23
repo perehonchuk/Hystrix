@@ -606,8 +606,16 @@ import java.util.concurrent.atomic.AtomicReference;
                 Exception e = getExceptionFromThrowable(t);
                 executionResult = executionResult.setExecutionException(e);
                 if (e instanceof RejectedExecutionException) {
+                    // Check if fallback should be filtered based on failure type
+                    if (shouldSkipFallbackForEventType(HystrixEventType.THREAD_POOL_REJECTED)) {
+                        return handleFallbackDisabledByEmittingError(e, FailureType.REJECTED_THREAD_EXECUTION, "fallback disabled for thread pool rejection");
+                    }
                     return handleThreadPoolRejectionViaFallback(e);
                 } else if (t instanceof HystrixTimeoutException) {
+                    // Check if fallback should be filtered based on failure type
+                    if (shouldSkipFallbackForEventType(HystrixEventType.TIMEOUT)) {
+                        return handleFallbackDisabledByEmittingError(e, FailureType.TIMEOUT, "fallback disabled for timeout");
+                    }
                     return handleTimeoutViaFallback();
                 } else if (t instanceof HystrixBadRequestException) {
                     return handleBadRequestByEmittingError(e);
@@ -618,6 +626,11 @@ import java.util.concurrent.atomic.AtomicReference;
                     if (e instanceof HystrixBadRequestException) {
                         eventNotifier.markEvent(HystrixEventType.BAD_REQUEST, commandKey);
                         return Observable.error(e);
+                    }
+
+                    // Check if fallback should be filtered based on failure type
+                    if (shouldSkipFallbackForEventType(HystrixEventType.FAILURE)) {
+                        return handleFallbackDisabledByEmittingError(e, FailureType.COMMAND_EXCEPTION, "fallback disabled for command failure");
                     }
 
                     return handleFailureViaFallback(e);
@@ -968,6 +981,12 @@ import java.util.concurrent.atomic.AtomicReference;
         executionResult = executionResult.setExecutionException(semaphoreRejectionException);
         eventNotifier.markEvent(HystrixEventType.SEMAPHORE_REJECTED, commandKey);
         logger.debug("HystrixCommand Execution Rejection by Semaphore."); // debug only since we're throwing the exception and someone higher will do something with it
+
+        // Check if fallback should be filtered based on failure type
+        if (shouldSkipFallbackForEventType(HystrixEventType.SEMAPHORE_REJECTED)) {
+            return handleFallbackDisabledByEmittingError(semaphoreRejectionException, FailureType.REJECTED_SEMAPHORE_EXECUTION, "fallback disabled for semaphore rejection");
+        }
+
         // retrieve a fallback or throw an exception if no fallback available
         return getFallbackOrThrowException(this, HystrixEventType.SEMAPHORE_REJECTED, FailureType.REJECTED_SEMAPHORE_EXECUTION,
                 "could not acquire a semaphore for execution", semaphoreRejectionException);
@@ -979,6 +998,12 @@ import java.util.concurrent.atomic.AtomicReference;
         // short-circuit and go directly to fallback (or throw an exception if no fallback implemented)
         Exception shortCircuitException = new RuntimeException("Hystrix circuit short-circuited and is OPEN");
         executionResult = executionResult.setExecutionException(shortCircuitException);
+
+        // Check if fallback should be filtered based on failure type
+        if (shouldSkipFallbackForEventType(HystrixEventType.SHORT_CIRCUITED)) {
+            return handleFallbackDisabledByEmittingError(shortCircuitException, FailureType.SHORTCIRCUIT, "fallback disabled for short-circuit");
+        }
+
         try {
             return getFallbackOrThrowException(this, HystrixEventType.SHORT_CIRCUITED, FailureType.SHORTCIRCUIT,
                     "short-circuited", shortCircuitException);
@@ -1052,6 +1077,32 @@ import java.util.concurrent.atomic.AtomicReference;
         /* executionHook for all errors */
         Exception wrapped = wrapWithOnErrorHook(failureType, underlying);
         return Observable.error(new HystrixRuntimeException(failureType, this.getClass(), getLogMessagePrefix() + " " + message + " and fallback disabled.", wrapped, null));
+    }
+
+    /**
+     * Determines whether fallback should be skipped for the given event type based on selective fallback properties.
+     *
+     * @param eventType the event type that triggered the potential fallback
+     * @return true if fallback should be skipped, false if fallback should proceed
+     */
+    private boolean shouldSkipFallbackForEventType(HystrixEventType eventType) {
+        // If fallbackOnTimeoutOnly is enabled, only allow fallback for TIMEOUT events
+        if (properties.fallbackOnTimeoutOnly().get()) {
+            return eventType != HystrixEventType.TIMEOUT;
+        }
+
+        // If fallbackOnShortCircuitOnly is enabled, only allow fallback for SHORT_CIRCUITED events
+        if (properties.fallbackOnShortCircuitOnly().get()) {
+            return eventType != HystrixEventType.SHORT_CIRCUITED;
+        }
+
+        // If fallbackExcludeFailure is enabled, skip fallback for FAILURE events
+        if (properties.fallbackExcludeFailure().get() && eventType == HystrixEventType.FAILURE) {
+            return true;
+        }
+
+        // Default: don't skip fallback
+        return false;
     }
 
     protected boolean shouldNotBeWrapped(Throwable underlying) {
