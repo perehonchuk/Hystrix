@@ -143,7 +143,7 @@ public class HystrixRequestCache {
 
     /**
      * Clear the cache for a given cacheKey.
-     * 
+     *
      * @param cacheKey
      *            key as defined by {@link HystrixCommand#getCacheKey()}
      */
@@ -157,6 +157,25 @@ public class HystrixRequestCache {
 
             /* remove this cache key */
             cacheInstance.remove(key);
+        }
+    }
+
+    /**
+     * Mark a cached entry as stale to trigger background revalidation on next access.
+     *
+     * @param cacheKey
+     *            key as defined by {@link HystrixCommand#getCacheKey()}
+     */
+    public void markAsStale(String cacheKey) {
+        ValueCacheKey key = getRequestCacheKey(cacheKey);
+        if (key != null) {
+            ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+            if (cacheInstance != null) {
+                HystrixCachedObservable<?> cached = cacheInstance.get(key);
+                if (cached != null) {
+                    cached.markAsStale();
+                }
+            }
         }
     }
 

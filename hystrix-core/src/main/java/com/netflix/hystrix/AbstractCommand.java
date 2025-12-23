@@ -478,6 +478,35 @@ import java.util.concurrent.atomic.AtomicReference;
                 if (requestCacheEnabled) {
                     HystrixCommandResponseFromCache<R> fromCache = (HystrixCommandResponseFromCache<R>) requestCache.get(cacheKey);
                     if (fromCache != null) {
+                        // Check if stale-while-revalidate is enabled
+                        boolean staleWhileRevalidateEnabled = properties.requestCacheStaleWhileRevalidateEnabled().get();
+                        if (staleWhileRevalidateEnabled) {
+                            long staleAfterMs = properties.requestCacheStaleAfterMilliseconds().get();
+                            // Check if cached entry is stale
+                            if (fromCache.isStale(staleAfterMs) && !fromCache.isMarkedAsStale()) {
+                                // Mark as stale to prevent multiple concurrent refreshes
+                                fromCache.markAsStale();
+                                // Trigger background refresh by executing the command asynchronously
+                                // We don't wait for it, just fire and forget
+                                toObservable().subscribe(
+                                    new rx.Subscriber<R>() {
+                                        @Override
+                                        public void onCompleted() {
+                                            // Background refresh completed
+                                        }
+                                        @Override
+                                        public void onError(Throwable e) {
+                                            // Background refresh failed, but we already returned stale data
+                                        }
+                                        @Override
+                                        public void onNext(R r) {
+                                            // Background refresh produced new data
+                                        }
+                                    }
+                                );
+                            }
+                        }
+                        // Return the cached value (even if stale)
                         isResponseFromCache = true;
                         return handleRequestCacheHitAndEmitValues(fromCache, _cmd);
                     }

@@ -53,6 +53,8 @@ public abstract class HystrixCommandProperties {
     private static final Boolean default_executionIsolationThreadInterruptOnFutureCancel = false;
     private static final Boolean default_metricsRollingPercentileEnabled = true;
     private static final Boolean default_requestCacheEnabled = true;
+    private static final Boolean default_requestCacheStaleWhileRevalidateEnabled = false;
+    private static final Integer default_requestCacheStaleAfterMilliseconds = 5000;
     private static final Integer default_fallbackIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_fallbackEnabled = true;
     private static final Integer default_executionIsolationSemaphoreMaxConcurrentRequests = 10;
@@ -88,6 +90,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> requestCacheStaleWhileRevalidateEnabled; // Whether stale-while-revalidate is enabled for request cache.
+    private final HystrixProperty<Integer> requestCacheStaleAfterMilliseconds; // Milliseconds after which a cached response is considered stale.
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -135,6 +139,8 @@ public abstract class HystrixCommandProperties {
         this.metricsRollingPercentileBucketSize = getProperty(propertyPrefix, key, "metrics.rollingPercentile.bucketSize", builder.getMetricsRollingPercentileBucketSize(), default_metricsRollingPercentileBucketSize);
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
+        this.requestCacheStaleWhileRevalidateEnabled = getProperty(propertyPrefix, key, "requestCache.staleWhileRevalidate.enabled", builder.getRequestCacheStaleWhileRevalidateEnabled(), default_requestCacheStaleWhileRevalidateEnabled);
+        this.requestCacheStaleAfterMilliseconds = getProperty(propertyPrefix, key, "requestCache.staleAfterMilliseconds", builder.getRequestCacheStaleAfterMilliseconds(), default_requestCacheStaleAfterMilliseconds);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
 
         // threadpool doesn't have a global override, only instance level makes sense
@@ -418,8 +424,28 @@ public abstract class HystrixCommandProperties {
     }
 
     /**
+     * Whether stale-while-revalidate pattern is enabled for request cache.
+     * When enabled, stale cached responses can be returned while a background refresh is triggered.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> requestCacheStaleWhileRevalidateEnabled() {
+        return requestCacheStaleWhileRevalidateEnabled;
+    }
+
+    /**
+     * Time in milliseconds after which a cached response is considered stale.
+     * Used in conjunction with stale-while-revalidate pattern.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> requestCacheStaleAfterMilliseconds() {
+        return requestCacheStaleAfterMilliseconds;
+    }
+
+    /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
@@ -559,6 +585,8 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
+        private Boolean requestCacheStaleWhileRevalidateEnabled = null;
+        private Integer requestCacheStaleAfterMilliseconds = null;
         private Boolean requestLogEnabled = null;
 
         /* package */ Setter() {
@@ -658,6 +686,14 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestCacheEnabled() {
             return requestCacheEnabled;
+        }
+
+        public Boolean getRequestCacheStaleWhileRevalidateEnabled() {
+            return requestCacheStaleWhileRevalidateEnabled;
+        }
+
+        public Integer getRequestCacheStaleAfterMilliseconds() {
+            return requestCacheStaleAfterMilliseconds;
         }
 
         public Boolean getRequestLogEnabled() {
@@ -780,6 +816,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestCacheEnabled(boolean value) {
             this.requestCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withRequestCacheStaleWhileRevalidateEnabled(boolean value) {
+            this.requestCacheStaleWhileRevalidateEnabled = value;
+            return this;
+        }
+
+        public Setter withRequestCacheStaleAfterMilliseconds(int value) {
+            this.requestCacheStaleAfterMilliseconds = value;
             return this;
         }
 

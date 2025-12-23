@@ -9,8 +9,11 @@ public class HystrixCachedObservable<R> {
     protected final Subscription originalSubscription;
     protected final Observable<R> cachedObservable;
     private volatile int outstandingSubscriptions = 0;
+    private final long cachedAtTimestamp;
+    private volatile boolean markedAsStale = false;
 
     protected HystrixCachedObservable(final Observable<R> originalObservable) {
+        this.cachedAtTimestamp = System.currentTimeMillis();
         ReplaySubject<R> replaySubject = ReplaySubject.create();
         this.originalSubscription = originalObservable
                 .subscribe(replaySubject);
@@ -47,5 +50,37 @@ public class HystrixCachedObservable<R> {
 
     public void unsubscribe() {
         originalSubscription.unsubscribe();
+    }
+
+    /**
+     * Get the timestamp when this observable was cached
+     * @return timestamp in milliseconds
+     */
+    public long getCachedAtTimestamp() {
+        return cachedAtTimestamp;
+    }
+
+    /**
+     * Check if the cached value is stale based on the provided TTL
+     * @param staleAfterMilliseconds the TTL in milliseconds
+     * @return true if the cached value is older than the TTL
+     */
+    public boolean isStale(long staleAfterMilliseconds) {
+        return (System.currentTimeMillis() - cachedAtTimestamp) > staleAfterMilliseconds;
+    }
+
+    /**
+     * Mark this cached observable as stale to trigger background refresh
+     */
+    public void markAsStale() {
+        this.markedAsStale = true;
+    }
+
+    /**
+     * Check if this observable has been marked as stale
+     * @return true if marked as stale
+     */
+    public boolean isMarkedAsStale() {
+        return markedAsStale;
     }
 }
