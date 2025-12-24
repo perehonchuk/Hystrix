@@ -35,6 +35,10 @@ public abstract class HystrixCollapserProperties {
     private static final Integer default_maxRequestsInBatch = Integer.MAX_VALUE;
     private static final Integer default_timerDelayInMilliseconds = 10;
     private static final Boolean default_requestCacheEnabled = true;
+    private static final Boolean default_adaptiveBatchSizingEnabled = true;
+    private static final Integer default_minAdaptiveBatchSize = 5;
+    private static final Integer default_maxAdaptiveBatchSize = 100;
+    private static final Integer default_adaptiveBatchSizingWindow = 30000; // 30 seconds window for batch size adaptation
     /* package */ static final Integer default_metricsRollingStatisticalWindow = 10000;// default => statisticalWindow: 10000 = 10 seconds (and default of 10 buckets so each bucket is 1 second)
     private static final Integer default_metricsRollingStatisticalWindowBuckets = 10;// default => statisticalWindowBuckets: 10 = 10 buckets in a 10 second window so each bucket is 1 second
     private static final Boolean default_metricsRollingPercentileEnabled = true;
@@ -45,6 +49,10 @@ public abstract class HystrixCollapserProperties {
     private final HystrixProperty<Integer> maxRequestsInBatch;
     private final HystrixProperty<Integer> timerDelayInMilliseconds;
     private final HystrixProperty<Boolean> requestCacheEnabled;
+    private final HystrixProperty<Boolean> adaptiveBatchSizingEnabled;
+    private final HystrixProperty<Integer> minAdaptiveBatchSize;
+    private final HystrixProperty<Integer> maxAdaptiveBatchSize;
+    private final HystrixProperty<Integer> adaptiveBatchSizingWindow;
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowBuckets; // number of buckets in the statisticalWindow
     private final HystrixProperty<Boolean> metricsRollingPercentileEnabled; // Whether monitoring should be enabled
@@ -64,6 +72,10 @@ public abstract class HystrixCollapserProperties {
         this.maxRequestsInBatch = getProperty(propertyPrefix, key, "maxRequestsInBatch", builder.getMaxRequestsInBatch(), default_maxRequestsInBatch);
         this.timerDelayInMilliseconds = getProperty(propertyPrefix, key, "timerDelayInMilliseconds", builder.getTimerDelayInMilliseconds(), default_timerDelayInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
+        this.adaptiveBatchSizingEnabled = getProperty(propertyPrefix, key, "adaptiveBatchSizing.enabled", builder.getAdaptiveBatchSizingEnabled(), default_adaptiveBatchSizingEnabled);
+        this.minAdaptiveBatchSize = getProperty(propertyPrefix, key, "adaptiveBatchSizing.minSize", builder.getMinAdaptiveBatchSize(), default_minAdaptiveBatchSize);
+        this.maxAdaptiveBatchSize = getProperty(propertyPrefix, key, "adaptiveBatchSizing.maxSize", builder.getMaxAdaptiveBatchSize(), default_maxAdaptiveBatchSize);
+        this.adaptiveBatchSizingWindow = getProperty(propertyPrefix, key, "adaptiveBatchSizing.windowInMilliseconds", builder.getAdaptiveBatchSizingWindow(), default_adaptiveBatchSizingWindow);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -120,11 +132,48 @@ public abstract class HystrixCollapserProperties {
 
     /**
      * The number of milliseconds between batch executions (unless {@link #maxRequestsInBatch} is hit which will cause a batch to execute early.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> timerDelayInMilliseconds() {
         return timerDelayInMilliseconds;
+    }
+
+    /**
+     * Whether adaptive batch sizing is enabled. When enabled, the collapser will dynamically adjust
+     * the effective batch size based on recent execution patterns to optimize batching efficiency.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> adaptiveBatchSizingEnabled() {
+        return adaptiveBatchSizingEnabled;
+    }
+
+    /**
+     * The minimum batch size when adaptive batch sizing is enabled.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> minAdaptiveBatchSize() {
+        return minAdaptiveBatchSize;
+    }
+
+    /**
+     * The maximum batch size when adaptive batch sizing is enabled.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> maxAdaptiveBatchSize() {
+        return maxAdaptiveBatchSize;
+    }
+
+    /**
+     * The time window in milliseconds over which batch size adaptations are calculated.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> adaptiveBatchSizingWindow() {
+        return adaptiveBatchSizingWindow;
     }
 
     /**
@@ -217,6 +266,10 @@ public abstract class HystrixCollapserProperties {
         private Integer maxRequestsInBatch = null;
         private Integer timerDelayInMilliseconds = null;
         private Boolean requestCacheEnabled = null;
+        private Boolean adaptiveBatchSizingEnabled = null;
+        private Integer minAdaptiveBatchSize = null;
+        private Integer maxAdaptiveBatchSize = null;
+        private Integer adaptiveBatchSizingWindow = null;
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Integer metricsRollingPercentileBucketSize = null;
@@ -245,6 +298,22 @@ public abstract class HystrixCollapserProperties {
 
         public Boolean getRequestCacheEnabled() {
             return requestCacheEnabled;
+        }
+
+        public Boolean getAdaptiveBatchSizingEnabled() {
+            return adaptiveBatchSizingEnabled;
+        }
+
+        public Integer getMinAdaptiveBatchSize() {
+            return minAdaptiveBatchSize;
+        }
+
+        public Integer getMaxAdaptiveBatchSize() {
+            return maxAdaptiveBatchSize;
+        }
+
+        public Integer getAdaptiveBatchSizingWindow() {
+            return adaptiveBatchSizingWindow;
         }
 
         public Integer getMetricsRollingStatisticalWindowInMilliseconds() {
@@ -292,6 +361,26 @@ public abstract class HystrixCollapserProperties {
 
         public Setter withRequestCacheEnabled(boolean value) {
             this.requestCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withAdaptiveBatchSizingEnabled(boolean value) {
+            this.adaptiveBatchSizingEnabled = value;
+            return this;
+        }
+
+        public Setter withMinAdaptiveBatchSize(int value) {
+            this.minAdaptiveBatchSize = value;
+            return this;
+        }
+
+        public Setter withMaxAdaptiveBatchSize(int value) {
+            this.maxAdaptiveBatchSize = value;
+            return this;
+        }
+
+        public Setter withAdaptiveBatchSizingWindow(int value) {
+            this.adaptiveBatchSizingWindow = value;
             return this;
         }
 

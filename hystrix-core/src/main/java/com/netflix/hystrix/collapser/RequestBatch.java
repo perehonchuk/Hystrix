@@ -19,6 +19,8 @@ import java.util.Collection;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.slf4j.Logger;
@@ -52,6 +54,12 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
 
+    // Adaptive batch sizing fields
+    private static final ConcurrentMap<String, AtomicInteger> adaptiveBatchSizes = new ConcurrentHashMap<String, AtomicInteger>();
+    private static final ConcurrentMap<String, AtomicLong> lastAdaptationTime = new ConcurrentHashMap<String, AtomicLong>();
+    private static final ConcurrentMap<String, AtomicInteger> recentBatchSizeSum = new ConcurrentHashMap<String, AtomicInteger>();
+    private static final ConcurrentMap<String, AtomicInteger> recentBatchCount = new ConcurrentHashMap<String, AtomicInteger>();
+
     public RequestBatch(HystrixCollapserProperties properties, HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser, int maxBatchSize) {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
@@ -77,7 +85,8 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     return null;
                 }
 
-                if (argumentMap.size() >= maxBatchSize) {
+                int effectiveBatchSize = getEffectiveBatchSize();
+                if (argumentMap.size() >= effectiveBatchSize) {
                     return null;
                 } else {
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
@@ -163,6 +172,10 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
+                // Update adaptive batch sizing with actual batch size
+                int actualBatchSize = argumentMap.size();
+                updateAdaptiveBatchSize(actualBatchSize);
+
                 // shard batches
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
                 // for each shard execute its requests 
@@ -285,5 +298,76 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     public int getSize() {
         return argumentMap.size();
+    }
+
+    /**
+     * Get the effective batch size considering adaptive batch sizing if enabled.
+     * When adaptive batch sizing is enabled, this returns a dynamically calculated size
+     * based on recent batching patterns. Otherwise returns the configured maxBatchSize.
+     */
+    private int getEffectiveBatchSize() {
+        if (!properties.adaptiveBatchSizingEnabled().get()) {
+            return maxBatchSize;
+        }
+
+        String collapserKey = commandCollapser.getCollapserKey().name();
+
+        // Initialize if needed
+        adaptiveBatchSizes.putIfAbsent(collapserKey, new AtomicInteger(properties.minAdaptiveBatchSize().get()));
+        lastAdaptationTime.putIfAbsent(collapserKey, new AtomicLong(System.currentTimeMillis()));
+        recentBatchSizeSum.putIfAbsent(collapserKey, new AtomicInteger(0));
+        recentBatchCount.putIfAbsent(collapserKey, new AtomicInteger(0));
+
+        return Math.min(adaptiveBatchSizes.get(collapserKey).get(), maxBatchSize);
+    }
+
+    /**
+     * Update the adaptive batch size based on the actual batch size that was executed.
+     * This is called after a batch completes to inform the adaptive sizing algorithm.
+     */
+    private void updateAdaptiveBatchSize(int actualBatchSize) {
+        if (!properties.adaptiveBatchSizingEnabled().get()) {
+            return;
+        }
+
+        String collapserKey = commandCollapser.getCollapserKey().name();
+
+        // Track recent batch sizes
+        recentBatchSizeSum.get(collapserKey).addAndGet(actualBatchSize);
+        int count = recentBatchCount.get(collapserKey).incrementAndGet();
+
+        long now = System.currentTimeMillis();
+        long lastTime = lastAdaptationTime.get(collapserKey).get();
+        long windowSize = properties.adaptiveBatchSizingWindow().get();
+
+        // Adapt batch size if window has elapsed
+        if (now - lastTime >= windowSize && count > 0) {
+            if (lastAdaptationTime.get(collapserKey).compareAndSet(lastTime, now)) {
+                int sum = recentBatchSizeSum.get(collapserKey).getAndSet(0);
+                int batchCount = recentBatchCount.get(collapserKey).getAndSet(0);
+
+                if (batchCount > 0) {
+                    int avgBatchSize = sum / batchCount;
+                    int currentAdaptiveSize = adaptiveBatchSizes.get(collapserKey).get();
+
+                    // Adjust adaptive size based on utilization
+                    int newSize;
+                    if (avgBatchSize >= currentAdaptiveSize * 0.9) {
+                        // High utilization - increase batch size
+                        newSize = Math.min(currentAdaptiveSize + 10, properties.maxAdaptiveBatchSize().get());
+                    } else if (avgBatchSize < currentAdaptiveSize * 0.5) {
+                        // Low utilization - decrease batch size
+                        newSize = Math.max(currentAdaptiveSize - 10, properties.minAdaptiveBatchSize().get());
+                    } else {
+                        // Medium utilization - keep current size
+                        newSize = currentAdaptiveSize;
+                    }
+
+                    adaptiveBatchSizes.get(collapserKey).set(newSize);
+                    logger.debug("Adaptive batch size for {} adjusted to {} (avg: {}, count: {})",
+                        collapserKey, newSize, avgBatchSize, batchCount);
+                }
+            }
+        }
     }
 }
