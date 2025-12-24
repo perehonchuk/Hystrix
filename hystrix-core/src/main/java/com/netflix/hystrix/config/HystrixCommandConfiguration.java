@@ -63,7 +63,9 @@ public class HystrixCommandConfiguration {
                 commandProperties.circuitBreakerForceClosed().get(),
                 commandProperties.circuitBreakerForceOpen().get(),
                 commandProperties.circuitBreakerRequestVolumeThreshold().get(),
-                commandProperties.circuitBreakerSleepWindowInMilliseconds().get()
+                commandProperties.circuitBreakerSleepWindowInMilliseconds().get(),
+                commandProperties.circuitBreakerHalfOpenMaxTestRequests().get(),
+                commandProperties.circuitBreakerHalfOpenSuccessThreshold().get()
         );
 
         HystrixCommandMetricsConfig metricsConfig = new HystrixCommandMetricsConfig(
@@ -106,15 +108,20 @@ public class HystrixCommandConfiguration {
         private final boolean forceOpen;
         private final int requestVolumeThreshold;
         private final int sleepWindowInMilliseconds;
+        private final int halfOpenMaxTestRequests;
+        private final int halfOpenSuccessThreshold;
 
         public HystrixCommandCircuitBreakerConfig(boolean enabled, int errorThresholdPercentage, boolean forceClosed,
-                                                  boolean forceOpen, int requestVolumeThreshold, int sleepWindowInMilliseconds) {
+                                                  boolean forceOpen, int requestVolumeThreshold, int sleepWindowInMilliseconds,
+                                                  int halfOpenMaxTestRequests, int halfOpenSuccessThreshold) {
             this.enabled = enabled;
             this.errorThresholdPercentage = errorThresholdPercentage;
             this.forceClosed = forceClosed;
             this.forceOpen = forceOpen;
             this.requestVolumeThreshold = requestVolumeThreshold;
             this.sleepWindowInMilliseconds = sleepWindowInMilliseconds;
+            this.halfOpenMaxTestRequests = halfOpenMaxTestRequests;
+            this.halfOpenSuccessThreshold = halfOpenSuccessThreshold;
         }
 
         public boolean isEnabled() {
@@ -139,6 +146,14 @@ public class HystrixCommandConfiguration {
 
         public int getSleepWindowInMilliseconds() {
             return sleepWindowInMilliseconds;
+        }
+
+        public int getHalfOpenMaxTestRequests() {
+            return halfOpenMaxTestRequests;
+        }
+
+        public int getHalfOpenSuccessThreshold() {
+            return halfOpenSuccessThreshold;
         }
     }
 

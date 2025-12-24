@@ -147,6 +147,11 @@ public interface HystrixCircuitBreaker {
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
 
+        // Progressive recovery state tracking
+        private final AtomicLong halfOpenTestRequestCount = new AtomicLong(0);
+        private final AtomicLong halfOpenSuccessCount = new AtomicLong(0);
+        private final AtomicLong halfOpenFailureCount = new AtomicLong(0);
+
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
             this.metrics = metrics;
@@ -202,24 +207,56 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            if (status.get() == Status.HALF_OPEN) {
+                long successCount = halfOpenSuccessCount.incrementAndGet();
+                int successThreshold = properties.circuitBreakerHalfOpenSuccessThreshold().get();
+
+                // Check if we've reached the success threshold to close the circuit
+                if (successCount >= successThreshold) {
+                    if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
+                        //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+
+                        // Reset progressive recovery counters
+                        halfOpenTestRequestCount.set(0);
+                        halfOpenSuccessCount.set(0);
+                        halfOpenFailureCount.set(0);
+                    }
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
             }
         }
 
         @Override
         public void markNonSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
-                //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
-                circuitOpened.set(System.currentTimeMillis());
+            if (status.get() == Status.HALF_OPEN) {
+                long failureCount = halfOpenFailureCount.incrementAndGet();
+                int maxTestRequests = properties.circuitBreakerHalfOpenMaxTestRequests().get();
+                int successThreshold = properties.circuitBreakerHalfOpenSuccessThreshold().get();
+                long currentSuccessCount = halfOpenSuccessCount.get();
+
+                // Calculate if it's still possible to reach success threshold
+                long remainingRequests = maxTestRequests - (currentSuccessCount + failureCount);
+                long neededSuccesses = successThreshold - currentSuccessCount;
+
+                // If we can't possibly reach the success threshold, reopen the circuit immediately
+                if (neededSuccesses > remainingRequests) {
+                    if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
+                        //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
+                        circuitOpened.set(System.currentTimeMillis());
+
+                        // Reset progressive recovery counters
+                        halfOpenTestRequestCount.set(0);
+                        halfOpenSuccessCount.set(0);
+                        halfOpenFailureCount.set(0);
+                    }
+                }
             }
         }
 
@@ -246,7 +283,9 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (status.get().equals(Status.HALF_OPEN)) {
-                    return false;
+                    // In half-open state, allow requests up to the max test request limit
+                    int maxTestRequests = properties.circuitBreakerHalfOpenMaxTestRequests().get();
+                    return halfOpenTestRequestCount.get() < maxTestRequests;
                 } else {
                     return isAfterSleepWindow();
                 }
@@ -272,15 +311,33 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (isAfterSleepWindow()) {
-                    //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
-                    //if the executing command fails, the status will transition to OPEN
-                    //if the executing command gets unsubscribed, the status will transition to OPEN
-                    if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
-                        return true;
-                    } else {
-                        return false;
+                    Status currentStatus = status.get();
+                    if (currentStatus == Status.OPEN) {
+                        //First request after sleep window - transition to half-open
+                        //Multiple test requests will be allowed based on halfOpenMaxTestRequests
+                        if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                            // Reset counters when entering half-open state
+                            halfOpenTestRequestCount.set(0);
+                            halfOpenSuccessCount.set(0);
+                            halfOpenFailureCount.set(0);
+                        }
                     }
+
+                    // Allow execution if we're in half-open and haven't exceeded max test requests
+                    if (status.get() == Status.HALF_OPEN) {
+                        int maxTestRequests = properties.circuitBreakerHalfOpenMaxTestRequests().get();
+                        long currentTestCount = halfOpenTestRequestCount.get();
+
+                        if (currentTestCount < maxTestRequests) {
+                            // Increment and allow this test request
+                            halfOpenTestRequestCount.incrementAndGet();
+                            return true;
+                        } else {
+                            // Exceeded max test requests, don't allow more until circuit state changes
+                            return false;
+                        }
+                    }
+                    return false;
                 } else {
                     return false;
                 }
