@@ -14,6 +14,11 @@ public class HystrixCommandResponseFromCache<R> extends HystrixCachedObservable<
         this.originalCommand = originalCommand;
     }
 
+    /* package-private */ HystrixCommandResponseFromCache(Observable<R> originalObservable, final AbstractCommand<R> originalCommand, long ttlInMilliseconds) {
+        super(originalObservable, ttlInMilliseconds);
+        this.originalCommand = originalCommand;
+    }
+
     public Observable<R> toObservableWithStateCopiedInto(final AbstractCommand<R> commandToCopyStateInto) {
         final AtomicBoolean completionLogicRun = new AtomicBoolean(false);
 
