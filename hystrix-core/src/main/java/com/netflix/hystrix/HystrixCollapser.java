@@ -257,15 +257,68 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * For example, a batch of 100 requests could be split into 4 different batches sharded on name (ie. a-g, h-n, o-t, u-z) that each result in a separate {@link HystrixCommand} being created and
      * executed for them.
      * <p>
-     * By default this method does nothing to the Collection and is a pass-thru.
-     * 
+     * By default, this method automatically shards requests by priority if the request arguments implement {@link HystrixRequestPriority}.
+     * When arguments implement HystrixRequestPriority, requests are automatically grouped by priority level,
+     * with higher priority requests executed in separate batches from lower priority requests.
+     * <p>
+     * If automatic priority-based sharding is not desired, or if additional custom sharding logic is needed,
+     * override this method to provide custom sharding behavior.
+     *
      * @param requests
      *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects containing the arguments of each request collapsed in this batch.
      * @return Collection of {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} objects sharded according to business rules.
      *         <p>The CollapsedRequest instances should not be modified or wrapped as the CollapsedRequest instance object contains state information needed to complete the execution.
      */
     protected Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        // Check if any request argument implements HystrixRequestPriority
+        boolean hasPriority = false;
+        for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+            if (request.getArgument() instanceof HystrixRequestPriority) {
+                hasPriority = true;
+                break;
+            }
+        }
+
+        // If priority-based sharding is applicable, group by priority
+        if (hasPriority) {
+            return shardRequestsByPriority(requests);
+        }
+
+        // Otherwise return all requests as a single shard (legacy behavior)
         return Collections.singletonList(requests);
+    }
+
+    /**
+     * Automatically shard requests by priority level.
+     * <p>
+     * Groups requests by their priority (obtained via HystrixRequestPriority interface),
+     * creating separate execution shards for each priority level.
+     * Higher priority shards are ordered first to ensure they execute before lower priorities.
+     *
+     * @param requests all collapsed requests to be sharded
+     * @return Collection of shards, sorted by priority (highest first)
+     */
+    private Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequestsByPriority(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        // Group requests by priority level
+        java.util.Map<Integer, java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>>> priorityGroups =
+            new java.util.TreeMap<Integer, java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>>>(java.util.Collections.reverseOrder());
+
+        for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+            int priority = 0; // default priority for non-HystrixRequestPriority arguments
+            if (request.getArgument() instanceof HystrixRequestPriority) {
+                priority = ((HystrixRequestPriority) request.getArgument()).getPriority();
+            }
+
+            java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>> group = priorityGroups.get(priority);
+            if (group == null) {
+                group = new java.util.ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+                priorityGroups.put(priority, group);
+            }
+            group.add(request);
+        }
+
+        // Return shards sorted by priority (highest to lowest)
+        return new java.util.ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>(priorityGroups.values());
     }
 
     /**
