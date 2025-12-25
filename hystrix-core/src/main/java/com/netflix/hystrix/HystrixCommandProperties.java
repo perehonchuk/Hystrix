@@ -62,6 +62,8 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Boolean default_fallbackCacheEnabled = false; // default => fallbackCacheEnabled: false = fallback results are not cached by default
+    private static final Integer default_fallbackCacheTTLInMilliseconds = 5000; // default => fallbackCacheTTL: 5000 = cached fallback results expire after 5 seconds
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +90,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> fallbackCacheEnabled; // Whether fallback result caching is enabled.
+    private final HystrixProperty<Integer> fallbackCacheTTLInMilliseconds; // TTL for cached fallback results in milliseconds.
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -136,6 +140,8 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.fallbackCacheEnabled = getProperty(propertyPrefix, key, "fallback.cache.enabled", builder.getFallbackCacheEnabled(), default_fallbackCacheEnabled);
+        this.fallbackCacheTTLInMilliseconds = getProperty(propertyPrefix, key, "fallback.cache.ttlInMilliseconds", builder.getFallbackCacheTTLInMilliseconds(), default_fallbackCacheTTLInMilliseconds);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -419,11 +425,33 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
         return requestLogEnabled;
+    }
+
+    /**
+     * Whether fallback results should be cached and reused within the TTL window.
+     * When enabled, successful fallback executions will be cached and reused for subsequent
+     * fallback requests within the TTL period, avoiding repeated fallback execution.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> fallbackCacheEnabled() {
+        return fallbackCacheEnabled;
+    }
+
+    /**
+     * Time-to-live in milliseconds for cached fallback results.
+     * Cached fallback results will expire after this duration and fresh fallback execution will be triggered.
+     * Only applies when {@link #fallbackCacheEnabled()} is true.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> fallbackCacheTTLInMilliseconds() {
+        return fallbackCacheTTLInMilliseconds;
     }
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
@@ -560,6 +588,8 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Boolean fallbackCacheEnabled = null;
+        private Integer fallbackCacheTTLInMilliseconds = null;
 
         /* package */ Setter() {
         }
@@ -662,6 +692,14 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Boolean getFallbackCacheEnabled() {
+            return fallbackCacheEnabled;
+        }
+
+        public Integer getFallbackCacheTTLInMilliseconds() {
+            return fallbackCacheTTLInMilliseconds;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -785,6 +823,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withFallbackCacheEnabled(boolean value) {
+            this.fallbackCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withFallbackCacheTTLInMilliseconds(int value) {
+            this.fallbackCacheTTLInMilliseconds = value;
             return this;
         }
     }

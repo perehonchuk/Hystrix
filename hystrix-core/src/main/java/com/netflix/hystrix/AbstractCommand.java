@@ -94,6 +94,11 @@ import java.util.concurrent.atomic.AtomicReference;
     protected static final ConcurrentHashMap<String, TryableSemaphore> fallbackSemaphorePerCircuit = new ConcurrentHashMap<String, TryableSemaphore>();
     /* END FALLBACK Semaphore */
 
+    /* FALLBACK Cache */
+    /* each command key has a cache to store recent fallback results */
+    protected static final ConcurrentHashMap<HystrixCommandKey, HystrixFallbackCache<?>> fallbackCachePerCommandKey = new ConcurrentHashMap<HystrixCommandKey, HystrixFallbackCache<?>>();
+    /* END FALLBACK Cache */
+
     /* EXECUTION Semaphore */
     protected final TryableSemaphore executionSemaphoreOverride;
     /* each circuit has a semaphore to restrict concurrent fallback execution */
@@ -776,6 +781,29 @@ import java.util.concurrent.atomic.AtomicReference;
             if (properties.fallbackEnabled().get()) {
                 /* fallback behavior is permitted so attempt */
 
+                // Check fallback cache if enabled
+                if (properties.fallbackCacheEnabled().get()) {
+                    @SuppressWarnings("unchecked")
+                    HystrixFallbackCache<R> fallbackCache = (HystrixFallbackCache<R>) fallbackCachePerCommandKey.get(commandKey);
+                    if (fallbackCache == null) {
+                        fallbackCache = new HystrixFallbackCache<R>();
+                        @SuppressWarnings("unchecked")
+                        HystrixFallbackCache<R> existing = (HystrixFallbackCache<R>) fallbackCachePerCommandKey.putIfAbsent(commandKey, fallbackCache);
+                        if (existing != null) {
+                            fallbackCache = existing;
+                        }
+                    }
+
+                    Observable<R> cachedFallback = fallbackCache.getCachedFallback();
+                    if (cachedFallback != null) {
+                        // Return cached fallback result
+                        long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+                        eventNotifier.markEvent(HystrixEventType.FALLBACK_FROM_CACHE, commandKey);
+                        executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_FROM_CACHE);
+                        return cachedFallback;
+                    }
+                }
+
                 final Action1<Notification<? super R>> setRequestContext = new Action1<Notification<? super R>>() {
                     @Override
                     public void call(Notification<? super R> rNotification) {
@@ -799,6 +827,20 @@ import java.util.concurrent.atomic.AtomicReference;
                         long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
                         eventNotifier.markEvent(HystrixEventType.FALLBACK_SUCCESS, commandKey);
                         executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_SUCCESS);
+                    }
+                };
+
+                final Action1<R> cacheFallbackResult = new Action1<R>() {
+                    @Override
+                    public void call(R result) {
+                        if (properties.fallbackCacheEnabled().get()) {
+                            @SuppressWarnings("unchecked")
+                            HystrixFallbackCache<R> fallbackCache = (HystrixFallbackCache<R>) fallbackCachePerCommandKey.get(commandKey);
+                            if (fallbackCache != null) {
+                                long ttl = properties.fallbackCacheTTLInMilliseconds().get();
+                                fallbackCache.cacheFallbackResult(Observable.just(result), ttl);
+                            }
+                        }
                     }
                 };
 
@@ -868,6 +910,7 @@ import java.util.concurrent.atomic.AtomicReference;
                             .lift(new FallbackHookApplication(_cmd))
                             .lift(new DeprecatedOnFallbackHookApplication(_cmd))
                             .doOnNext(markFallbackEmit)
+                            .doOnNext(cacheFallbackResult)
                             .doOnCompleted(markFallbackCompleted)
                             .onErrorResumeNext(handleFallbackError)
                             .doOnTerminate(singleSemaphoreRelease)
