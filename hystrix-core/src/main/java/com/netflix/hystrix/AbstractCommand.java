@@ -340,6 +340,13 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getFallbackObservable();
 
     /**
+     * Validates a response value returned from successful execution.
+     * @param response the response to validate
+     * @return true if the response is valid, false if it should trigger fallback
+     */
+    protected abstract boolean validateResponse(R response);
+
+    /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
      * <p>
      * This lazily starts execution of the command once the {@link Observable} is subscribed to.
@@ -890,6 +897,27 @@ import java.util.concurrent.atomic.AtomicReference;
             // the run() method is a user provided implementation so can throw instead of using Observable.onError
             // so we catch it here and turn it into Observable.error
             userObservable = Observable.error(ex);
+        }
+
+        // Apply response validation if enabled
+        if (properties.responseValidationEnabled().get()) {
+            userObservable = userObservable.flatMap(new Func1<R, Observable<R>>() {
+                @Override
+                public Observable<R> call(R response) {
+                    try {
+                        boolean isValid = validateResponse(response);
+                        if (isValid) {
+                            return Observable.just(response);
+                        } else {
+                            // Validation failed - treat as execution failure
+                            return Observable.error(new HystrixBadRequestException("Response validation failed: validateResponse() returned false"));
+                        }
+                    } catch (Throwable validationEx) {
+                        // Validation threw exception - treat as execution failure
+                        return Observable.error(new RuntimeException("Response validation threw exception", validationEx));
+                    }
+                }
+            });
         }
 
         return userObservable

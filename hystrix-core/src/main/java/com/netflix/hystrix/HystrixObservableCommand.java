@@ -240,11 +240,37 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or UnsupportedOperationException if not implemented
      */
     protected Observable<R> resumeWithFallback() {
         return Observable.error(new UnsupportedOperationException("No fallback available."));
+    }
+
+    /**
+     * Validates each emitted value from {@link #construct()} to ensure it meets business requirements.
+     * <p>
+     * This method is called for each value emitted by the Observable returned from {@link #construct()}
+     * if response validation is enabled. If this method returns false or throws an exception for any emitted value,
+     * that value is considered invalid and Hystrix will route the flow to {@link #resumeWithFallback()}
+     * as if the execution had failed.
+     * <p>
+     * This allows commands to enforce business-level validation rules on emitted values. For example:
+     * <ul>
+     * <li>Validating that emitted objects contain required fields</li>
+     * <li>Checking that status codes indicate success</li>
+     * <li>Ensuring numeric values are within acceptable ranges</li>
+     * <li>Verifying data integrity constraints</li>
+     * </ul>
+     * <p>
+     * DEFAULT BEHAVIOR: Returns true (all emitted values are considered valid).
+     *
+     * @param value the value emitted from {@link #construct()}
+     * @return true if the value is valid and should be emitted to subscribers,
+     *         false if the value is invalid and should trigger fallback logic
+     */
+    protected boolean validateResponse(R value) {
+        return true; // by default, all emitted values are valid
     }
 
     @Override
