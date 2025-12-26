@@ -892,6 +892,62 @@ import java.util.concurrent.atomic.AtomicReference;
             userObservable = Observable.error(ex);
         }
 
+        // Apply retry logic if enabled
+        if (properties.retryEnabled().get()) {
+            final int maxAttempts = properties.retryMaxAttempts().get();
+            final int retryDelay = properties.retryDelayInMilliseconds().get();
+            final java.util.concurrent.atomic.AtomicInteger attemptCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+            userObservable = userObservable
+                    .onErrorResumeNext(new rx.functions.Func1<Throwable, Observable<? extends R>>() {
+                        @Override
+                        public Observable<? extends R> call(final Throwable throwable) {
+                            int currentAttempt = attemptCount.incrementAndGet();
+
+                            // If we've exhausted retries, propagate the error
+                            if (currentAttempt > maxAttempts) {
+                                _cmd.executionResult = _cmd.executionResult.addEvent(HystrixEventType.RETRY_EXHAUSTED);
+                                _cmd.eventNotifier.markEvent(HystrixEventType.RETRY_EXHAUSTED, _cmd.commandKey);
+                                return Observable.error(throwable);
+                            }
+
+                            // Mark retry attempt
+                            _cmd.executionResult = _cmd.executionResult.addEvent(HystrixEventType.RETRY_ATTEMPT);
+                            _cmd.eventNotifier.markEvent(HystrixEventType.RETRY_ATTEMPT, _cmd.commandKey);
+
+                            // Delay before retry if configured
+                            Observable<Long> delayObservable = retryDelay > 0
+                                    ? Observable.timer(retryDelay, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                    : Observable.just(0L);
+
+                            return delayObservable.flatMap(new rx.functions.Func1<Long, Observable<? extends R>>() {
+                                @Override
+                                public Observable<? extends R> call(Long delay) {
+                                    try {
+                                        Observable<R> retryObservable = getExecutionObservable();
+                                        return retryObservable.doOnNext(new rx.functions.Action1<R>() {
+                                            @Override
+                                            public void call(R r) {
+                                                // Mark successful retry
+                                                _cmd.executionResult = _cmd.executionResult.addEvent(HystrixEventType.RETRY_SUCCESS);
+                                                _cmd.eventNotifier.markEvent(HystrixEventType.RETRY_SUCCESS, _cmd.commandKey);
+                                            }
+                                        });
+                                    } catch (Throwable ex) {
+                                        return Observable.error(ex);
+                                    }
+                                }
+                            }).onErrorResumeNext(new rx.functions.Func1<Throwable, Observable<? extends R>>() {
+                                @Override
+                                public Observable<? extends R> call(Throwable retryError) {
+                                    // Retry failed, try again recursively
+                                    return call(retryError);
+                                }
+                            });
+                        }
+                    });
+        }
+
         return userObservable
                 .lift(new ExecutionHookApplication(_cmd))
                 .lift(new DeprecatedOnRunHookApplication(_cmd));
