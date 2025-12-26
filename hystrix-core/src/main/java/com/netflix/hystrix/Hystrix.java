@@ -146,6 +146,35 @@ public class Hystrix {
     }
 
     /**
+     * Manually force a circuit breaker into HALF_OPEN state for testing purposes.
+     * This allows operators to test if a dependency has recovered without waiting for the sleep window.
+     *
+     * @param commandKey The key identifying the circuit breaker to force into half-open state
+     * @return true if the circuit was successfully transitioned to HALF_OPEN, false otherwise
+     */
+    public static boolean forceCircuitBreakerHalfOpen(HystrixCommandKey commandKey) {
+        HystrixCircuitBreaker circuitBreaker = HystrixCircuitBreaker.Factory.getInstance(commandKey);
+        if (circuitBreaker != null) {
+            return circuitBreaker.forceHalfOpen();
+        }
+        return false;
+    }
+
+    /**
+     * Check if a circuit breaker is currently in a forced half-open state.
+     *
+     * @param commandKey The key identifying the circuit breaker to check
+     * @return true if the circuit is in forced half-open state, false otherwise
+     */
+    public static boolean isCircuitBreakerForcedHalfOpen(HystrixCommandKey commandKey) {
+        HystrixCircuitBreaker circuitBreaker = HystrixCircuitBreaker.Factory.getInstance(commandKey);
+        if (circuitBreaker != null) {
+            return circuitBreaker.isForcedHalfOpen();
+        }
+        return false;
+    }
+
+    /**
      * Trieber's algorithm for a concurrent stack
      * @param <E>
      */

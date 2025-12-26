@@ -44,7 +44,8 @@ public enum HystrixEventType {
     RESPONSE_FROM_CACHE(true),
     CANCELLED(true),
     COLLAPSED(false),
-    COMMAND_MAX_ACTIVE(false);
+    COMMAND_MAX_ACTIVE(false),
+    CIRCUIT_BREAKER_FORCED_HALF_OPEN(false);
 
     private final boolean isTerminal;
 
@@ -76,6 +77,7 @@ public enum HystrixEventType {
             case COLLAPSED: return COLLAPSED;
             case BAD_REQUEST: return BAD_REQUEST;
             case COMMAND_MAX_ACTIVE: return COMMAND_MAX_ACTIVE;
+            case CIRCUIT_BREAKER_FORCED_HALF_OPEN: return CIRCUIT_BREAKER_FORCED_HALF_OPEN;
             default:
                 throw new RuntimeException("Not an event that can be converted to HystrixEventType : " + event);
         }

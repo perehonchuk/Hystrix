@@ -64,6 +64,21 @@ public interface HystrixCircuitBreaker {
     boolean attemptExecution();
 
     /**
+     * Manually force the circuit breaker into HALF_OPEN state for testing purposes.
+     * This allows operators to test if a dependency has recovered without waiting for the sleep window.
+     *
+     * @return true if the circuit was successfully transitioned to HALF_OPEN, false otherwise
+     */
+    boolean forceHalfOpen();
+
+    /**
+     * Check if the circuit breaker is currently in a forced half-open state.
+     *
+     * @return true if the circuit is in forced half-open state
+     */
+    boolean isForcedHalfOpen();
+
+    /**
      * @ExcludeFromJavadoc
      * @ThreadSafe
      */
@@ -140,7 +155,7 @@ public interface HystrixCircuitBreaker {
         private final HystrixCommandMetrics metrics;
 
         enum Status {
-            CLOSED, OPEN, HALF_OPEN;
+            CLOSED, OPEN, HALF_OPEN, FORCED_HALF_OPEN;
         }
 
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
@@ -212,6 +227,16 @@ public interface HystrixCircuitBreaker {
                 Subscription newSubscription = subscribeToStream();
                 activeSubscription.set(newSubscription);
                 circuitOpened.set(-1L);
+            } else if (status.compareAndSet(Status.FORCED_HALF_OPEN, Status.CLOSED)) {
+                //Forced half-open test succeeded - close the circuit
+                metrics.resetStream();
+                Subscription previousSubscription = activeSubscription.get();
+                if (previousSubscription != null) {
+                    previousSubscription.unsubscribe();
+                }
+                Subscription newSubscription = subscribeToStream();
+                activeSubscription.set(newSubscription);
+                circuitOpened.set(-1L);
             }
         }
 
@@ -219,6 +244,9 @@ public interface HystrixCircuitBreaker {
         public void markNonSuccess() {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
+                circuitOpened.set(System.currentTimeMillis());
+            } else if (status.compareAndSet(Status.FORCED_HALF_OPEN, Status.OPEN)) {
+                //Forced half-open test failed - reopen the circuit
                 circuitOpened.set(System.currentTimeMillis());
             }
         }
@@ -245,7 +273,8 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (status.get().equals(Status.HALF_OPEN)) {
+                Status currentStatus = status.get();
+                if (currentStatus.equals(Status.HALF_OPEN) || currentStatus.equals(Status.FORCED_HALF_OPEN)) {
                     return false;
                 } else {
                     return isAfterSleepWindow();
@@ -271,6 +300,10 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
+                //Allow execution if in FORCED_HALF_OPEN state
+                if (status.get().equals(Status.FORCED_HALF_OPEN)) {
+                    return true;
+                }
                 if (isAfterSleepWindow()) {
                     //only the first request after sleep window should execute
                     //if the executing command succeeds, the status will transition to CLOSED
@@ -285,6 +318,20 @@ public interface HystrixCircuitBreaker {
                     return false;
                 }
             }
+        }
+
+        @Override
+        public boolean forceHalfOpen() {
+            //Can only force half-open from OPEN state
+            if (status.compareAndSet(Status.OPEN, Status.FORCED_HALF_OPEN)) {
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public boolean isForcedHalfOpen() {
+            return status.get().equals(Status.FORCED_HALF_OPEN);
         }
     }
 
@@ -318,6 +365,16 @@ public interface HystrixCircuitBreaker {
         @Override
         public boolean attemptExecution() {
             return true;
+        }
+
+        @Override
+        public boolean forceHalfOpen() {
+            return false;
+        }
+
+        @Override
+        public boolean isForcedHalfOpen() {
+            return false;
         }
     }
 
