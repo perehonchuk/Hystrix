@@ -286,11 +286,26 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * If {@link #getFallback()} fails in any way then this method will be invoked to provide an opportunity to return a secondary fallback response.
+     * <p>
+     * This provides a second level of fallback protection, allowing commands to degrade gracefully through multiple tiers.
+     * <p>
+     * This should do work that does not require network transport to produce and should be even more conservative than the primary fallback.
+     * <p>
+     * DEFAULT BEHAVIOR: It throws UnsupportedOperationException (no secondary fallback).
+     *
+     * @return R or throw UnsupportedOperationException if not implemented
+     */
+    protected R getSecondaryFallback() {
+        throw new UnsupportedOperationException("No secondary fallback available.");
     }
 
     @Override
@@ -321,7 +336,13 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
                 try {
                     return Observable.just(getFallback());
                 } catch (Throwable ex) {
-                    return Observable.error(ex);
+                    // Try secondary fallback if primary fallback fails
+                    try {
+                        return Observable.just(getSecondaryFallback());
+                    } catch (Throwable secondaryEx) {
+                        // If secondary fallback also fails, return the original error
+                        return Observable.error(ex);
+                    }
                 }
             }
         });

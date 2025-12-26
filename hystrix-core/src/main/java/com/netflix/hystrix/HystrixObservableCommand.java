@@ -240,20 +240,40 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or UnsupportedOperationException if not implemented
      */
     protected Observable<R> resumeWithFallback() {
         return Observable.error(new UnsupportedOperationException("No fallback available."));
     }
 
+    /**
+     * If {@link #resumeWithFallback()} fails in any way then this method will be invoked to provide an opportunity to return a secondary fallback response.
+     * <p>
+     * This provides a second level of fallback protection, allowing commands to degrade gracefully through multiple tiers.
+     * <p>
+     * This should do work that does not require network transport to produce and should be even more conservative than the primary fallback.
+     * <p>
+     * DEFAULT BEHAVIOR: It throws UnsupportedOperationException (no secondary fallback).
+     *
+     * @return Observable<R> or UnsupportedOperationException if not implemented
+     */
+    protected Observable<R> resumeWithSecondaryFallback() {
+        return Observable.error(new UnsupportedOperationException("No secondary fallback available."));
+    }
+
     @Override
     final protected Observable<R> getExecutionObservable() {
         return construct();
     }
-    
+
     @Override
     final protected Observable<R> getFallbackObservable() {
-        return resumeWithFallback();
+        return resumeWithFallback().onErrorResumeNext(new rx.functions.Func1<Throwable, Observable<? extends R>>() {
+            @Override
+            public Observable<? extends R> call(Throwable throwable) {
+                return resumeWithSecondaryFallback();
+            }
+        });
     }
 }
