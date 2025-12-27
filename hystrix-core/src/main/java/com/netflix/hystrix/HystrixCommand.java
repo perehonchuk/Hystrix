@@ -276,6 +276,22 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
     protected abstract R run() throws Exception;
 
     /**
+     * Validates the request before command execution. This method is called before any circuit breaker,
+     * timeout, or execution logic is invoked. Override this method to implement custom validation logic.
+     * <p>
+     * Validation occurs before execution resources (thread pool, semaphore) are consumed. If validation
+     * fails and validationFailureShortCircuitsExecution is enabled (default), the command will not execute
+     * and the validation failure will not count toward circuit breaker metrics.
+     * <p>
+     * DEFAULT BEHAVIOR: Returns null (validation passes).
+     *
+     * @return null if validation passes, or a {@link ValidationResult} describing the failure
+     */
+    protected ValidationResult validateRequest() {
+        return null; // null means validation passed
+    }
+
+    /**
      * If {@link #execute()} or {@link #queue()} fails in any way then this method will be invoked to provide an opportunity to return a fallback response.
      * <p>
      * This should do work that does not require network transport to produce.
@@ -286,7 +302,7 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {

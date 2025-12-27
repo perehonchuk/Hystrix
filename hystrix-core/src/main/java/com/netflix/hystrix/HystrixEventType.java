@@ -44,7 +44,10 @@ public enum HystrixEventType {
     RESPONSE_FROM_CACHE(true),
     CANCELLED(true),
     COLLAPSED(false),
-    COMMAND_MAX_ACTIVE(false);
+    COMMAND_MAX_ACTIVE(false),
+    VALIDATION_SUCCESS(false),
+    VALIDATION_FAILED(true),
+    VALIDATION_SKIPPED(false);
 
     private final boolean isTerminal;
 
@@ -97,6 +100,7 @@ public enum HystrixEventType {
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_DISABLED);
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_MISSING);
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_REJECTION);
+        EXCEPTION_PRODUCING_EVENT_TYPES.add(VALIDATION_FAILED);
 
         for (HystrixEventType eventType: HystrixEventType.values()) {
             if (eventType.isTerminal()) {

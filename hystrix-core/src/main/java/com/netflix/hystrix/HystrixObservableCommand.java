@@ -223,10 +223,26 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
 
     /**
      * Implement this method with code to be executed when {@link #observe()} or {@link #toObservable()} are invoked.
-     * 
+     *
      * @return R response type
      */
     protected abstract Observable<R> construct();
+
+    /**
+     * Validates the request before command execution. This method is called before any circuit breaker,
+     * timeout, or execution logic is invoked. Override this method to implement custom validation logic.
+     * <p>
+     * Validation occurs before execution resources (semaphore) are consumed. If validation
+     * fails and validationFailureShortCircuitsExecution is enabled (default), the command will not execute
+     * and the validation failure will not count toward circuit breaker metrics.
+     * <p>
+     * DEFAULT BEHAVIOR: Returns null (validation passes).
+     *
+     * @return null if validation passes, or a {@link ValidationResult} describing the failure
+     */
+    protected ValidationResult validateRequest() {
+        return null; // null means validation passed
+    }
 
     /**
      * If {@link #observe()} or {@link #toObservable()} fails in any way then this method will be invoked to provide an opportunity to return a fallback response.
@@ -240,7 +256,7 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or UnsupportedOperationException if not implemented
      */
     protected Observable<R> resumeWithFallback() {
