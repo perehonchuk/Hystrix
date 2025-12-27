@@ -9,8 +9,10 @@ public class HystrixCachedObservable<R> {
     protected final Subscription originalSubscription;
     protected final Observable<R> cachedObservable;
     private volatile int outstandingSubscriptions = 0;
+    private final long cachedTimestamp;
 
     protected HystrixCachedObservable(final Observable<R> originalObservable) {
+        this.cachedTimestamp = System.currentTimeMillis();
         ReplaySubject<R> replaySubject = ReplaySubject.create();
         this.originalSubscription = originalObservable
                 .subscribe(replaySubject);
@@ -47,5 +49,17 @@ public class HystrixCachedObservable<R> {
 
     public void unsubscribe() {
         originalSubscription.unsubscribe();
+    }
+
+    public boolean isExpired(long ttlInMilliseconds) {
+        if (ttlInMilliseconds <= 0) {
+            return false; // TTL disabled
+        }
+        long age = System.currentTimeMillis() - cachedTimestamp;
+        return age > ttlInMilliseconds;
+    }
+
+    public long getCachedTimestamp() {
+        return cachedTimestamp;
     }
 }

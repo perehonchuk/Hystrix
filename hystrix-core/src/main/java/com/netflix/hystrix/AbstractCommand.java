@@ -478,8 +478,21 @@ import java.util.concurrent.atomic.AtomicReference;
                 if (requestCacheEnabled) {
                     HystrixCommandResponseFromCache<R> fromCache = (HystrixCommandResponseFromCache<R>) requestCache.get(cacheKey);
                     if (fromCache != null) {
-                        isResponseFromCache = true;
-                        return handleRequestCacheHitAndEmitValues(fromCache, _cmd);
+                        // Check if TTL-based expiration is enabled and if cache entry has expired
+                        boolean ttlEnabled = properties.requestCacheTtlEnabled().get();
+                        if (ttlEnabled) {
+                            long ttlInMillis = properties.requestCacheTtlInMilliseconds().get();
+                            if (fromCache.isExpired(ttlInMillis)) {
+                                // Cache entry has expired, invalidate it and proceed with execution
+                                requestCache.clear(cacheKey);
+                                fromCache = null;
+                            }
+                        }
+
+                        if (fromCache != null) {
+                            isResponseFromCache = true;
+                            return handleRequestCacheHitAndEmitValues(fromCache, _cmd);
+                        }
                     }
                 }
 
@@ -496,9 +509,28 @@ import java.util.concurrent.atomic.AtomicReference;
                     HystrixCommandResponseFromCache<R> fromCache = (HystrixCommandResponseFromCache<R>) requestCache.putIfAbsent(cacheKey, toCache);
                     if (fromCache != null) {
                         // another thread beat us so we'll use the cached value instead
-                        toCache.unsubscribe();
-                        isResponseFromCache = true;
-                        return handleRequestCacheHitAndEmitValues(fromCache, _cmd);
+                        // But first check if it has expired
+                        boolean ttlEnabled = properties.requestCacheTtlEnabled().get();
+                        if (ttlEnabled) {
+                            long ttlInMillis = properties.requestCacheTtlInMilliseconds().get();
+                            if (fromCache.isExpired(ttlInMillis)) {
+                                // The cached entry from the other thread has already expired
+                                // Clear it and use our newly created observable instead
+                                requestCache.clear(cacheKey);
+                                requestCache.putIfAbsent(cacheKey, toCache);
+                                afterCache = toCache.toObservable();
+                            } else {
+                                // Cached entry is still valid, use it
+                                toCache.unsubscribe();
+                                isResponseFromCache = true;
+                                return handleRequestCacheHitAndEmitValues(fromCache, _cmd);
+                            }
+                        } else {
+                            // TTL not enabled, use cached value
+                            toCache.unsubscribe();
+                            isResponseFromCache = true;
+                            return handleRequestCacheHitAndEmitValues(fromCache, _cmd);
+                        }
                     } else {
                         // we just created an ObservableCommand so we cast and return it
                         afterCache = toCache.toObservable();
