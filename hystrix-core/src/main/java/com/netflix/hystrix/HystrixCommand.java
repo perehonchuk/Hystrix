@@ -285,12 +285,31 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * If network traffic is wanted for fallback (such as going to MemCache) then the fallback implementation should invoke another {@link HystrixCommand} instance that protects against that network
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
+     * With fallback chaining enabled (default), you can also override {@link #getChainedFallbackCommand()} to provide
+     * a secondary fallback command that will be automatically executed if this getFallback() method fails.
+     * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * Returns a fallback command to be executed if the primary fallback fails. This enables cascading fallback
+     * behavior where multiple levels of fallback commands can be chained together.
+     * <p>
+     * When fallback chaining is enabled (via fallback.chaining.enabled property, default: true), if getFallback() fails,
+     * Hystrix will invoke this method to obtain a secondary fallback command. The chain can continue up to
+     * the depth specified by fallback.maxChainDepth property (default: 3).
+     * <p>
+     * DEFAULT BEHAVIOR: Returns null (no chained fallback).
+     *
+     * @return HystrixCommand to execute as fallback, or null if no chained fallback is available
+     */
+    protected HystrixCommand<R> getChainedFallbackCommand() {
+        return null;
     }
 
     @Override

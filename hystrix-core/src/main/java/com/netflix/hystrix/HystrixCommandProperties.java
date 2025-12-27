@@ -45,7 +45,7 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_circuitBreakerSleepWindowInMilliseconds = 5000;// default => sleepWindow: 5000 = 5 seconds that we will sleep before trying again after tripping the circuit
     private static final Integer default_circuitBreakerErrorThresholdPercentage = 50;// default => errorThresholdPercentage = 50 = if 50%+ of requests in 10 seconds are failures or latent then we will trip the circuit
     private static final Boolean default_circuitBreakerForceOpen = false;// default => forceCircuitOpen = false (we want to allow traffic)
-    /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false 
+    /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false
     private static final Integer default_executionTimeoutInMilliseconds = 1000; // default => executionTimeoutInMilliseconds: 1000 = 1 second
     private static final Boolean default_executionTimeoutEnabled = true;
     private static final ExecutionIsolationStrategy default_executionIsolationStrategy = ExecutionIsolationStrategy.THREAD;
@@ -58,10 +58,12 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_executionIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_requestLogEnabled = true;
     private static final Boolean default_circuitBreakerEnabled = true;
-    private static final Integer default_metricsRollingPercentileWindow = 60000; // default to 1 minute for RollingPercentile 
+    private static final Integer default_metricsRollingPercentileWindow = 60000; // default to 1 minute for RollingPercentile
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Boolean default_fallbackChainingEnabled = true; // default => fallbackChainingEnabled: true = enable automatic cascading fallback chain execution
+    private static final Integer default_fallbackMaxChainDepth = 3; // default => fallbackMaxChainDepth: 3 = maximum depth of fallback chain
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +90,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> fallbackChainingEnabled; // Whether fallback chaining is enabled.
+    private final HystrixProperty<Integer> fallbackMaxChainDepth; // Maximum depth of fallback chain.
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -136,6 +140,8 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.fallbackChainingEnabled = getProperty(propertyPrefix, key, "fallback.chaining.enabled", builder.getFallbackChainingEnabled(), default_fallbackChainingEnabled);
+        this.fallbackMaxChainDepth = getProperty(propertyPrefix, key, "fallback.maxChainDepth", builder.getFallbackMaxChainDepth(), default_fallbackMaxChainDepth);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -419,11 +425,31 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
         return requestLogEnabled;
+    }
+
+    /**
+     * Whether fallback chaining is enabled (true) or not (false). When enabled, if a fallback method itself fails,
+     * Hystrix will attempt to call a secondary fallback command if one is defined. Defaults to true.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> fallbackChainingEnabled() {
+        return fallbackChainingEnabled;
+    }
+
+    /**
+     * Maximum depth of fallback chain. When fallback chaining is enabled, this limits how many levels of
+     * fallback commands can be chained together before giving up. Defaults to 3.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> fallbackMaxChainDepth() {
+        return fallbackMaxChainDepth;
     }
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
@@ -560,6 +586,8 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Boolean fallbackChainingEnabled = null;
+        private Integer fallbackMaxChainDepth = null;
 
         /* package */ Setter() {
         }
@@ -785,6 +813,24 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Boolean getFallbackChainingEnabled() {
+            return fallbackChainingEnabled;
+        }
+
+        public Setter withFallbackChainingEnabled(boolean value) {
+            this.fallbackChainingEnabled = value;
+            return this;
+        }
+
+        public Integer getFallbackMaxChainDepth() {
+            return fallbackMaxChainDepth;
+        }
+
+        public Setter withFallbackMaxChainDepth(int value) {
+            this.fallbackMaxChainDepth = value;
             return this;
         }
     }

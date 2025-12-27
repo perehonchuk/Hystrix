@@ -40,6 +40,8 @@ public enum HystrixEventType {
     FALLBACK_REJECTION(true),
     FALLBACK_DISABLED(true),
     FALLBACK_MISSING(true),
+    FALLBACK_CHAINED(false),
+    FALLBACK_CHAIN_DEPTH_EXCEEDED(true),
     EXCEPTION_THROWN(false),
     RESPONSE_FROM_CACHE(true),
     CANCELLED(true),
