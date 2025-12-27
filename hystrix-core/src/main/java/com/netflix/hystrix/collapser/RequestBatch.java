@@ -20,6 +20,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +32,7 @@ import rx.functions.Action0;
 import rx.functions.Action1;
 
 import com.netflix.hystrix.HystrixCollapser.CollapsedRequest;
+import com.netflix.hystrix.HystrixCollapser.Priority;
 import com.netflix.hystrix.HystrixCollapserProperties;
 
 /**
@@ -62,6 +66,15 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
      * @return Observable if offer accepted, null if batch is full, already started or completed
      */
     public Observable<ResponseType> offer(RequestArgumentType arg) {
+        return offer(arg, Priority.NORMAL);
+    }
+
+    /**
+     * @param arg The argument for this request
+     * @param priority The priority level for this request
+     * @return Observable if offer accepted, null if batch is full, already started or completed
+     */
+    public Observable<ResponseType> offer(RequestArgumentType arg, Priority priority) {
         /* short-cut - if the batch is started we reject the offer */
         if (batchStarted.get()) {
             return null;
@@ -81,7 +94,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     return null;
                 } else {
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
-                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
+                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this, priority);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
                     /**
                      * If the argument already exists in the batch, then there are 2 options:
@@ -164,8 +177,26 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
             try {
                 // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
+                Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requestsToProcess = argumentMap.values();
+
+                // If priority-based batching is enabled, sort requests by priority
+                if (properties.priorityBasedBatchingEnabled().get()) {
+                    List<CollapsedRequest<ResponseType, RequestArgumentType>> sortedRequests =
+                        new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>(requestsToProcess);
+
+                    // Sort by priority: HIGH first, then NORMAL, then LOW
+                    sortedRequests.sort(new Comparator<CollapsedRequest<ResponseType, RequestArgumentType>>() {
+                        @Override
+                        public int compare(CollapsedRequest<ResponseType, RequestArgumentType> r1,
+                                         CollapsedRequest<ResponseType, RequestArgumentType> r2) {
+                            return r1.getPriority().compareTo(r2.getPriority());
+                        }
+                    });
+                    requestsToProcess = sortedRequests;
+                }
+
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(requestsToProcess);
+                // for each shard execute its requests
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests

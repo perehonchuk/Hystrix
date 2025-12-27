@@ -20,6 +20,7 @@ import java.util.Collection;
 import rx.Observable;
 
 import com.netflix.hystrix.HystrixCollapser.CollapsedRequest;
+import com.netflix.hystrix.HystrixCollapser.Priority;
 import com.netflix.hystrix.HystrixCollapserKey;
 
 /**
@@ -38,5 +39,7 @@ public interface HystrixCollapserBridge<BatchReturnType, ResponseType, RequestAr
     Observable<Void> mapResponseToRequests(Observable<BatchReturnType> batchResponse, Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
 
     HystrixCollapserKey getCollapserKey();
+
+    Priority getRequestPriority();
 
 }

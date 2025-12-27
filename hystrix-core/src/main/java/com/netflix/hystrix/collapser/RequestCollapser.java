@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 
 import rx.Observable;
 
+import com.netflix.hystrix.HystrixCollapser.Priority;
 import com.netflix.hystrix.HystrixCollapserProperties;
 import com.netflix.hystrix.strategy.concurrency.HystrixConcurrencyStrategy;
 import com.netflix.hystrix.strategy.concurrency.HystrixContextCallable;
@@ -91,10 +92,11 @@ public class RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType
             }
 
             final Observable<ResponseType> response;
+            Priority priority = commandCollapser.getRequestPriority();
             if (arg != null) {
-                response = b.offer(arg);
+                response = b.offer(arg, priority);
             } else {
-                response = b.offer( (RequestArgumentType) NULL_SENTINEL);
+                response = b.offer((RequestArgumentType) NULL_SENTINEL, priority);
             }
             // it will always get an Observable unless we hit the max batch size
             if (response != null) {

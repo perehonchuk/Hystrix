@@ -92,6 +92,19 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
     }
 
     /**
+     * The priority level for a collapsed request.
+     * Requests are batched and executed in priority order when priority-based batching is enabled.
+     * <ul>
+     * <li>HIGH: Highest priority requests, executed first</li>
+     * <li>NORMAL: Standard priority requests (default)</li>
+     * <li>LOW: Lowest priority requests, executed last</li>
+     * </ul>
+     */
+    public static enum Priority {
+        HIGH, NORMAL, LOW
+    }
+
+    /**
      * Collapser with default {@link HystrixCollapserKey} derived from the implementing class name and scoped to {@link Scope#REQUEST} and default configuration.
      */
     protected HystrixObservableCollapser() {
@@ -234,6 +247,11 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
                 return self.getCollapserKey();
             }
 
+            @Override
+            public Priority getRequestPriority() {
+                return self.getRequestPriority();
+            }
+
         };
     }
 
@@ -295,10 +313,25 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      * Typically this means to take the argument(s) provided to the constructor and return it here.
      * <p>
      * If there are multiple arguments that need to be bundled, create a single object to contain them, or use a Tuple.
-     * 
+     *
      * @return RequestArgumentType
      */
     public abstract RequestArgumentType getRequestArgument();
+
+    /**
+     * The priority level of this request for priority-based batching.
+     * <p>
+     * Override this method to specify a custom priority for the request.
+     * When priority-based batching is enabled, requests are grouped and executed
+     * in priority order (HIGH, NORMAL, LOW).
+     * <p>
+     * By default, returns {@link Priority#NORMAL}.
+     *
+     * @return Priority level of the request
+     */
+    public Priority getRequestPriority() {
+        return Priority.NORMAL;
+    }
 
     /**
      * Factory method to create a new {@link HystrixObservableCommand}{@code <BatchReturnType>} command object each time a batch needs to be executed.
