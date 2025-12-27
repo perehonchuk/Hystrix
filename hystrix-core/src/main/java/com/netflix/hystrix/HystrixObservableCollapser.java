@@ -39,10 +39,12 @@ import rx.functions.Func1;
 import rx.schedulers.Schedulers;
 import rx.subjects.ReplaySubject;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -326,14 +328,60 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      * For example, a batch of 100 requests could be split into 4 different batches sharded on name (ie. a-g, h-n, o-t, u-z) that each result in a separate {@link HystrixCommand} being created and
      * executed for them.
      * <p>
-     * By default this method does nothing to the Collection and is a pass-thru.
-     * 
+     * Additionally, if the RequestArgumentType implements {@link PrioritizedRequest}, this method will automatically
+     * group requests by priority level. Requests with the same priority will be batched together, allowing
+     * high-priority requests to be processed separately from lower-priority requests.
+     * <p>
+     * By default this method groups requests by priority (if applicable), otherwise it is a pass-thru.
+     *
      * @param requests
      *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects containing the arguments of each request collapsed in this batch.
      * @return Collection of {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} objects sharded according to business rules.
      *         <p>The CollapsedRequest instances should not be modified or wrapped as the CollapsedRequest instance object contains state information needed to complete the execution.
      */
     protected Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        // Check if any request implements PrioritizedRequest
+        boolean hasPrioritizedRequests = false;
+        for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+            if (request.getArgument() instanceof PrioritizedRequest) {
+                hasPrioritizedRequests = true;
+                break;
+            }
+        }
+
+        // If requests support priority, group them by priority level
+        if (hasPrioritizedRequests) {
+            Map<Integer, List<CollapsedRequest<ResponseType, RequestArgumentType>>> priorityGroups =
+                new HashMap<Integer, List<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+
+            for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+                int priority = 0;  // default priority for non-prioritized requests
+                if (request.getArgument() instanceof PrioritizedRequest) {
+                    priority = ((PrioritizedRequest) request.getArgument()).getPriority();
+                }
+
+                List<CollapsedRequest<ResponseType, RequestArgumentType>> group = priorityGroups.get(priority);
+                if (group == null) {
+                    group = new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+                    priorityGroups.put(priority, group);
+                }
+                group.add(request);
+            }
+
+            // Return groups sorted by priority (lower number = higher priority, processed first)
+            List<Integer> sortedPriorities = new ArrayList<Integer>(priorityGroups.keySet());
+            Collections.sort(sortedPriorities);
+
+            List<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> result =
+                new ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+            for (Integer priority : sortedPriorities) {
+                result.add(priorityGroups.get(priority));
+            }
+
+            return result;
+        }
+
+        // Default: no sharding, return all requests as a single batch
         return Collections.singletonList(requests);
     }
 
