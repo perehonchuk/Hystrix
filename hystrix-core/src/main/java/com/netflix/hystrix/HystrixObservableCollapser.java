@@ -326,14 +326,50 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      * For example, a batch of 100 requests could be split into 4 different batches sharded on name (ie. a-g, h-n, o-t, u-z) that each result in a separate {@link HystrixCommand} being created and
      * executed for them.
      * <p>
-     * By default this method does nothing to the Collection and is a pass-thru.
-     * 
+     * If automatic partitioning is enabled via {@link HystrixCollapserProperties#autoPartitioningEnabled()}, this method will first apply
+     * automatic size-based partitioning before applying any custom sharding logic. This means batches will first be split by size, then each
+     * partition will be passed to the subclass implementation for further sharding if needed.
+     * <p>
+     * By default this method applies automatic partitioning if enabled, otherwise returns the Collection as a pass-thru.
+     *
      * @param requests
      *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects containing the arguments of each request collapsed in this batch.
      * @return Collection of {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} objects sharded according to business rules.
      *         <p>The CollapsedRequest instances should not be modified or wrapped as the CollapsedRequest instance object contains state information needed to complete the execution.
      */
     protected Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        HystrixCollapserProperties properties = HystrixPropertiesFactory.getCollapserProperties(collapserFactory.getCollapserKey(), null);
+
+        // Apply automatic partitioning if enabled
+        if (properties.autoPartitioningEnabled().get()) {
+            int partitionSize = properties.partitionSize().get();
+            int totalRequests = requests.size();
+
+            // Only partition if batch size exceeds partition size
+            if (totalRequests > partitionSize) {
+                java.util.List<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> partitions =
+                    new java.util.ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+
+                java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>> currentPartition =
+                    new java.util.ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+
+                for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+                    currentPartition.add(request);
+                    if (currentPartition.size() >= partitionSize) {
+                        partitions.add(currentPartition);
+                        currentPartition = new java.util.ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+                    }
+                }
+
+                // Add any remaining requests as the final partition
+                if (!currentPartition.isEmpty()) {
+                    partitions.add(currentPartition);
+                }
+
+                return partitions;
+            }
+        }
+
         return Collections.singletonList(requests);
     }
 
