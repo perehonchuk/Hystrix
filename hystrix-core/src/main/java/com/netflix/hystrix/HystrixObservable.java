@@ -63,6 +63,31 @@ public interface HystrixObservable<R> extends HystrixInvokable<R> {
     /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
      * <p>
+     * This eagerly starts execution of the command and buffers ALL results using ReplaySubject.
+     * Late subscribers will receive all previously emitted values from the beginning of the execution.
+     * <p>
+     * This method provides the legacy behavior from earlier versions of Hystrix where {@code observe()} used ReplaySubject.
+     * <p>
+     * See https://github.com/ReactiveX/RxJava/wiki for more information.
+     *
+     * @return {@code Observable<R>} that executes and calls back with the result of the command execution or a fallback if the command execution fails for any reason.
+     * @throws HystrixRuntimeException
+     *             if a fallback does not exist
+     *             <p>
+     *             <ul>
+     *             <li>via {@code Observer#onError} if a failure occurs</li>
+     *             <li>or immediately if the command can not be queued (such as short-circuited, thread-pool/semaphore rejected)</li>
+     *             </ul>
+     * @throws HystrixBadRequestException
+     *             via {@code Observer#onError} if invalid arguments or state were used representing a user failure, not a system failure
+     * @throws IllegalStateException
+     *             if invoked more than once
+     */
+    public Observable<R> observeWithReplay();
+
+    /**
+     * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
+     * <p>
      * This lazily starts execution of the command only once the {@link Observable} is subscribed to.
      * <p>
      * An eager {@link Observable} can be obtained from {@link #observe()}

@@ -46,6 +46,7 @@ import rx.functions.Action1;
 import rx.functions.Func0;
 import rx.functions.Func1;
 import rx.subjects.ReplaySubject;
+import rx.subjects.PublishSubject;
 import rx.subscriptions.CompositeSubscription;
 
 import java.lang.ref.Reference;
@@ -306,8 +307,12 @@ import java.util.concurrent.atomic.AtomicReference;
      * <p>
      * A lazy {@link Observable} can be obtained from {@link #toObservable()}.
      * <p>
+     * <b>IMPORTANT:</b> This method now uses {@link PublishSubject} which does NOT buffer emissions. Late subscribers
+     * will only receive values emitted after their subscription. If you need to ensure all values are available to
+     * late subscribers, use {@link #observeWithReplay()} instead.
+     * <p>
      * See https://github.com/Netflix/RxJava/wiki for more information.
-     * 
+     *
      * @return {@code Observable<R>} that executes and calls back with the result of command execution or a fallback if the command fails for any reason.
      * @throws HystrixRuntimeException
      *             if a fallback does not exist
@@ -322,7 +327,47 @@ import java.util.concurrent.atomic.AtomicReference;
      *             if invoked more than once
      */
     public Observable<R> observe() {
-        // us a ReplaySubject to buffer the eagerly subscribed-to Observable
+        // use a PublishSubject to multicast the eagerly subscribed-to Observable
+        // late subscribers will only receive values emitted after their subscription
+        PublishSubject<R> subject = PublishSubject.create();
+        // eagerly kick off subscription
+        final Subscription sourceSubscription = toObservable().subscribe(subject);
+        // return the subject that can be subscribed to later while the execution has already started
+        return subject.doOnUnsubscribe(new Action0() {
+            @Override
+            public void call() {
+                sourceSubscription.unsubscribe();
+            }
+        });
+    }
+
+    /**
+     * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
+     * <p>
+     * This eagerly starts execution of the command and buffers ALL results using {@link ReplaySubject}.
+     * Late subscribers will receive all previously emitted values from the beginning of the execution.
+     * <p>
+     * This method provides the legacy behavior from earlier versions of Hystrix where {@code observe()} used ReplaySubject.
+     * <p>
+     * A lazy {@link Observable} can be obtained from {@link #toObservable()}.
+     * <p>
+     * See https://github.com/Netflix/RxJava/wiki for more information.
+     *
+     * @return {@code Observable<R>} that executes and calls back with the result of command execution or a fallback if the command fails for any reason.
+     * @throws HystrixRuntimeException
+     *             if a fallback does not exist
+     *             <p>
+     *             <ul>
+     *             <li>via {@code Observer#onError} if a failure occurs</li>
+     *             <li>or immediately if the command can not be queued (such as short-circuited, thread-pool/semaphore rejected)</li>
+     *             </ul>
+     * @throws HystrixBadRequestException
+     *             via {@code Observer#onError} if invalid arguments or state were used representing a user failure, not a system failure
+     * @throws IllegalStateException
+     *             if invoked more than once
+     */
+    public Observable<R> observeWithReplay() {
+        // use a ReplaySubject to buffer all emissions from the eagerly subscribed-to Observable
         ReplaySubject<R> subject = ReplaySubject.create();
         // eagerly kick off subscription
         final Subscription sourceSubscription = toObservable().subscribe(subject);
