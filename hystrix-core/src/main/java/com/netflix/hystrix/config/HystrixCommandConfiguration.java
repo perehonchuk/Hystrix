@@ -62,6 +62,7 @@ public class HystrixCommandConfiguration {
                 commandProperties.circuitBreakerErrorThresholdPercentage().get(),
                 commandProperties.circuitBreakerForceClosed().get(),
                 commandProperties.circuitBreakerForceOpen().get(),
+                commandProperties.circuitBreakerForceHalfOpen().get(),
                 commandProperties.circuitBreakerRequestVolumeThreshold().get(),
                 commandProperties.circuitBreakerSleepWindowInMilliseconds().get()
         );
@@ -104,15 +105,17 @@ public class HystrixCommandConfiguration {
         private final int errorThresholdPercentage;
         private final boolean forceClosed;
         private final boolean forceOpen;
+        private final boolean forceHalfOpen;
         private final int requestVolumeThreshold;
         private final int sleepWindowInMilliseconds;
 
         public HystrixCommandCircuitBreakerConfig(boolean enabled, int errorThresholdPercentage, boolean forceClosed,
-                                                  boolean forceOpen, int requestVolumeThreshold, int sleepWindowInMilliseconds) {
+                                                  boolean forceOpen, boolean forceHalfOpen, int requestVolumeThreshold, int sleepWindowInMilliseconds) {
             this.enabled = enabled;
             this.errorThresholdPercentage = errorThresholdPercentage;
             this.forceClosed = forceClosed;
             this.forceOpen = forceOpen;
+            this.forceHalfOpen = forceHalfOpen;
             this.requestVolumeThreshold = requestVolumeThreshold;
             this.sleepWindowInMilliseconds = sleepWindowInMilliseconds;
         }
@@ -131,6 +134,10 @@ public class HystrixCommandConfiguration {
 
         public boolean isForceOpen() {
             return forceOpen;
+        }
+
+        public boolean isForceHalfOpen() {
+            return forceHalfOpen;
         }
 
         public int getRequestVolumeThreshold() {
