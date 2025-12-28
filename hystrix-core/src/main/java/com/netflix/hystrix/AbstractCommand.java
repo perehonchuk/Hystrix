@@ -52,6 +52,7 @@ import java.lang.ref.Reference;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -638,6 +639,57 @@ import java.util.concurrent.atomic.AtomicReference;
                     .lift(new HystrixObservableTimeoutOperator<R>(_cmd));
         } else {
             execution = executeCommandWithSpecifiedIsolation(_cmd);
+        }
+
+        // Apply retry logic if enabled
+        if (properties.retryEnabled().get()) {
+            final int maxAttempts = properties.retryMaxAttempts().get();
+            final int delayMs = properties.retryDelayInMilliseconds().get();
+            execution = execution.retryWhen(new Func1<Observable<? extends Throwable>, Observable<?>>() {
+                private int retryCount = 0;
+
+                @Override
+                public Observable<?> call(Observable<? extends Throwable> errors) {
+                    return errors.flatMap(new Func1<Throwable, Observable<?>>() {
+                        @Override
+                        public Observable<?> call(Throwable error) {
+                            // Don't retry on HystrixBadRequestException, circuit breaker open, or semaphore rejection
+                            if (error instanceof HystrixBadRequestException ||
+                                error instanceof HystrixRuntimeException) {
+                                HystrixRuntimeException hre = (HystrixRuntimeException) error;
+                                if (hre.getFailureType() == FailureType.SHORTCIRCUIT ||
+                                    hre.getFailureType() == FailureType.REJECTED_SEMAPHORE_EXECUTION) {
+                                    return Observable.error(error);
+                                }
+                            }
+
+                            if (retryCount >= maxAttempts) {
+                                return Observable.error(error);
+                            }
+
+                            retryCount++;
+                            eventNotifier.markEvent(HystrixEventType.RETRY_ATTEMPTED, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.RETRY_ATTEMPTED);
+
+                            // Delay before retry
+                            if (delayMs > 0) {
+                                return Observable.timer(delayMs, TimeUnit.MILLISECONDS);
+                            } else {
+                                return Observable.just(null);
+                            }
+                        }
+                    });
+                }
+            }).doOnNext(new Action1<R>() {
+                @Override
+                public void call(R r) {
+                    // Track successful retry
+                    if (retryCount > 0) {
+                        eventNotifier.markEvent(HystrixEventType.RETRY_SUCCESS, commandKey);
+                        executionResult = executionResult.addEvent(HystrixEventType.RETRY_SUCCESS);
+                    }
+                }
+            });
         }
 
         return execution.doOnNext(markEmits)
