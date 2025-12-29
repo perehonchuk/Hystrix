@@ -803,6 +803,8 @@ import java.util.concurrent.atomic.AtomicReference;
                 };
 
                 final Func1<Throwable, Observable<R>> handleFallbackError = new Func1<Throwable, Observable<R>>() {
+                    private final AtomicInteger attemptCount = new AtomicInteger(0);
+
                     @Override
                     public Observable<R> call(Throwable t) {
                         /* executionHook for all errors */
@@ -819,7 +821,45 @@ import java.util.concurrent.atomic.AtomicReference;
 
                             toEmit = new HystrixRuntimeException(failureType, _cmd.getClass(), getLogMessagePrefix() + " " + message + " and no fallback available.", e, fe);
                         } else {
-                            logger.debug("HystrixCommand execution " + failureType.name() + " and fallback failed.", fe);
+                            // Check if we should retry the fallback
+                            int maxRetries = properties.fallbackMaxRetryAttempts().get();
+                            int currentAttempt = attemptCount.getAndIncrement();
+
+                            if (currentAttempt < maxRetries) {
+                                // Calculate exponential backoff delay
+                                int initialDelay = properties.fallbackRetryInitialDelayInMilliseconds().get();
+                                int backoffMultiplier = properties.fallbackRetryBackoffMultiplier().get();
+                                long delayMs = (long) (initialDelay * Math.pow(backoffMultiplier, currentAttempt));
+
+                                logger.debug("HystrixCommand fallback failed on attempt " + (currentAttempt + 1) +
+                                           ", retrying after " + delayMs + "ms. Max retries: " + maxRetries, fe);
+
+                                // Record the retry event
+                                eventNotifier.markEvent(HystrixEventType.FALLBACK_RETRY, commandKey);
+                                executionResult = executionResult.addEvent(HystrixEventType.FALLBACK_RETRY);
+
+                                // Retry the fallback after the calculated delay
+                                return Observable.timer(delayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                    .flatMap(new Func1<Long, Observable<R>>() {
+                                        @Override
+                                        public Observable<R> call(Long tick) {
+                                            try {
+                                                return getFallbackObservable()
+                                                    .doOnEach(setRequestContext)
+                                                    .lift(new FallbackHookApplication(_cmd))
+                                                    .lift(new DeprecatedOnFallbackHookApplication(_cmd))
+                                                    .doOnNext(markFallbackEmit)
+                                                    .doOnCompleted(markFallbackCompleted)
+                                                    .onErrorResumeNext(handleFallbackError);
+                                            } catch (Throwable ex) {
+                                                return Observable.error(ex);
+                                            }
+                                        }
+                                    });
+                            }
+
+                            logger.debug("HystrixCommand execution " + failureType.name() + " and fallback failed after " +
+                                       (currentAttempt + 1) + " attempts.", fe);
                             eventNotifier.markEvent(HystrixEventType.FALLBACK_FAILURE, commandKey);
                             executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_FAILURE);
 

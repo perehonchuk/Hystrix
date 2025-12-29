@@ -62,6 +62,9 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Integer default_fallbackMaxRetryAttempts = 3; // default to 3 retry attempts for fallback execution
+    private static final Integer default_fallbackRetryInitialDelayInMilliseconds = 100; // default to 100ms initial delay before first retry
+    private static final Integer default_fallbackRetryBackoffMultiplier = 2; // default to 2x backoff multiplier (100ms, 200ms, 400ms, etc.)
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +91,9 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Integer> fallbackMaxRetryAttempts; // Maximum number of retry attempts for fallback execution
+    private final HystrixProperty<Integer> fallbackRetryInitialDelayInMilliseconds; // Initial delay in milliseconds before first retry
+    private final HystrixProperty<Integer> fallbackRetryBackoffMultiplier; // Multiplier for exponential backoff between retry attempts
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -136,6 +142,9 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.fallbackMaxRetryAttempts = getProperty(propertyPrefix, key, "fallback.retry.maxAttempts", builder.getFallbackMaxRetryAttempts(), default_fallbackMaxRetryAttempts);
+        this.fallbackRetryInitialDelayInMilliseconds = getProperty(propertyPrefix, key, "fallback.retry.initialDelayInMilliseconds", builder.getFallbackRetryInitialDelayInMilliseconds(), default_fallbackRetryInitialDelayInMilliseconds);
+        this.fallbackRetryBackoffMultiplier = getProperty(propertyPrefix, key, "fallback.retry.backoffMultiplier", builder.getFallbackRetryBackoffMultiplier(), default_fallbackRetryBackoffMultiplier);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -426,6 +435,34 @@ public abstract class HystrixCommandProperties {
         return requestLogEnabled;
     }
 
+    /**
+     * Maximum number of retry attempts for fallback execution when fallback fails.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> fallbackMaxRetryAttempts() {
+        return fallbackMaxRetryAttempts;
+    }
+
+    /**
+     * Initial delay in milliseconds before first fallback retry attempt.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> fallbackRetryInitialDelayInMilliseconds() {
+        return fallbackRetryInitialDelayInMilliseconds;
+    }
+
+    /**
+     * Multiplier for exponential backoff between fallback retry attempts.
+     * For example, with initialDelay=100ms and multiplier=2, retry delays will be: 100ms, 200ms, 400ms, etc.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> fallbackRetryBackoffMultiplier() {
+        return fallbackRetryBackoffMultiplier;
+    }
+
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
         return forBoolean()
                 .add(propertyPrefix + ".command." + key.name() + "." + instanceProperty, builderOverrideValue)
@@ -560,6 +597,9 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Integer fallbackMaxRetryAttempts = null;
+        private Integer fallbackRetryInitialDelayInMilliseconds = null;
+        private Integer fallbackRetryBackoffMultiplier = null;
 
         /* package */ Setter() {
         }
@@ -662,6 +702,18 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Integer getFallbackMaxRetryAttempts() {
+            return fallbackMaxRetryAttempts;
+        }
+
+        public Integer getFallbackRetryInitialDelayInMilliseconds() {
+            return fallbackRetryInitialDelayInMilliseconds;
+        }
+
+        public Integer getFallbackRetryBackoffMultiplier() {
+            return fallbackRetryBackoffMultiplier;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -785,6 +837,21 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withFallbackMaxRetryAttempts(int value) {
+            this.fallbackMaxRetryAttempts = value;
+            return this;
+        }
+
+        public Setter withFallbackRetryInitialDelayInMilliseconds(int value) {
+            this.fallbackRetryInitialDelayInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withFallbackRetryBackoffMultiplier(int value) {
+            this.fallbackRetryBackoffMultiplier = value;
             return this;
         }
     }
