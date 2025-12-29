@@ -181,6 +181,36 @@ import java.util.concurrent.atomic.AtomicReference;
 
         /* execution semaphore override if applicable */
         this.executionSemaphoreOverride = executionSemaphore;
+
+        // Register circuit breaker state change callback to invoke execution hooks
+        this.circuitBreaker.setStateChangeCallback(new HystrixCircuitBreaker.StateChangeCallback() {
+            @Override
+            public void onOpen(HystrixCommandKey key) {
+                try {
+                    AbstractCommand.this.executionHook.onCircuitBreakerOpen(AbstractCommand.this);
+                } catch (Throwable hookEx) {
+                    logger.warn("Error calling HystrixCommandExecutionHook.onCircuitBreakerOpen", hookEx);
+                }
+            }
+
+            @Override
+            public void onHalfOpen(HystrixCommandKey key) {
+                try {
+                    AbstractCommand.this.executionHook.onCircuitBreakerHalfOpen(AbstractCommand.this);
+                } catch (Throwable hookEx) {
+                    logger.warn("Error calling HystrixCommandExecutionHook.onCircuitBreakerHalfOpen", hookEx);
+                }
+            }
+
+            @Override
+            public void onClose(HystrixCommandKey key) {
+                try {
+                    AbstractCommand.this.executionHook.onCircuitBreakerClose(AbstractCommand.this);
+                } catch (Throwable hookEx) {
+                    logger.warn("Error calling HystrixCommandExecutionHook.onCircuitBreakerClose", hookEx);
+                }
+            }
+        });
     }
 
     private static HystrixCommandGroupKey initGroupKey(final HystrixCommandGroupKey fromConstructor) {
@@ -1145,6 +1175,13 @@ import java.util.concurrent.atomic.AtomicReference;
                     if (originalCommand.isCommandTimedOut.compareAndSet(TimedOutStatus.NOT_EXECUTED, TimedOutStatus.TIMED_OUT)) {
                         // report timeout failure
                         originalCommand.eventNotifier.markEvent(HystrixEventType.TIMEOUT, originalCommand.commandKey);
+
+                        // invoke timeout hook
+                        try {
+                            originalCommand.executionHook.onTimeout(originalCommand);
+                        } catch (Throwable hookEx) {
+                            logger.warn("Error calling HystrixCommandExecutionHook.onTimeout", hookEx);
+                        }
 
                         // shut down the original request
                         s.unsubscribe();

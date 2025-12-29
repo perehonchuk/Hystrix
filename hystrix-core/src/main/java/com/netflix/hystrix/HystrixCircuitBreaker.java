@@ -32,10 +32,19 @@ import rx.Subscription;
 public interface HystrixCircuitBreaker {
 
     /**
+     * Callback interface for circuit breaker state change notifications.
+     */
+    interface StateChangeCallback {
+        void onOpen(HystrixCommandKey commandKey);
+        void onHalfOpen(HystrixCommandKey commandKey);
+        void onClose(HystrixCommandKey commandKey);
+    }
+
+    /**
      * Every {@link HystrixCommand} requests asks this if it is allowed to proceed or not.  It is idempotent and does
      * not modify any internal state, and takes into account the half-open logic which allows some requests through
      * after the circuit has been opened
-     * 
+     *
      * @return boolean whether a request should be permitted
      */
     boolean allowRequest();
@@ -62,6 +71,11 @@ public interface HystrixCircuitBreaker {
      * state.
      */
     boolean attemptExecution();
+
+    /**
+     * Set a callback to be notified of circuit breaker state changes.
+     */
+    void setStateChangeCallback(StateChangeCallback callback);
 
     /**
      * @ExcludeFromJavadoc
@@ -138,6 +152,8 @@ public interface HystrixCircuitBreaker {
     /* package */class HystrixCircuitBreakerImpl implements HystrixCircuitBreaker {
         private final HystrixCommandProperties properties;
         private final HystrixCommandMetrics metrics;
+        private final HystrixCommandKey commandKey;
+        private volatile StateChangeCallback stateChangeCallback;
 
         enum Status {
             CLOSED, OPEN, HALF_OPEN;
@@ -150,10 +166,16 @@ public interface HystrixCircuitBreaker {
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
             this.metrics = metrics;
+            this.commandKey = key;
 
             //On a timer, this will set the circuit between OPEN/CLOSED as command executions occur
             Subscription s = subscribeToStream();
             activeSubscription.set(s);
+        }
+
+        @Override
+        public void setStateChangeCallback(StateChangeCallback callback) {
+            this.stateChangeCallback = callback;
         }
 
         private Subscription subscribeToStream() {
@@ -193,6 +215,9 @@ public interface HystrixCircuitBreaker {
                                     // our failure rate is too high, we need to set the state to OPEN
                                     if (status.compareAndSet(Status.CLOSED, Status.OPEN)) {
                                         circuitOpened.set(System.currentTimeMillis());
+                                        if (stateChangeCallback != null) {
+                                            stateChangeCallback.onOpen(commandKey);
+                                        }
                                     }
                                 }
                             }
@@ -212,6 +237,9 @@ public interface HystrixCircuitBreaker {
                 Subscription newSubscription = subscribeToStream();
                 activeSubscription.set(newSubscription);
                 circuitOpened.set(-1L);
+                if (stateChangeCallback != null) {
+                    stateChangeCallback.onClose(commandKey);
+                }
             }
         }
 
@@ -220,6 +248,9 @@ public interface HystrixCircuitBreaker {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+                if (stateChangeCallback != null) {
+                    stateChangeCallback.onOpen(commandKey);
+                }
             }
         }
 
@@ -277,6 +308,9 @@ public interface HystrixCircuitBreaker {
                     //if the executing command fails, the status will transition to OPEN
                     //if the executing command gets unsubscribed, the status will transition to OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        if (stateChangeCallback != null) {
+                            stateChangeCallback.onHalfOpen(commandKey);
+                        }
                         return true;
                     } else {
                         return false;
@@ -318,6 +352,11 @@ public interface HystrixCircuitBreaker {
         @Override
         public boolean attemptExecution() {
             return true;
+        }
+
+        @Override
+        public void setStateChangeCallback(StateChangeCallback callback) {
+            // no-op
         }
     }
 

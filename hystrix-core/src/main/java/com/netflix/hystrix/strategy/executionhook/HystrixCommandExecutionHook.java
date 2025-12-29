@@ -228,6 +228,50 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked when the circuit breaker opens due to health checks failing.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onCircuitBreakerOpen(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the circuit breaker transitions to half-open state to test if service has recovered.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onCircuitBreakerHalfOpen(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the circuit breaker closes after successful health checks.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onCircuitBreakerClose(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when a command execution times out.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     *
+     * @since 1.6.0
+     */
+    public <T> void onTimeout(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
      * DEPRECATED: Change usages of this to {@link #onExecutionStart}.
      *
      * Invoked before {@link HystrixCommand#run()} is about to be executed.
