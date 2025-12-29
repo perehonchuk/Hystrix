@@ -472,14 +472,24 @@ import java.util.concurrent.atomic.AtomicReference;
                 }
 
                 final boolean requestCacheEnabled = isRequestCachingEnabled();
+                final boolean globalDeduplicationEnabled = properties.globalRequestDeduplicationEnabled().get();
                 final String cacheKey = getCacheKey();
 
-                /* try from cache first */
+                /* try from request-scoped cache first */
                 if (requestCacheEnabled) {
                     HystrixCommandResponseFromCache<R> fromCache = (HystrixCommandResponseFromCache<R>) requestCache.get(cacheKey);
                     if (fromCache != null) {
                         isResponseFromCache = true;
                         return handleRequestCacheHitAndEmitValues(fromCache, _cmd);
+                    }
+                }
+
+                /* try from global cache if enabled */
+                if (globalDeduplicationEnabled && cacheKey != null) {
+                    HystrixCommandResponseFromCache<R> fromGlobalCache = (HystrixCommandResponseFromCache<R>) requestCache.getFromGlobalCache(cacheKey);
+                    if (fromGlobalCache != null) {
+                        isResponseFromCache = true;
+                        return handleRequestCacheHitAndEmitValues(fromGlobalCache, _cmd);
                     }
                 }
 
@@ -502,9 +512,28 @@ import java.util.concurrent.atomic.AtomicReference;
                     } else {
                         // we just created an ObservableCommand so we cast and return it
                         afterCache = toCache.toObservable();
+
+                        // Also put in global cache if enabled
+                        if (globalDeduplicationEnabled) {
+                            long ttl = properties.globalRequestDeduplicationTTLInMilliseconds().get();
+                            requestCache.putInGlobalCacheIfAbsent(cacheKey, toCache, ttl);
+                        }
                     }
                 } else {
                     afterCache = hystrixObservable;
+
+                    // If request cache is disabled but global deduplication is enabled, still use global cache
+                    if (globalDeduplicationEnabled && cacheKey != null) {
+                        HystrixCachedObservable<R> toCache = HystrixCachedObservable.from(hystrixObservable, _cmd);
+                        long ttl = properties.globalRequestDeduplicationTTLInMilliseconds().get();
+                        HystrixCommandResponseFromCache<R> fromGlobalCache = (HystrixCommandResponseFromCache<R>) requestCache.putInGlobalCacheIfAbsent(cacheKey, toCache, ttl);
+                        if (fromGlobalCache != null) {
+                            toCache.unsubscribe();
+                            isResponseFromCache = true;
+                            return handleRequestCacheHitAndEmitValues(fromGlobalCache, _cmd);
+                        }
+                        afterCache = toCache.toObservable();
+                    }
                 }
 
                 return afterCache

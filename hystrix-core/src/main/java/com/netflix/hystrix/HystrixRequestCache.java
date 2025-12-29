@@ -25,11 +25,14 @@ import rx.Observable;
 import rx.internal.operators.CachedObservable;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Cache that is scoped to the current request as managed by {@link HystrixRequestVariableDefault}.
  * <p>
  * This is used for short-lived caching of {@link HystrixCommand} instances to allow de-duping of command executions within a request.
+ * <p>
+ * Additionally supports global request deduplication across request contexts with TTL-based expiration.
  */
 public class HystrixRequestCache {
     @SuppressWarnings("unused")
@@ -37,6 +40,9 @@ public class HystrixRequestCache {
 
     // the String key must be: HystrixRequestCache.prefix + concurrencyStrategy + cacheKey
     private final static ConcurrentHashMap<RequestCacheKey, HystrixRequestCache> caches = new ConcurrentHashMap<RequestCacheKey, HystrixRequestCache>();
+
+    // Global cache for cross-request-context deduplication
+    private final static ConcurrentHashMap<ValueCacheKey, GlobalCacheEntry<?>> globalCache = new ConcurrentHashMap<ValueCacheKey, GlobalCacheEntry<?>>();
 
     private final RequestCacheKey rcKey;
     private final HystrixConcurrencyStrategy concurrencyStrategy;
@@ -277,6 +283,75 @@ public class HystrixRequestCache {
             return true;
         }
 
+    }
+
+    private static class GlobalCacheEntry<T> {
+        private final HystrixCachedObservable<T> cachedObservable;
+        private final long expirationTime;
+
+        private GlobalCacheEntry(HystrixCachedObservable<T> cachedObservable, long ttlMillis) {
+            this.cachedObservable = cachedObservable;
+            this.expirationTime = System.currentTimeMillis() + ttlMillis;
+        }
+
+        public HystrixCachedObservable<T> getCachedObservable() {
+            return cachedObservable;
+        }
+
+        public boolean isExpired() {
+            return System.currentTimeMillis() > expirationTime;
+        }
+    }
+
+    /**
+     * Retrieve a cached observable from the global cache if available and not expired.
+     */
+    @SuppressWarnings({ "unchecked" })
+    /* package */<T> HystrixCachedObservable<T> getFromGlobalCache(String cacheKey) {
+        ValueCacheKey key = getRequestCacheKey(cacheKey);
+        if (key != null) {
+            GlobalCacheEntry<?> entry = globalCache.get(key);
+            if (entry != null) {
+                if (entry.isExpired()) {
+                    // Remove expired entry
+                    globalCache.remove(key, entry);
+                    return null;
+                }
+                return (HystrixCachedObservable<T>) entry.getCachedObservable();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Put the observable in the global cache with TTL.
+     */
+    @SuppressWarnings({ "unchecked" })
+    /* package */<T> HystrixCachedObservable<T> putInGlobalCacheIfAbsent(String cacheKey, HystrixCachedObservable<T> observable, long ttlMillis) {
+        ValueCacheKey key = getRequestCacheKey(cacheKey);
+        if (key != null) {
+            GlobalCacheEntry<T> newEntry = new GlobalCacheEntry<T>(observable, ttlMillis);
+            GlobalCacheEntry<?> existingEntry = globalCache.putIfAbsent(key, newEntry);
+            if (existingEntry != null) {
+                if (existingEntry.isExpired()) {
+                    // Existing entry expired, replace it
+                    globalCache.replace(key, existingEntry, newEntry);
+                    return null;
+                }
+                return (HystrixCachedObservable<T>) existingEntry.getCachedObservable();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Clear the global cache for a given cacheKey.
+     */
+    public void clearGlobalCache(String cacheKey) {
+        ValueCacheKey key = getRequestCacheKey(cacheKey);
+        if (key != null) {
+            globalCache.remove(key);
+        }
     }
 
 }
