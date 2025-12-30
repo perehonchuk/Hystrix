@@ -799,6 +799,11 @@ import java.util.concurrent.atomic.AtomicReference;
                         long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
                         eventNotifier.markEvent(HystrixEventType.FALLBACK_SUCCESS, commandKey);
                         executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_SUCCESS);
+
+                        // Invalidate request cache when fallback completes successfully if enabled
+                        if (properties.requestCacheInvalidateOnFallback().get()) {
+                            invalidateCache();
+                        }
                     }
                 };
 
@@ -1725,6 +1730,19 @@ import java.util.concurrent.atomic.AtomicReference;
 
     protected boolean isRequestCachingEnabled() {
         return properties.requestCacheEnabled().get() && getCacheKey() != null;
+    }
+
+    /**
+     * Invalidate the cache entry for this command instance if caching is enabled.
+     * This is automatically called when fallback completes if requestCacheInvalidateOnFallback is enabled.
+     */
+    protected void invalidateCache() {
+        if (isRequestCachingEnabled()) {
+            String cacheKey = getCacheKey();
+            if (cacheKey != null) {
+                requestCache.clear(cacheKey);
+            }
+        }
     }
 
     protected String getLogMessagePrefix() {
