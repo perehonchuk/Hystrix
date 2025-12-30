@@ -15,7 +15,11 @@
  */
 package com.netflix.hystrix.collapser;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -163,9 +167,29 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
+                // Get all requests
+                Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests = argumentMap.values();
+
+                // If priority-based collapsing is enabled, sort requests by priority
+                if (properties.priorityBasedCollapsingEnabled().get()) {
+                    List<CollapsedRequest<ResponseType, RequestArgumentType>> sortedRequests =
+                        new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>(requests);
+                    Collections.sort(sortedRequests, new Comparator<CollapsedRequest<ResponseType, RequestArgumentType>>() {
+                        @Override
+                        public int compare(CollapsedRequest<ResponseType, RequestArgumentType> r1,
+                                         CollapsedRequest<ResponseType, RequestArgumentType> r2) {
+                            // Sort by priority descending (higher priority first)
+                            int p1 = commandCollapser.getRequestPriority(r1.getArgument());
+                            int p2 = commandCollapser.getRequestPriority(r2.getArgument());
+                            return Integer.compare(p2, p1); // p2 - p1 for descending order
+                        }
+                    });
+                    requests = sortedRequests;
+                }
+
                 // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(requests);
+                // for each shard execute its requests
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests

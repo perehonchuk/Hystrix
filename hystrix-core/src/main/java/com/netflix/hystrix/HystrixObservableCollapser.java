@@ -234,6 +234,11 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
                 return self.getCollapserKey();
             }
 
+            @Override
+            public int getRequestPriority(RequestArgumentType arg) {
+                return self.getRequestPriority(arg);
+            }
+
         };
     }
 
@@ -375,6 +380,23 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
     protected abstract Func1<BatchReturnType, ResponseType> getBatchReturnTypeToResponseTypeMapper();
 
     /**
+     * Override to provide a priority for each request argument to enable priority-based request ordering.
+     * <p>
+     * Requests with HIGHER priority values will be processed first when priority-based collapsing is enabled.
+     * <p>
+     * The default implementation returns 0 for all requests (no prioritization).
+     * <p>
+     * This is only used when priority-based collapsing is enabled via {@link HystrixCollapserProperties#priorityBasedCollapsingEnabled()}.
+     *
+     * @param arg
+     *            The request argument for which to determine priority
+     * @return int representing the priority (higher values = higher priority)
+     */
+    protected int getRequestPriority(RequestArgumentType arg) {
+        return 0;
+    }
+
+    /**
      * Used for asynchronous execution with a callback by subscribing to the {@link Observable}.
      * <p>
      * This eagerly starts execution the same as {@link HystrixCollapser#queue()} and {@link HystrixCollapser#execute()}.
@@ -389,7 +411,7 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      * Use {@link #toObservable(rx.Scheduler)} to schedule the callback differently.
      * <p>
      * See https://github.com/Netflix/RxJava/wiki for more information.
-     * 
+     *
      * @return {@code Observable<R>} that executes and calls back with the result of of {@link HystrixCommand}{@code <BatchReturnType>} execution after mapping
      *         the {@code <BatchReturnType>} into {@code <ResponseType>}
      */

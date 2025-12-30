@@ -182,6 +182,11 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
                 return self.getCollapserKey();
             }
 
+            @Override
+            public int getRequestPriority(RequestArgumentType arg) {
+                return self.getRequestPriority(arg);
+            }
+
         };
     }
 
@@ -368,6 +373,23 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
     protected abstract void mapResponseToRequests(BatchReturnType batchResponse, Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
 
     /**
+     * Override to provide a priority for each request argument to enable priority-based request ordering.
+     * <p>
+     * Requests with HIGHER priority values will be processed first when priority-based collapsing is enabled.
+     * <p>
+     * The default implementation returns 0 for all requests (no prioritization).
+     * <p>
+     * This is only used when priority-based collapsing is enabled via {@link HystrixCollapserProperties#priorityBasedCollapsingEnabled()}.
+     *
+     * @param arg
+     *            The request argument for which to determine priority
+     * @return int representing the priority (higher values = higher priority)
+     */
+    protected int getRequestPriority(RequestArgumentType arg) {
+        return 0;
+    }
+
+    /**
      * Used for asynchronous execution with a callback by subscribing to the {@link Observable}.
      * <p>
      * This eagerly starts execution the same as {@link #queue()} and {@link #execute()}.
@@ -382,7 +404,7 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * Use {@link #toObservable(rx.Scheduler)} to schedule the callback differently.
      * <p>
      * See https://github.com/Netflix/RxJava/wiki for more information.
-     * 
+     *
      * @return {@code Observable<R>} that executes and calls back with the result of of {@link HystrixCommand}{@code <BatchReturnType>} execution after passing through {@link #mapResponseToRequests}
      *         to transform the {@code <BatchReturnType>} into {@code <ResponseType>}
      */
