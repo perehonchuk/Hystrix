@@ -52,6 +52,7 @@ import java.lang.ref.Reference;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -879,10 +880,10 @@ import java.util.concurrent.atomic.AtomicReference;
                     try {
                         if (isFallbackUserDefined()) {
                             executionHook.onFallbackStart(this);
-                            fallbackExecutionChain = getFallbackObservable();
+                            fallbackExecutionChain = getFallbackOrRetry();
                         } else {
                             //same logic as above without the hook invocation
-                            fallbackExecutionChain = getFallbackObservable();
+                            fallbackExecutionChain = getFallbackOrRetry();
                         }
                     } catch (Throwable ex) {
                         //If hook or user-fallback throws, then use that as the result of the fallback lookup
@@ -1059,6 +1060,51 @@ import java.util.concurrent.atomic.AtomicReference;
         // record the exception
         executionResult = executionResult.setException(underlying);
         return getFallbackOrThrowException(this, HystrixEventType.FAILURE, FailureType.COMMAND_EXCEPTION, "failed", underlying);
+    }
+
+    /**
+     * Executes the fallback with retry logic based on configuration.
+     * If fallback fails, it will be retried up to fallbackMaxRetryCount times
+     * with a delay of fallbackRetryDelayInMilliseconds between attempts.
+     *
+     * @return Observable with fallback result or error
+     */
+    private Observable<R> getFallbackOrRetry() {
+        final int maxRetries = properties.fallbackMaxRetryCount().get();
+        final int retryDelay = properties.fallbackRetryDelayInMilliseconds().get();
+
+        if (maxRetries <= 0) {
+            // No retry configured, execute fallback directly
+            return getFallbackObservable();
+        }
+
+        // Implement retry logic using RxJava retry operator with delay
+        return getFallbackObservable()
+                .retryWhen(new rx.functions.Func1<Observable<? extends Throwable>, Observable<?>>() {
+                    @Override
+                    public Observable<?> call(Observable<? extends Throwable> errors) {
+                        return errors
+                                .zipWith(Observable.range(1, maxRetries), new rx.functions.Func2<Throwable, Integer, Integer>() {
+                                    @Override
+                                    public Integer call(Throwable throwable, Integer attemptNumber) {
+                                        return attemptNumber;
+                                    }
+                                })
+                                .flatMap(new rx.functions.Func1<Integer, Observable<?>>() {
+                                    @Override
+                                    public Observable<?> call(Integer attemptNumber) {
+                                        logger.debug("Fallback retry attempt {} of {} for HystrixCommand {}",
+                                                attemptNumber, maxRetries, commandKey.name());
+                                        if (attemptNumber >= maxRetries) {
+                                            // Exceeded max retries, propagate error
+                                            return Observable.error(new RuntimeException("Fallback failed after " + maxRetries + " retry attempts"));
+                                        }
+                                        // Delay before next retry
+                                        return Observable.timer(retryDelay, TimeUnit.MILLISECONDS);
+                                    }
+                                });
+                    }
+                });
     }
 
     private Observable<R> handleFallbackRejectionByEmittingError() {
