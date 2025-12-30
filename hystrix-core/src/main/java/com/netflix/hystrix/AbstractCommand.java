@@ -467,6 +467,13 @@ import java.util.concurrent.atomic.AtomicReference;
                 if (properties.requestLogEnabled().get()) {
                     // log this command execution regardless of what happened
                     if (currentRequestLog != null) {
+                        // Check if this command key has been executed before in this request
+                        int previousExecutionCount = currentRequestLog.getExecutionCount(_cmd.commandKey);
+                        if (previousExecutionCount > 0) {
+                            // This is a duplicate execution within the same request
+                            executionResult = executionResult.addEvent(HystrixEventType.DUPLICATE_COMMAND_EXECUTION);
+                            eventNotifier.markEvent(HystrixEventType.DUPLICATE_COMMAND_EXECUTION, _cmd.commandKey);
+                        }
                         currentRequestLog.addExecutedCommand(_cmd);
                     }
                 }

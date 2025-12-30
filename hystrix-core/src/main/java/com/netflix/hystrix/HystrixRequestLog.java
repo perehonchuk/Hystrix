@@ -72,6 +72,11 @@ public class HystrixRequestLog {
      */
     private LinkedBlockingQueue<HystrixInvokableInfo<?>> allExecutedCommands = new LinkedBlockingQueue<HystrixInvokableInfo<?>>(MAX_STORAGE);
 
+    /**
+     * Tracks execution frequency of commands by command key within this request.
+     */
+    private Map<HystrixCommandKey, Integer> commandExecutionFrequency = new HashMap<HystrixCommandKey, Integer>();
+
     // prevent public instantiation
     private HystrixRequestLog() {
     }
@@ -109,7 +114,7 @@ public class HystrixRequestLog {
 
     /**
      * Retrieve {@link HystrixCommand} instances that were executed during this {@link HystrixRequestContext}.
-     * 
+     *
      * @return {@code Collection<HystrixCommand<?>>}
      */
     public Collection<HystrixInvokableInfo<?>> getAllExecutedCommands() {
@@ -117,8 +122,32 @@ public class HystrixRequestLog {
     }
 
     /**
+     * Retrieve the execution frequency map for all command keys executed during this {@link HystrixRequestContext}.
+     *
+     * @return {@code Map<HystrixCommandKey, Integer>} mapping command keys to their execution counts
+     */
+    public Map<HystrixCommandKey, Integer> getCommandExecutionFrequency() {
+        synchronized (commandExecutionFrequency) {
+            return Collections.unmodifiableMap(new HashMap<HystrixCommandKey, Integer>(commandExecutionFrequency));
+        }
+    }
+
+    /**
+     * Get the number of times a specific command key was executed during this {@link HystrixRequestContext}.
+     *
+     * @param commandKey the command key to query
+     * @return the number of executions, or 0 if the command was never executed
+     */
+    public int getExecutionCount(HystrixCommandKey commandKey) {
+        synchronized (commandExecutionFrequency) {
+            Integer count = commandExecutionFrequency.get(commandKey);
+            return (count == null) ? 0 : count;
+        }
+    }
+
+    /**
      * Add {@link HystrixCommand} instance to the request log.
-     * 
+     *
      * @param command
      *            {@code HystrixCommand<?>}
      */
@@ -126,6 +155,17 @@ public class HystrixRequestLog {
         if (!allExecutedCommands.offer(command)) {
             // see RequestLog: Reduce Chance of Memory Leak https://github.com/Netflix/Hystrix/issues/53
             logger.warn("RequestLog ignoring command after reaching limit of " + MAX_STORAGE + ". See https://github.com/Netflix/Hystrix/issues/53 for more information.");
+        }
+
+        // Track command execution frequency by command key
+        synchronized (commandExecutionFrequency) {
+            HystrixCommandKey key = command.getCommandKey();
+            Integer count = commandExecutionFrequency.get(key);
+            if (count == null) {
+                commandExecutionFrequency.put(key, 1);
+            } else {
+                commandExecutionFrequency.put(key, count + 1);
+            }
         }
 
         // TODO remove this when deprecation completed
