@@ -348,6 +348,38 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
     }
 
     /**
+     * Used for fire-and-forget execution of command.
+     * <p>
+     * This will execute the command asynchronously without returning a result handle.
+     * The command will run in the background and any result or error will be ignored.
+     * <p>
+     * This is useful for commands where you don't care about the result or when you want
+     * to trigger side effects without blocking or waiting for completion.
+     * <p>
+     * NOTE: Since no result is returned, you cannot know if the command succeeded or failed
+     * unless you implement your own external tracking mechanism.
+     *
+     * @return void - no result is returned
+     */
+    public void fireAndForget() {
+        // Subscribe to the observable but ignore all results
+        toObservable().subscribe(
+            new Action1<R>() {
+                @Override
+                public void call(R r) {
+                    // Ignore success result
+                }
+            },
+            new Action1<Throwable>() {
+                @Override
+                public void call(Throwable throwable) {
+                    // Ignore error - fire and forget means we don't care about failures
+                }
+            }
+        );
+    }
+
+    /**
      * Used for asynchronous execution of command.
      * <p>
      * This will queue up the command on the thread pool and return an {@link Future} to get the result once it completes.
@@ -355,7 +387,7 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * NOTE: If configured to not run in a separate thread, this will have the same effect as {@link #execute()} and will block.
      * <p>
      * We don't throw an exception but just flip to synchronous execution so code doesn't need to change in order to switch a command from running on a separate thread to the calling thread.
-     * 
+     *
      * @return {@code Future<R>} Result of {@link #run()} execution or a fallback from {@link #getFallback()} if the command fails for any reason.
      * @throws HystrixRuntimeException
      *             if a fallback does not exist

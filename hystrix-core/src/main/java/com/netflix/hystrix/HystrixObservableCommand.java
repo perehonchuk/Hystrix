@@ -222,8 +222,40 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
     }
 
     /**
+     * Used for fire-and-forget execution of command.
+     * <p>
+     * This will execute the command asynchronously without returning a result handle.
+     * The command will run in the background and any results or errors will be ignored.
+     * <p>
+     * This is useful for commands where you don't care about the result or when you want
+     * to trigger side effects without blocking or waiting for completion.
+     * <p>
+     * NOTE: Since no result is returned, you cannot know if the command succeeded or failed
+     * unless you implement your own external tracking mechanism.
+     *
+     * @return void - no result is returned
+     */
+    public void fireAndForget() {
+        // Subscribe to the observable but ignore all results
+        toObservable().subscribe(
+            new rx.functions.Action1<R>() {
+                @Override
+                public void call(R r) {
+                    // Ignore success results
+                }
+            },
+            new rx.functions.Action1<Throwable>() {
+                @Override
+                public void call(Throwable throwable) {
+                    // Ignore error - fire and forget means we don't care about failures
+                }
+            }
+        );
+    }
+
+    /**
      * Implement this method with code to be executed when {@link #observe()} or {@link #toObservable()} are invoked.
-     * 
+     *
      * @return R response type
      */
     protected abstract Observable<R> construct();
