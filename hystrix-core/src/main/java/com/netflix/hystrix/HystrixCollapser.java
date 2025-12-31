@@ -167,8 +167,39 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
                 return batchResponse.single().doOnNext(new Action1<BatchReturnType>() {
                     @Override
                     public void call(BatchReturnType batchReturnType) {
-                        // this is a blocking call in HystrixCollapser
-                        self.mapResponseToRequests(batchReturnType, requests);
+                        // Check if index-based mapping is being used
+                        // We test this by calling mapResponseToRequestsByIndex with index=0 and checking for null
+                        // If it returns non-null or throws, we know the user has overridden it
+                        boolean useIndexBasedMapping = false;
+                        try {
+                            // Try calling with index -1 to detect if method is overridden
+                            // If not overridden, it returns null immediately without accessing batchResponse
+                            ResponseType testResult = self.mapResponseToRequestsByIndex(batchReturnType, -1);
+                            useIndexBasedMapping = (testResult != null);
+                        } catch (Exception e) {
+                            // Method threw an exception, which means it's overridden (default impl returns null)
+                            useIndexBasedMapping = true;
+                        }
+
+                        if (useIndexBasedMapping && requests.size() > 0) {
+                            // Use new index-based mapping approach
+                            int index = 0;
+                            for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+                                try {
+                                    ResponseType response = self.mapResponseToRequestsByIndex(batchReturnType, index);
+                                    if (response != null) {
+                                        request.setResponse(response);
+                                    }
+                                    // If null is returned, don't set response (request will timeout or use fallback)
+                                } catch (Exception e) {
+                                    request.setException(e);
+                                }
+                                index++;
+                            }
+                        } else {
+                            // Use traditional collection-based mapping approach
+                            self.mapResponseToRequests(batchReturnType, requests);
+                        }
                     }
                 }).ignoreElements().cast(Void.class);
             }
@@ -285,34 +316,78 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * <p>
      * Common code when {@code <BatchReturnType>} is {@code List<ResponseType>} is:
      * <p>
-     * 
+     *
      * <pre>
      * int count = 0;
      * for ({@code CollapsedRequest<ResponseType, RequestArgumentType>} request : requests) {
      * &nbsp;&nbsp;&nbsp;&nbsp; request.setResponse(batchResponse.get(count++));
      * }
      * </pre>
-     * 
+     *
      * For example if the types were {@code <List<String>, String, String>}:
      * <p>
-     * 
+     *
      * <pre>
      * int count = 0;
      * for ({@code CollapsedRequest<String, String>} request : requests) {
      * &nbsp;&nbsp;&nbsp;&nbsp; request.setResponse(batchResponse.get(count++));
      * }
      * </pre>
-     * 
+     *
+     * <p>
+     * NOTE: If you override {@link #mapResponseToRequestsByIndex(Object, int)} to provide index-based mapping,
+     * this method implementation will not be called. Instead, the framework will automatically iterate through
+     * requests and invoke mapResponseToRequestsByIndex for each one.
+     *
      * @param batchResponse
      *            The {@code <BatchReturnType>} returned from the {@link HystrixCommand}{@code <BatchReturnType>} command created by {@link #createCommand}.
      *            <p>
-     * 
+     *
      * @param requests
      *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects containing the arguments of each request collapsed in this batch.
      *            <p>
      *            The {@link CollapsedRequest#setResponse(Object)} or {@link CollapsedRequest#setException(Exception)} must be called on each {@link CollapsedRequest} in the Collection.
      */
     protected abstract void mapResponseToRequests(BatchReturnType batchResponse, Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
+
+    /**
+     * Optional index-based mapping method that can be overridden instead of {@link #mapResponseToRequests(Object, Collection)}.
+     * <p>
+     * When this method is overridden (returns non-null), the framework will automatically iterate through the collapsed requests
+     * in order and invoke this method for each request with its corresponding index. This provides a cleaner API for batch operations
+     * where responses are positionally aligned with requests.
+     * <p>
+     * This is particularly useful when:
+     * <ul>
+     * <li>Batch responses are returned as a List where position N corresponds to request N</li>
+     * <li>The backend service maintains request ordering in responses</li>
+     * <li>You want to avoid manual iteration logic in mapResponseToRequests</li>
+     * </ul>
+     * <p>
+     * Example implementation when {@code <BatchReturnType>} is {@code List<ResponseType>}:
+     * <pre>
+     * &#64;Override
+     * protected ResponseType mapResponseToRequestsByIndex(List&lt;ResponseType&gt; batchResponse, int index) {
+     *     return batchResponse.get(index);
+     * }
+     * </pre>
+     * <p>
+     * If this method returns null for a given index, no response will be set for that request (the request will timeout).
+     * To set an exception, throw it from this method and it will be set on the corresponding request.
+     * <p>
+     * DEFAULT: Returns null, meaning index-based mapping is disabled and {@link #mapResponseToRequests(Object, Collection)}
+     * will be used instead.
+     *
+     * @param batchResponse
+     *            The {@code <BatchReturnType>} returned from the batch command execution
+     * @param index
+     *            The zero-based index of the request being mapped (0 to N-1 where N is the batch size)
+     * @return ResponseType to set on the request at this index, or null if no response should be set
+     * @throws Exception if an error occurs, which will be set as an exception on the corresponding request
+     */
+    protected ResponseType mapResponseToRequestsByIndex(BatchReturnType batchResponse, int index) throws Exception {
+        return null;
+    }
 
     /**
      * Used for asynchronous execution with a callback by subscribing to the {@link Observable}.

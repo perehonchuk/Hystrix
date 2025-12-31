@@ -167,66 +167,131 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
 
             @Override
             public Observable<Void> mapResponseToRequests(Observable<BatchReturnType> batchResponse, Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
-                Func1<RequestArgumentType, K> requestKeySelector = self.getRequestArgumentKeySelector();
-                final Func1<BatchReturnType, K> batchResponseKeySelector = self.getBatchReturnTypeKeySelector();
-                final Func1<BatchReturnType, ResponseType> mapBatchTypeToResponseType = self.getBatchReturnTypeToResponseTypeMapper();
-
-                // index the requests by key
-                final Map<K, CollapsedRequest<ResponseType, RequestArgumentType>> requestsByKey = new HashMap<K, CollapsedRequest<ResponseType, RequestArgumentType>>(requests.size());
-                for (CollapsedRequest<ResponseType, RequestArgumentType> cr : requests) {
-                    K requestArg = requestKeySelector.call(cr.getArgument());
-                    requestsByKey.put(requestArg, cr);
+                // Check if index-based mapping is being used by testing with a null batch item
+                boolean useIndexBasedMapping = false;
+                try {
+                    ResponseType testResult = self.mapBatchResponseByIndex(null, 0);
+                    useIndexBasedMapping = (testResult != null);
+                } catch (Exception e) {
+                    // Method threw exception, likely means it's overridden
+                    useIndexBasedMapping = true;
                 }
-                final Set<K> seenKeys = new HashSet<K>();
 
-                // observe the responses and join with the requests by key
-                return batchResponse
-                        .doOnNext(new Action1<BatchReturnType>() {
-                            @Override
-                            public void call(BatchReturnType batchReturnType) {
-                                try {
-                                    K responseKey = batchResponseKeySelector.call(batchReturnType);
-                                    CollapsedRequest<ResponseType, RequestArgumentType> requestForResponse = requestsByKey.get(responseKey);
-                                    if (requestForResponse != null) {
-                                        requestForResponse.emitResponse(mapBatchTypeToResponseType.call(batchReturnType));
-                                        // now add this to seenKeys, so we can later check what was seen, and what was unseen
-                                        seenKeys.add(responseKey);
-                                    } else {
-                                        logger.warn("Batch Response contained a response key not in request batch : {}", responseKey);
-                                    }
-                                } catch (Throwable ex) {
-                                    logger.warn("Uncaught error during demultiplexing of BatchResponse", ex);
-                                }
-                            }
-                        })
-                        .doOnError(new Action1<Throwable>() {
-                            @Override
-                            public void call(Throwable t) {
-                                Exception ex = getExceptionFromThrowable(t);
-                                for (CollapsedRequest<ResponseType, RequestArgumentType> collapsedReq : requestsByKey.values()) {
-                                    collapsedReq.setException(ex);
-                                }
-                            }
-                        })
-                        .doOnCompleted(new Action0() {
-                            @Override
-                            public void call() {
+                if (useIndexBasedMapping) {
+                    // Use new index-based ordered mapping approach
+                    final java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>> requestList =
+                        new java.util.ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>(requests);
+                    final Set<Integer> seenIndices = new HashSet<Integer>();
+                    final java.util.concurrent.atomic.AtomicInteger emissionIndex = new java.util.concurrent.atomic.AtomicInteger(0);
 
-                                for (Map.Entry<K, CollapsedRequest<ResponseType, RequestArgumentType>> entry : requestsByKey.entrySet()) {
-                                    K key = entry.getKey();
-                                    CollapsedRequest<ResponseType, RequestArgumentType> collapsedReq = entry.getValue();
-                                    if (!seenKeys.contains(key)) {
-                                        try {
-                                            onMissingResponse(collapsedReq);
-                                        } catch (Throwable ex) {
-                                            collapsedReq.setException(new RuntimeException("Error in HystrixObservableCollapser.onMissingResponse handler", ex));
+                    return batchResponse
+                            .doOnNext(new Action1<BatchReturnType>() {
+                                @Override
+                                public void call(BatchReturnType batchReturnType) {
+                                    try {
+                                        int index = emissionIndex.getAndIncrement();
+                                        if (index < requestList.size()) {
+                                            ResponseType response = self.mapBatchResponseByIndex(batchReturnType, index);
+                                            if (response != null) {
+                                                requestList.get(index).emitResponse(response);
+                                                seenIndices.add(index);
+                                            }
+                                        } else {
+                                            logger.warn("Batch Observable emitted more items ({}) than requests in batch ({})", index + 1, requestList.size());
                                         }
+                                    } catch (Throwable ex) {
+                                        logger.warn("Error during index-based mapping of batch response", ex);
                                     }
-                                    //then unconditionally issue an onCompleted. this ensures the downstream gets a terminal, regardless of how onMissingResponse was implemented
-                                    collapsedReq.setComplete();
                                 }
-                            }
-                        }).ignoreElements().cast(Void.class);
+                            })
+                            .doOnError(new Action1<Throwable>() {
+                                @Override
+                                public void call(Throwable t) {
+                                    Exception ex = getExceptionFromThrowable(t);
+                                    for (CollapsedRequest<ResponseType, RequestArgumentType> collapsedReq : requestList) {
+                                        collapsedReq.setException(ex);
+                                    }
+                                }
+                            })
+                            .doOnCompleted(new Action0() {
+                                @Override
+                                public void call() {
+                                    for (int i = 0; i < requestList.size(); i++) {
+                                        CollapsedRequest<ResponseType, RequestArgumentType> collapsedReq = requestList.get(i);
+                                        if (!seenIndices.contains(i)) {
+                                            try {
+                                                onMissingResponse(collapsedReq);
+                                            } catch (Throwable ex) {
+                                                collapsedReq.setException(new RuntimeException("Error in HystrixObservableCollapser.onMissingResponse handler", ex));
+                                            }
+                                        }
+                                        collapsedReq.setComplete();
+                                    }
+                                }
+                            }).ignoreElements().cast(Void.class);
+                } else {
+                    // Use traditional key-based mapping approach
+                    Func1<RequestArgumentType, K> requestKeySelector = self.getRequestArgumentKeySelector();
+                    final Func1<BatchReturnType, K> batchResponseKeySelector = self.getBatchReturnTypeKeySelector();
+                    final Func1<BatchReturnType, ResponseType> mapBatchTypeToResponseType = self.getBatchReturnTypeToResponseTypeMapper();
+
+                    // index the requests by key
+                    final Map<K, CollapsedRequest<ResponseType, RequestArgumentType>> requestsByKey = new HashMap<K, CollapsedRequest<ResponseType, RequestArgumentType>>(requests.size());
+                    for (CollapsedRequest<ResponseType, RequestArgumentType> cr : requests) {
+                        K requestArg = requestKeySelector.call(cr.getArgument());
+                        requestsByKey.put(requestArg, cr);
+                    }
+                    final Set<K> seenKeys = new HashSet<K>();
+
+                    // observe the responses and join with the requests by key
+                    return batchResponse
+                            .doOnNext(new Action1<BatchReturnType>() {
+                                @Override
+                                public void call(BatchReturnType batchReturnType) {
+                                    try {
+                                        K responseKey = batchResponseKeySelector.call(batchReturnType);
+                                        CollapsedRequest<ResponseType, RequestArgumentType> requestForResponse = requestsByKey.get(responseKey);
+                                        if (requestForResponse != null) {
+                                            requestForResponse.emitResponse(mapBatchTypeToResponseType.call(batchReturnType));
+                                            // now add this to seenKeys, so we can later check what was seen, and what was unseen
+                                            seenKeys.add(responseKey);
+                                        } else {
+                                            logger.warn("Batch Response contained a response key not in request batch : {}", responseKey);
+                                        }
+                                    } catch (Throwable ex) {
+                                        logger.warn("Uncaught error during demultiplexing of BatchResponse", ex);
+                                    }
+                                }
+                            })
+                            .doOnError(new Action1<Throwable>() {
+                                @Override
+                                public void call(Throwable t) {
+                                    Exception ex = getExceptionFromThrowable(t);
+                                    for (CollapsedRequest<ResponseType, RequestArgumentType> collapsedReq : requestsByKey.values()) {
+                                        collapsedReq.setException(ex);
+                                    }
+                                }
+                            })
+                            .doOnCompleted(new Action0() {
+                                @Override
+                                public void call() {
+
+                                    for (Map.Entry<K, CollapsedRequest<ResponseType, RequestArgumentType>> entry : requestsByKey.entrySet()) {
+                                        K key = entry.getKey();
+                                        CollapsedRequest<ResponseType, RequestArgumentType> collapsedReq = entry.getValue();
+                                        if (!seenKeys.contains(key)) {
+                                            try {
+                                                onMissingResponse(collapsedReq);
+                                            } catch (Throwable ex) {
+                                                collapsedReq.setException(new RuntimeException("Error in HystrixObservableCollapser.onMissingResponse handler", ex));
+                                            }
+                                        }
+                                        //then unconditionally issue an onCompleted. this ensures the downstream gets a terminal, regardless of how onMissingResponse was implemented
+                                        collapsedReq.setComplete();
+                                    }
+                                }
+                            }).ignoreElements().cast(Void.class);
+                }
             }
 
             @Override
@@ -369,10 +434,48 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      * Function for mapping from BatchReturnType to ResponseType.
      * <p>
      * Often these two types are exactly the same so it's just a pass-thru.
-     * 
+     *
      * @return function for mapping from BatchReturnType to ResponseType
      */
     protected abstract Func1<BatchReturnType, ResponseType> getBatchReturnTypeToResponseTypeMapper();
+
+    /**
+     * Optional index-based mapping method that can be overridden as an alternative to the key-based mapping approach.
+     * <p>
+     * When this method is overridden (returns non-null for at least the first emission), the framework will use
+     * positional indexing to map batch responses to requests rather than requiring key selectors. This is useful when:
+     * <ul>
+     * <li>The batch response Observable emits items in the same order as requests were submitted</li>
+     * <li>The backend service maintains request ordering in responses</li>
+     * <li>You don't have a natural key to join requests and responses</li>
+     * </ul>
+     * <p>
+     * Example implementation when batch responses are ordered:
+     * <pre>
+     * &#64;Override
+     * protected ResponseType mapBatchResponseByIndex(BatchReturnType batchItem, int index) {
+     *     // batchItem is the Nth emission from the batch Observable
+     *     // index is the position (0-based) in the original request collection
+     *     return convertBatchItemToResponse(batchItem);
+     * }
+     * </pre>
+     * <p>
+     * The index parameter represents the position in the request collection that corresponds to this batch emission.
+     * If the batch Observable emits fewer items than there are requests, {@link #onMissingResponse(CollapsedRequest)}
+     * will be called for requests without responses.
+     * <p>
+     * DEFAULT: Returns null, meaning index-based mapping is disabled and key-based mapping via
+     * {@link #getBatchReturnTypeKeySelector()} and {@link #getRequestArgumentKeySelector()} will be used.
+     *
+     * @param batchItem
+     *            The item emitted from the batch Observable
+     * @param index
+     *            The zero-based index indicating which request this item corresponds to
+     * @return ResponseType to emit for the request at this index, or null to use key-based mapping
+     */
+    protected ResponseType mapBatchResponseByIndex(BatchReturnType batchItem, int index) {
+        return null;
+    }
 
     /**
      * Used for asynchronous execution with a callback by subscribing to the {@link Observable}.
