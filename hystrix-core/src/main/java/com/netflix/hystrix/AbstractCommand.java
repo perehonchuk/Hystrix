@@ -799,6 +799,19 @@ import java.util.concurrent.atomic.AtomicReference;
                         long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
                         eventNotifier.markEvent(HystrixEventType.FALLBACK_SUCCESS, commandKey);
                         executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_SUCCESS);
+
+                        // Automatically invalidate cache if enabled
+                        if (properties.requestCacheInvalidateOnFallback().get()) {
+                            String cacheKey = getCacheKey();
+                            if (cacheKey != null) {
+                                try {
+                                    requestCache.clear(cacheKey);
+                                    logger.debug("Request cache invalidated for key [{}] after fallback execution", cacheKey);
+                                } catch (Exception e) {
+                                    logger.warn("Failed to invalidate request cache for key [{}] after fallback", cacheKey, e);
+                                }
+                            }
+                        }
                     }
                 };
 
