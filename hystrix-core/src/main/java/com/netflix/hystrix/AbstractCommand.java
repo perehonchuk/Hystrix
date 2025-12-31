@@ -761,6 +761,8 @@ import java.util.concurrent.atomic.AtomicReference;
         // record the executionResult
         // do this before executing fallback so it can be queried from within getFallback (see See https://github.com/Netflix/Hystrix/pull/144)
         executionResult = executionResult.addEvent((int) latency, eventType);
+        // store failure type for context-aware fallback selection
+        executionResult = executionResult.setFailureType(failureType);
 
         if (isUnrecoverable(originalException)) {
             logger.error("Unrecoverable Error for HystrixCommand so will throw HystrixRuntimeException and not apply fallback. ", originalException);

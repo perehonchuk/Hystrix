@@ -286,11 +286,81 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     * <p>
+     * NOTE: This method is called when no context-aware fallback method is defined. If you override {@link #getFallbackForTimeout()},
+     * {@link #getFallbackForFailure()}, {@link #getFallbackForShortCircuit()}, {@link #getFallbackForRejection()}, or
+     * {@link #getFallbackForBadRequest()}, those will be called instead based on the failure type.
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * Override this method to provide a fallback response when the command times out.
+     * <p>
+     * This is invoked specifically for timeout failures, allowing different fallback behavior than other failure types.
+     * <p>
+     * DEFAULT BEHAVIOR: Falls back to {@link #getFallback()}.
+     *
+     * @return R fallback response for timeout
+     */
+    protected R getFallbackForTimeout() {
+        return getFallback();
+    }
+
+    /**
+     * Override this method to provide a fallback response when the command execution fails (throws exception).
+     * <p>
+     * This is invoked specifically for command execution failures, allowing different fallback behavior than other failure types.
+     * <p>
+     * DEFAULT BEHAVIOR: Falls back to {@link #getFallback()}.
+     *
+     * @return R fallback response for execution failure
+     */
+    protected R getFallbackForFailure() {
+        return getFallback();
+    }
+
+    /**
+     * Override this method to provide a fallback response when the circuit breaker is open (short-circuited).
+     * <p>
+     * This is invoked specifically when requests are short-circuited, allowing different fallback behavior than other failure types.
+     * <p>
+     * DEFAULT BEHAVIOR: Falls back to {@link #getFallback()}.
+     *
+     * @return R fallback response for short-circuit
+     */
+    protected R getFallbackForShortCircuit() {
+        return getFallback();
+    }
+
+    /**
+     * Override this method to provide a fallback response when the thread pool or semaphore is at capacity.
+     * <p>
+     * This is invoked specifically for rejection failures (thread pool or semaphore), allowing different fallback behavior than other failure types.
+     * <p>
+     * DEFAULT BEHAVIOR: Falls back to {@link #getFallback()}.
+     *
+     * @return R fallback response for rejection
+     */
+    protected R getFallbackForRejection() {
+        return getFallback();
+    }
+
+    /**
+     * Override this method to provide a fallback response when a bad request exception is thrown.
+     * <p>
+     * This is invoked specifically for bad request errors, allowing different fallback behavior than other failure types.
+     * Note: Bad requests typically should not have fallbacks, but this is provided for completeness.
+     * <p>
+     * DEFAULT BEHAVIOR: Falls back to {@link #getFallback()}.
+     *
+     * @return R fallback response for bad request
+     */
+    protected R getFallbackForBadRequest() {
+        return getFallback();
     }
 
     @Override
@@ -319,12 +389,39 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
             @Override
             public Observable<R> call() {
                 try {
-                    return Observable.just(getFallback());
+                    return Observable.just(getContextAwareFallback());
                 } catch (Throwable ex) {
                     return Observable.error(ex);
                 }
             }
         });
+    }
+
+    /**
+     * Internal method that routes to the appropriate context-aware fallback method based on failure type.
+     */
+    private R getContextAwareFallback() {
+        FailureType failureType = executionResult.getFailureType();
+        if (failureType == null) {
+            return getFallback();
+        }
+
+        switch (failureType) {
+            case TIMEOUT:
+                return getFallbackForTimeout();
+            case COMMAND_EXCEPTION:
+                return getFallbackForFailure();
+            case SHORTCIRCUIT:
+                return getFallbackForShortCircuit();
+            case REJECTED_THREAD_EXECUTION:
+            case REJECTED_SEMAPHORE_EXECUTION:
+            case REJECTED_SEMAPHORE_FALLBACK:
+                return getFallbackForRejection();
+            case BAD_REQUEST_EXCEPTION:
+                return getFallbackForBadRequest();
+            default:
+                return getFallback();
+        }
     }
 
     /**

@@ -15,6 +15,8 @@
  */
 package com.netflix.hystrix;
 
+import com.netflix.hystrix.exception.HystrixRuntimeException.FailureType;
+
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
@@ -39,6 +41,7 @@ public class ExecutionResult {
     private final boolean executionOccurred;
     private final boolean isExecutedInThread;
     private final HystrixCollapserKey collapserKey;
+    private final FailureType failureType; //type of failure that triggered fallback
 
     private static final HystrixEventType[] ALL_EVENT_TYPES = HystrixEventType.values();
     private static final int NUM_EVENT_TYPES = ALL_EVENT_TYPES.length;
@@ -188,7 +191,8 @@ public class ExecutionResult {
 
     private ExecutionResult(EventCounts eventCounts, long startTimestamp, int executionLatency,
                             int userThreadLatency, Exception failedExecutionException, Exception executionException,
-                            boolean executionOccurred, boolean isExecutedInThread, HystrixCollapserKey collapserKey) {
+                            boolean executionOccurred, boolean isExecutedInThread, HystrixCollapserKey collapserKey,
+                            FailureType failureType) {
         this.eventCounts = eventCounts;
         this.startTimestamp = startTimestamp;
         this.executionLatency = executionLatency;
@@ -198,6 +202,7 @@ public class ExecutionResult {
         this.executionOccurred = executionOccurred;
         this.isExecutedInThread = isExecutedInThread;
         this.collapserKey = collapserKey;
+        this.failureType = failureType;
     }
 
     // we can return a static version since it's immutable
@@ -210,7 +215,7 @@ public class ExecutionResult {
                 didExecutionOccur = true;
             }
         }
-        return new ExecutionResult(new EventCounts(eventTypes), -1L, -1, -1, null, null, didExecutionOccur, false, null);
+        return new ExecutionResult(new EventCounts(eventTypes), -1L, -1, -1, null, null, didExecutionOccur, false, null, null);
     }
 
     private static boolean didExecutionOccur(HystrixEventType eventType) {
@@ -226,52 +231,61 @@ public class ExecutionResult {
 
     public ExecutionResult setExecutionOccurred() {
         return new ExecutionResult(eventCounts, startTimestamp, executionLatency, userThreadLatency,
-                failedExecutionException, executionException, true, isExecutedInThread, collapserKey);
+                failedExecutionException, executionException, true, isExecutedInThread, collapserKey, failureType);
     }
 
     public ExecutionResult setExecutionLatency(int executionLatency) {
         return new ExecutionResult(eventCounts, startTimestamp, executionLatency, userThreadLatency,
-                failedExecutionException, executionException, executionOccurred, isExecutedInThread, collapserKey);
+                failedExecutionException, executionException, executionOccurred, isExecutedInThread, collapserKey, failureType);
     }
 
     public ExecutionResult setException(Exception e) {
         return new ExecutionResult(eventCounts, startTimestamp, executionLatency, userThreadLatency, e,
-                executionException, executionOccurred, isExecutedInThread, collapserKey);
+                executionException, executionOccurred, isExecutedInThread, collapserKey, failureType);
     }
 
     public ExecutionResult setExecutionException(Exception executionException) {
         return new ExecutionResult(eventCounts, startTimestamp, executionLatency, userThreadLatency,
-                failedExecutionException, executionException, executionOccurred, isExecutedInThread, collapserKey);
+                failedExecutionException, executionException, executionOccurred, isExecutedInThread, collapserKey, failureType);
     }
 
     public ExecutionResult setInvocationStartTime(long startTimestamp) {
         return new ExecutionResult(eventCounts, startTimestamp, executionLatency, userThreadLatency,
-                failedExecutionException, executionException, executionOccurred, isExecutedInThread, collapserKey);
+                failedExecutionException, executionException, executionOccurred, isExecutedInThread, collapserKey, failureType);
     }
 
     public ExecutionResult setExecutedInThread() {
         return new ExecutionResult(eventCounts, startTimestamp, executionLatency, userThreadLatency,
-                failedExecutionException, executionException, executionOccurred, true, collapserKey);
+                failedExecutionException, executionException, executionOccurred, true, collapserKey, failureType);
     }
 
     public ExecutionResult setNotExecutedInThread() {
         return new ExecutionResult(eventCounts, startTimestamp, executionLatency, userThreadLatency,
-                failedExecutionException, executionException, executionOccurred, false, collapserKey);
+                failedExecutionException, executionException, executionOccurred, false, collapserKey, failureType);
     }
 
     public ExecutionResult markCollapsed(HystrixCollapserKey collapserKey, int sizeOfBatch) {
         return new ExecutionResult(eventCounts.plus(HystrixEventType.COLLAPSED, sizeOfBatch), startTimestamp, executionLatency, userThreadLatency,
-                failedExecutionException, executionException, executionOccurred, isExecutedInThread, collapserKey);
+                failedExecutionException, executionException, executionOccurred, isExecutedInThread, collapserKey, failureType);
     }
 
     public ExecutionResult markUserThreadCompletion(long userThreadLatency) {
         if (startTimestamp > 0 && !isResponseRejected()) {
             /* execution time (must occur before terminal state otherwise a race condition can occur if requested by client) */
             return new ExecutionResult(eventCounts, startTimestamp, executionLatency, (int) userThreadLatency,
-                    failedExecutionException, executionException, executionOccurred, isExecutedInThread, collapserKey);
+                    failedExecutionException, executionException, executionOccurred, isExecutedInThread, collapserKey, failureType);
         } else {
             return this;
         }
+    }
+
+    public ExecutionResult setFailureType(FailureType failureType) {
+        return new ExecutionResult(eventCounts, startTimestamp, executionLatency, userThreadLatency,
+                failedExecutionException, executionException, executionOccurred, isExecutedInThread, collapserKey, failureType);
+    }
+
+    public FailureType getFailureType() {
+        return failureType;
     }
 
     /**
@@ -283,14 +297,14 @@ public class ExecutionResult {
     public ExecutionResult addEvent(HystrixEventType eventType) {
         return new ExecutionResult(eventCounts.plus(eventType), startTimestamp, executionLatency,
                 userThreadLatency, failedExecutionException, executionException,
-                executionOccurred, isExecutedInThread, collapserKey);
+                executionOccurred, isExecutedInThread, collapserKey, failureType);
     }
 
     public ExecutionResult addEvent(int executionLatency, HystrixEventType eventType) {
         if (startTimestamp >= 0 && !isResponseRejected()) {
             return new ExecutionResult(eventCounts.plus(eventType), startTimestamp, executionLatency,
                     userThreadLatency, failedExecutionException, executionException,
-                    executionOccurred, isExecutedInThread, collapserKey);
+                    executionOccurred, isExecutedInThread, collapserKey, failureType);
         } else {
             return addEvent(eventType);
         }
