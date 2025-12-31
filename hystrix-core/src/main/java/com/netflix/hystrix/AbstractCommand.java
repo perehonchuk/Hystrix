@@ -867,6 +867,8 @@ import java.util.concurrent.atomic.AtomicReference;
                             .doOnEach(setRequestContext)
                             .lift(new FallbackHookApplication(_cmd))
                             .lift(new DeprecatedOnFallbackHookApplication(_cmd))
+                            .lift(new ResponseTransformationApplication(_cmd, true))
+                            .lift(new ResponseValidationApplication(_cmd, true))
                             .doOnNext(markFallbackEmit)
                             .doOnCompleted(markFallbackCompleted)
                             .onErrorResumeNext(handleFallbackError)
@@ -894,7 +896,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
         return userObservable
                 .lift(new ExecutionHookApplication(_cmd))
-                .lift(new DeprecatedOnRunHookApplication(_cmd));
+                .lift(new DeprecatedOnRunHookApplication(_cmd))
+                .lift(new ResponseTransformationApplication(_cmd, false))
+                .lift(new ResponseValidationApplication(_cmd, false));
     }
 
     private Observable<R> handleRequestCacheHitAndEmitValues(final HystrixCommandResponseFromCache<R> fromCache, final AbstractCommand<R> _cmd) {
@@ -1403,6 +1407,84 @@ import java.util.concurrent.atomic.AtomicReference;
                 public void onNext(R r) {
                     R wrappedValue = wrapWithOnFallbackEmitHook(r);
                     subscriber.onNext(wrappedValue);
+                }
+            };
+        }
+    }
+
+    private class ResponseTransformationApplication implements Operator<R, R> {
+        private final HystrixInvokable<R> cmd;
+        private final boolean fromFallback;
+
+        ResponseTransformationApplication(HystrixInvokable<R> cmd, boolean fromFallback) {
+            this.cmd = cmd;
+            this.fromFallback = fromFallback;
+        }
+
+        @Override
+        public Subscriber<? super R> call(final Subscriber<? super R> subscriber) {
+            return new Subscriber<R>(subscriber) {
+                @Override
+                public void onCompleted() {
+                    subscriber.onCompleted();
+                }
+
+                @Override
+                public void onError(Throwable e) {
+                    subscriber.onError(e);
+                }
+
+                @Override
+                public void onNext(R r) {
+                    try {
+                        R transformedValue = executionHook.onResponseTransform(cmd, r, fromFallback);
+                        subscriber.onNext(transformedValue);
+                    } catch (Throwable hookEx) {
+                        logger.warn("Error calling HystrixCommandExecutionHook.onResponseTransform", hookEx);
+                        subscriber.onNext(r);
+                    }
+                }
+            };
+        }
+    }
+
+    private class ResponseValidationApplication implements Operator<R, R> {
+        private final HystrixInvokable<R> cmd;
+        private final boolean fromFallback;
+
+        ResponseValidationApplication(HystrixInvokable<R> cmd, boolean fromFallback) {
+            this.cmd = cmd;
+            this.fromFallback = fromFallback;
+        }
+
+        @Override
+        public Subscriber<? super R> call(final Subscriber<? super R> subscriber) {
+            return new Subscriber<R>(subscriber) {
+                @Override
+                public void onCompleted() {
+                    subscriber.onCompleted();
+                }
+
+                @Override
+                public void onError(Throwable e) {
+                    subscriber.onError(e);
+                }
+
+                @Override
+                public void onNext(R r) {
+                    try {
+                        executionHook.onResponseValidation(cmd, r, fromFallback);
+                        subscriber.onNext(r);
+                    } catch (Throwable validationEx) {
+                        Exception e = getExceptionFromThrowable(validationEx);
+                        try {
+                            Exception wrappedEx = executionHook.onResponseValidationError(cmd, r, e, fromFallback);
+                            subscriber.onError(wrappedEx);
+                        } catch (Throwable hookEx) {
+                            logger.warn("Error calling HystrixCommandExecutionHook.onResponseValidationError", hookEx);
+                            subscriber.onError(e);
+                        }
+                    }
                 }
             };
         }

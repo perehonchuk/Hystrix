@@ -228,6 +228,56 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked after a response is produced (either from run() or fallback()) but before
+     * it is returned to the caller. This allows for response transformation, validation,
+     * enrichment, or sanitization regardless of whether the response came from the primary
+     * execution path or the fallback path.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param response The response value to be transformed
+     * @param fromFallback True if the response came from fallback, false if from run()
+     * @return T response object that can be modified, decorated, replaced or just returned as a pass-thru.
+     *
+     * @since 1.6
+     */
+    public <T> T onResponseTransform(HystrixInvokable<T> commandInstance, T response, boolean fromFallback) {
+        //by default, just pass through
+        return response;
+    }
+
+    /**
+     * Invoked after response transformation to validate the response before returning to caller.
+     * This hook can throw an exception to reject the response and trigger fallback (if not already
+     * in fallback) or error propagation.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param response The response value to be validated
+     * @param fromFallback True if the response came from fallback, false if from run()
+     *
+     * @since 1.6
+     */
+    public <T> void onResponseValidation(HystrixInvokable<T> commandInstance, T response, boolean fromFallback) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when response validation fails by throwing an exception. This provides
+     * an opportunity to customize error handling or logging for validation failures.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param response The response that failed validation
+     * @param validationException The exception thrown during validation
+     * @param fromFallback True if the response came from fallback, false if from run()
+     * @return Exception that can be decorated, replaced or just returned as a pass-thru.
+     *
+     * @since 1.6
+     */
+    public <T> Exception onResponseValidationError(HystrixInvokable<T> commandInstance, T response, Exception validationException, boolean fromFallback) {
+        //by default, just pass through
+        return validationException;
+    }
+
+    /**
      * DEPRECATED: Change usages of this to {@link #onExecutionStart}.
      *
      * Invoked before {@link HystrixCommand#run()} is about to be executed.
