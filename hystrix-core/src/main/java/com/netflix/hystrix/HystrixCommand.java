@@ -286,11 +286,28 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     * <p>
+     * If this fallback fails, Hystrix will attempt to call {@link #getSecondaryFallback()} if implemented.
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * If {@link #getFallback()} fails or is not implemented, this method will be invoked to provide a secondary fallback response.
+     * <p>
+     * This provides a second level of fallback protection, allowing for graceful degradation even when the primary fallback fails.
+     * <p>
+     * This should return a very simple, static response that is guaranteed not to fail.
+     * <p>
+     * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
+     *
+     * @return R or throw UnsupportedOperationException if not implemented
+     */
+    protected R getSecondaryFallback() {
+        throw new UnsupportedOperationException("No secondary fallback available.");
     }
 
     @Override
@@ -320,8 +337,14 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
             public Observable<R> call() {
                 try {
                     return Observable.just(getFallback());
-                } catch (Throwable ex) {
-                    return Observable.error(ex);
+                } catch (Throwable primaryEx) {
+                    // Primary fallback failed, try secondary fallback
+                    try {
+                        return Observable.just(getSecondaryFallback());
+                    } catch (Throwable secondaryEx) {
+                        // Both fallbacks failed, return primary fallback exception
+                        return Observable.error(primaryEx);
+                    }
                 }
             }
         });

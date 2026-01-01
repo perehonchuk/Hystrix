@@ -240,20 +240,49 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     * <p>
+     * If this fallback fails, Hystrix will attempt to call {@link #resumeWithSecondaryFallback()} if implemented.
+     *
      * @return R or UnsupportedOperationException if not implemented
      */
     protected Observable<R> resumeWithFallback() {
         return Observable.error(new UnsupportedOperationException("No fallback available."));
     }
 
+    /**
+     * If {@link #resumeWithFallback()} fails or is not implemented, this method will be invoked to provide a secondary fallback response.
+     * <p>
+     * This provides a second level of fallback protection, allowing for graceful degradation even when the primary fallback fails.
+     * <p>
+     * This should return a very simple, static Observable that is guaranteed not to fail.
+     * <p>
+     * DEFAULT BEHAVIOR: It returns an Observable that emits an UnsupportedOperationException error.
+     *
+     * @return Observable<R> or UnsupportedOperationException if not implemented
+     */
+    protected Observable<R> resumeWithSecondaryFallback() {
+        return Observable.error(new UnsupportedOperationException("No secondary fallback available."));
+    }
+
     @Override
     final protected Observable<R> getExecutionObservable() {
         return construct();
     }
-    
+
     @Override
     final protected Observable<R> getFallbackObservable() {
-        return resumeWithFallback();
+        return resumeWithFallback().onErrorResumeNext(new rx.functions.Func1<Throwable, Observable<? extends R>>() {
+            @Override
+            public Observable<? extends R> call(Throwable primaryFallbackError) {
+                // Primary fallback failed, try secondary fallback
+                return resumeWithSecondaryFallback().onErrorResumeNext(new rx.functions.Func1<Throwable, Observable<? extends R>>() {
+                    @Override
+                    public Observable<? extends R> call(Throwable secondaryFallbackError) {
+                        // Both fallbacks failed, return original primary fallback error
+                        return Observable.error(primaryFallbackError);
+                    }
+                });
+            }
+        });
     }
 }
