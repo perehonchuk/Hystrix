@@ -21,18 +21,22 @@ import com.netflix.hystrix.HystrixCommandProperties.ExecutionIsolationStrategy;
 import com.netflix.hystrix.strategy.executionhook.HystrixCommandExecutionHook;
 import com.netflix.hystrix.strategy.properties.HystrixPropertiesStrategy;
 import com.netflix.hystrix.strategy.eventnotifier.HystrixEventNotifier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Used to wrap code that will execute potentially risky functionality (typically meaning a service call over the network)
  * with fault and latency tolerance, statistics and performance metrics capture, circuit breaker and bulkhead functionality.
  * This command should be used for a purely non-blocking call pattern. The caller of this command will be subscribed to the Observable<R> returned by the run() method.
- * 
+ *
  * @param <R>
  *            the return type
- * 
+ *
  * @ThreadSafe
  */
 public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> implements HystrixObservable<R>, HystrixInvokableInfo<R> {
+
+    private static final Logger logger = LoggerFactory.getLogger(HystrixObservableCommand.class);
 
     /**
      * Construct a {@link HystrixObservableCommand} with defined {@link HystrixCommandGroupKey}.
@@ -240,20 +244,71 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     * <p>
+     * NOTE: If both resumeWithFallback() and getTieredFallbackObservables() are implemented, the tiered fallbacks will be tried first in priority order,
+     * and resumeWithFallback() will be used as the final fallback if all tiered fallbacks fail.
+     *
      * @return R or UnsupportedOperationException if not implemented
      */
     protected Observable<R> resumeWithFallback() {
         return Observable.error(new UnsupportedOperationException("No fallback available."));
     }
 
+    /**
+     * Override this method to provide multiple fallback strategies with priority ordering.
+     * Fallbacks are tried in array order (index 0 first, then 1, etc.) until one successfully emits a value.
+     * If all tiered fallbacks fail, the system will fall back to resumeWithFallback() as a final option.
+     * <p>
+     * This enables sophisticated fallback chains such as:
+     * 1. Primary cache lookup (returns Observable)
+     * 2. Secondary/backup service call (returns Observable)
+     * 3. Static default Observable
+     * <p>
+     * Each fallback Observable in the array should be progressively more reliable and less dependent on external systems.
+     * <p>
+     * DEFAULT BEHAVIOR: Returns null (no tiered fallbacks configured)
+     *
+     * @return Array of fallback Observables in priority order, or null if not using tiered fallbacks
+     */
+    protected Observable<R>[] getTieredFallbackObservables() {
+        return null;
+    }
+
     @Override
     final protected Observable<R> getExecutionObservable() {
         return construct();
     }
-    
+
     @Override
     final protected Observable<R> getFallbackObservable() {
+        // Try tiered fallbacks first if configured
+        Observable<R>[] tieredFallbacks = getTieredFallbackObservables();
+        if (tieredFallbacks != null && tieredFallbacks.length > 0) {
+            // Chain fallbacks with onErrorResumeNext
+            Observable<R> result = null;
+            for (int i = 0; i < tieredFallbacks.length; i++) {
+                final int index = i;
+                if (result == null) {
+                    result = tieredFallbacks[i].doOnError(t ->
+                        logger.debug("Tiered fallback Observable at index " + index + " failed, trying next fallback", t)
+                    );
+                } else {
+                    final Observable<R> nextFallback = tieredFallbacks[i];
+                    result = result.onErrorResumeNext(t -> {
+                        logger.debug("Tiered fallback Observable at index " + index + " failed, trying next fallback", t);
+                        return nextFallback;
+                    });
+                }
+            }
+            // Chain with final resumeWithFallback()
+            final Observable<R> finalResult = result;
+            return finalResult.onErrorResumeNext(t -> {
+                logger.debug("All tiered fallback Observables failed, falling back to resumeWithFallback()", t);
+                return resumeWithFallback();
+            });
+        }
+
+        // Fall back to standard resumeWithFallback()
         return resumeWithFallback();
     }
 }

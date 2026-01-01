@@ -33,19 +33,22 @@ import com.netflix.hystrix.exception.HystrixRuntimeException.FailureType;
 import com.netflix.hystrix.strategy.executionhook.HystrixCommandExecutionHook;
 import com.netflix.hystrix.strategy.properties.HystrixPropertiesStrategy;
 import rx.functions.Func0;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Used to wrap code that will execute potentially risky functionality (typically meaning a service call over the network)
  * with fault and latency tolerance, statistics and performance metrics capture, circuit breaker and bulkhead functionality.
  * This command is essentially a blocking command but provides an Observable facade if used with observe()
- * 
+ *
  * @param <R>
  *            the return type
- * 
+ *
  * @ThreadSafe
  */
 public abstract class HystrixCommand<R> extends AbstractCommand<R> implements HystrixExecutable<R>, HystrixInvokableInfo<R>, HystrixObservable<R> {
 
+    private static final Logger logger = LoggerFactory.getLogger(HystrixCommand.class);
 
     /**
      * Construct a {@link HystrixCommand} with defined {@link HystrixCommandGroupKey}.
@@ -286,11 +289,34 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     * <p>
+     * NOTE: If both getFallback() and getTieredFallbacks() are implemented, the tiered fallbacks will be tried first in priority order,
+     * and getFallback() will be used as the final fallback if all tiered fallbacks fail.
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * Override this method to provide multiple fallback strategies with priority ordering.
+     * Fallbacks are tried in array order (index 0 first, then 1, etc.) until one succeeds.
+     * If all tiered fallbacks fail, the system will fall back to getFallback() as a final option.
+     * <p>
+     * This enables sophisticated fallback chains such as:
+     * 1. Primary cache lookup
+     * 2. Secondary/backup service call
+     * 3. Static default value
+     * <p>
+     * Each fallback in the array should be progressively more reliable and less dependent on external systems.
+     * <p>
+     * DEFAULT BEHAVIOR: Returns null (no tiered fallbacks configured)
+     *
+     * @return Array of fallback strategies in priority order, or null if not using tiered fallbacks
+     */
+    protected R[] getTieredFallbacks() {
+        return null;
     }
 
     @Override
@@ -318,6 +344,24 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
         return Observable.defer(new Func0<Observable<R>>() {
             @Override
             public Observable<R> call() {
+                // Try tiered fallbacks first if configured
+                R[] tieredFallbacks = getTieredFallbacks();
+                if (tieredFallbacks != null && tieredFallbacks.length > 0) {
+                    // Try each tiered fallback in order
+                    for (int i = 0; i < tieredFallbacks.length; i++) {
+                        try {
+                            R result = tieredFallbacks[i];
+                            if (result != null) {
+                                return Observable.just(result);
+                            }
+                        } catch (Throwable ex) {
+                            // Log and continue to next fallback
+                            logger.debug("Tiered fallback at index " + i + " failed, trying next fallback", ex);
+                        }
+                    }
+                }
+
+                // Fall back to standard getFallback() as final option
                 try {
                     return Observable.just(getFallback());
                 } catch (Throwable ex) {
