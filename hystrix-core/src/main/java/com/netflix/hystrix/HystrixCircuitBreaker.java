@@ -146,6 +146,7 @@ public interface HystrixCircuitBreaker {
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicLong consecutiveSuccessCount = new AtomicLong(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -202,24 +203,37 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            if (status.get().equals(Status.HALF_OPEN)) {
+                long currentCount = consecutiveSuccessCount.incrementAndGet();
+                // Require multiple consecutive successes before closing circuit
+                int requiredSuccesses = properties.circuitBreakerHealthCheckConsecutiveSuccessThreshold().get();
+
+                if (currentCount >= requiredSuccesses) {
+                    if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
+                        //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+                        consecutiveSuccessCount.set(0);
+                    }
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
             }
         }
 
         @Override
         public void markNonSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
-                //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
-                circuitOpened.set(System.currentTimeMillis());
+            if (status.get().equals(Status.HALF_OPEN)) {
+                // Reset consecutive success counter on any failure
+                consecutiveSuccessCount.set(0);
+                if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
+                    //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
+                    circuitOpened.set(System.currentTimeMillis());
+                }
             }
         }
 
@@ -246,7 +260,9 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (status.get().equals(Status.HALF_OPEN)) {
-                    return false;
+                    // In half-open state, allow requests up to the consecutive success threshold
+                    int maxRequests = properties.circuitBreakerHealthCheckConsecutiveSuccessThreshold().get();
+                    return consecutiveSuccessCount.get() < maxRequests;
                 } else {
                     return isAfterSleepWindow();
                 }
@@ -272,12 +288,14 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (isAfterSleepWindow()) {
-                    //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
-                    //if the executing command fails, the status will transition to OPEN
-                    //if the executing command gets unsubscribed, the status will transition to OPEN
+                    // Transition to half-open and allow multiple test requests
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        consecutiveSuccessCount.set(0);
                         return true;
+                    } else if (status.get().equals(Status.HALF_OPEN)) {
+                        // Already in half-open, allow requests up to threshold
+                        int maxRequests = properties.circuitBreakerHealthCheckConsecutiveSuccessThreshold().get();
+                        return consecutiveSuccessCount.get() < maxRequests;
                     } else {
                         return false;
                     }
