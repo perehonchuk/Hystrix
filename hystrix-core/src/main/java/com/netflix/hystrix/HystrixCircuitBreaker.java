@@ -140,12 +140,15 @@ public interface HystrixCircuitBreaker {
         private final HystrixCommandMetrics metrics;
 
         enum Status {
-            CLOSED, OPEN, HALF_OPEN;
+            CLOSED, OPEN, HALF_OPEN, WARMUP;
         }
 
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicLong warmupStartTime = new AtomicLong(-1);
+        private final AtomicLong warmupSuccessCount = new AtomicLong(0);
+        private final AtomicLong warmupInFlightRequests = new AtomicLong(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -212,6 +215,27 @@ public interface HystrixCircuitBreaker {
                 Subscription newSubscription = subscribeToStream();
                 activeSubscription.set(newSubscription);
                 circuitOpened.set(-1L);
+            } else if (status.get() == Status.WARMUP) {
+                // During warmup phase, track successful requests
+                long successCount = warmupSuccessCount.incrementAndGet();
+                warmupInFlightRequests.decrementAndGet();
+
+                // Check if we've reached the success threshold to close the circuit
+                if (successCount >= properties.circuitBreakerWarmupSuccessThreshold().get()) {
+                    if (status.compareAndSet(Status.WARMUP, Status.CLOSED)) {
+                        // Reset warmup state and close the circuit
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+                        warmupStartTime.set(-1L);
+                        warmupSuccessCount.set(0);
+                    }
+                }
             }
         }
 
@@ -220,6 +244,14 @@ public interface HystrixCircuitBreaker {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+            } else if (status.get() == Status.WARMUP) {
+                // During warmup, any failure reopens the circuit
+                warmupInFlightRequests.decrementAndGet();
+                if (status.compareAndSet(Status.WARMUP, Status.OPEN)) {
+                    circuitOpened.set(System.currentTimeMillis());
+                    warmupStartTime.set(-1L);
+                    warmupSuccessCount.set(0);
+                }
             }
         }
 
@@ -245,8 +277,12 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (status.get().equals(Status.HALF_OPEN)) {
+                Status currentStatus = status.get();
+                if (currentStatus.equals(Status.HALF_OPEN)) {
                     return false;
+                } else if (currentStatus.equals(Status.WARMUP)) {
+                    // During warmup, allow requests based on gradual increase
+                    return true; // attemptExecution will control the actual throttling
                 } else {
                     return isAfterSleepWindow();
                 }
@@ -271,15 +307,64 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (isAfterSleepWindow()) {
-                    //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
-                    //if the executing command fails, the status will transition to OPEN
-                    //if the executing command gets unsubscribed, the status will transition to OPEN
-                    if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                Status currentStatus = status.get();
+
+                if (currentStatus == Status.WARMUP) {
+                    // During warmup phase, gradually increase allowed concurrent requests
+                    long warmupStart = warmupStartTime.get();
+                    long currentTime = System.currentTimeMillis();
+                    long warmupDuration = properties.circuitBreakerWarmupDurationInMilliseconds().get();
+                    long elapsedTime = currentTime - warmupStart;
+
+                    if (elapsedTime > warmupDuration) {
+                        // Warmup duration has passed, transition to CLOSED
+                        if (status.compareAndSet(Status.WARMUP, Status.CLOSED)) {
+                            metrics.resetStream();
+                            Subscription previousSubscription = activeSubscription.get();
+                            if (previousSubscription != null) {
+                                previousSubscription.unsubscribe();
+                            }
+                            Subscription newSubscription = subscribeToStream();
+                            activeSubscription.set(newSubscription);
+                            circuitOpened.set(-1L);
+                            warmupStartTime.set(-1L);
+                            warmupSuccessCount.set(0);
+                        }
+                        return true;
+                    }
+
+                    // Calculate allowed concurrent requests based on warmup progress (1 to 5 requests)
+                    double warmupProgress = (double) elapsedTime / warmupDuration;
+                    long maxConcurrent = Math.max(1, (long) (warmupProgress * 5));
+
+                    long currentInFlight = warmupInFlightRequests.get();
+                    if (currentInFlight < maxConcurrent) {
+                        warmupInFlightRequests.incrementAndGet();
                         return true;
                     } else {
                         return false;
+                    }
+                }
+
+                if (isAfterSleepWindow()) {
+                    // Check if warmup is enabled
+                    if (properties.circuitBreakerWarmupEnabled().get()) {
+                        // Transition to WARMUP state instead of HALF_OPEN
+                        if (status.compareAndSet(Status.OPEN, Status.WARMUP)) {
+                            warmupStartTime.set(System.currentTimeMillis());
+                            warmupSuccessCount.set(0);
+                            warmupInFlightRequests.set(1);
+                            return true;
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        // Original behavior: transition to HALF_OPEN (single request)
+                        if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                            return true;
+                        } else {
+                            return false;
+                        }
                     }
                 } else {
                     return false;

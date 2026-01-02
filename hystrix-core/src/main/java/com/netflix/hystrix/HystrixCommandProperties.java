@@ -62,6 +62,9 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Boolean default_circuitBreakerWarmupEnabled = true; // default => warmup enabled: gradually increase request volume during recovery
+    private static final Integer default_circuitBreakerWarmupDurationInMilliseconds = 10000; // default => warmup duration: 10 seconds to gradually restore traffic
+    private static final Integer default_circuitBreakerWarmupSuccessThreshold = 5; // default => warmup success threshold: 5 successful requests to close circuit during warmup
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +91,9 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> circuitBreakerWarmupEnabled; // Whether warmup phase is enabled during circuit recovery
+    private final HystrixProperty<Integer> circuitBreakerWarmupDurationInMilliseconds; // Duration of warmup phase
+    private final HystrixProperty<Integer> circuitBreakerWarmupSuccessThreshold; // Number of successful requests needed during warmup to close circuit
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -136,6 +142,9 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.circuitBreakerWarmupEnabled = getProperty(propertyPrefix, key, "circuitBreaker.warmup.enabled", builder.getCircuitBreakerWarmupEnabled(), default_circuitBreakerWarmupEnabled);
+        this.circuitBreakerWarmupDurationInMilliseconds = getProperty(propertyPrefix, key, "circuitBreaker.warmup.durationInMilliseconds", builder.getCircuitBreakerWarmupDurationInMilliseconds(), default_circuitBreakerWarmupDurationInMilliseconds);
+        this.circuitBreakerWarmupSuccessThreshold = getProperty(propertyPrefix, key, "circuitBreaker.warmup.successThreshold", builder.getCircuitBreakerWarmupSuccessThreshold(), default_circuitBreakerWarmupSuccessThreshold);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -201,11 +210,41 @@ public abstract class HystrixCommandProperties {
 
     /**
      * The time in milliseconds after a {@link HystrixCircuitBreaker} trips open that it should wait before trying requests again.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> circuitBreakerSleepWindowInMilliseconds() {
         return circuitBreakerSleepWindowInMilliseconds;
+    }
+
+    /**
+     * Whether warmup phase is enabled during circuit recovery.
+     * When enabled, circuit breaker will gradually increase allowed concurrent requests during warmup duration.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> circuitBreakerWarmupEnabled() {
+        return circuitBreakerWarmupEnabled;
+    }
+
+    /**
+     * Duration of warmup phase in milliseconds during circuit recovery.
+     * The circuit breaker will gradually restore traffic over this duration.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerWarmupDurationInMilliseconds() {
+        return circuitBreakerWarmupDurationInMilliseconds;
+    }
+
+    /**
+     * Number of successful requests required during warmup to close the circuit.
+     * Circuit will transition to CLOSED once this threshold is reached during warmup.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerWarmupSuccessThreshold() {
+        return circuitBreakerWarmupSuccessThreshold;
     }
 
     /**
@@ -560,6 +599,9 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Boolean circuitBreakerWarmupEnabled = null;
+        private Integer circuitBreakerWarmupDurationInMilliseconds = null;
+        private Integer circuitBreakerWarmupSuccessThreshold = null;
 
         /* package */ Setter() {
         }
@@ -586,6 +628,18 @@ public abstract class HystrixCommandProperties {
 
         public Integer getCircuitBreakerSleepWindowInMilliseconds() {
             return circuitBreakerSleepWindowInMilliseconds;
+        }
+
+        public Boolean getCircuitBreakerWarmupEnabled() {
+            return circuitBreakerWarmupEnabled;
+        }
+
+        public Integer getCircuitBreakerWarmupDurationInMilliseconds() {
+            return circuitBreakerWarmupDurationInMilliseconds;
+        }
+
+        public Integer getCircuitBreakerWarmupSuccessThreshold() {
+            return circuitBreakerWarmupSuccessThreshold;
         }
 
         public Integer getExecutionIsolationSemaphoreMaxConcurrentRequests() {
@@ -691,6 +745,21 @@ public abstract class HystrixCommandProperties {
 
         public Setter withCircuitBreakerSleepWindowInMilliseconds(int value) {
             this.circuitBreakerSleepWindowInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerWarmupEnabled(boolean value) {
+            this.circuitBreakerWarmupEnabled = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerWarmupDurationInMilliseconds(int value) {
+            this.circuitBreakerWarmupDurationInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerWarmupSuccessThreshold(int value) {
+            this.circuitBreakerWarmupSuccessThreshold = value;
             return this;
         }
 
