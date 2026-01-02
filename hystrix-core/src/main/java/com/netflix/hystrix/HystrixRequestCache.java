@@ -25,6 +25,8 @@ import rx.Observable;
 import rx.internal.operators.CachedObservable;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Cache that is scoped to the current request as managed by {@link HystrixRequestVariableDefault}.
@@ -42,19 +44,22 @@ public class HystrixRequestCache {
     private final HystrixConcurrencyStrategy concurrencyStrategy;
 
     /**
-     * A ConcurrentHashMap per 'prefix' and per request scope that is used to to dedupe requests in the same request.
+     * An LRU cache per 'prefix' and per request scope that is used to to dedupe requests in the same request.
      * <p>
      * Key => CommandPrefix + CacheKey : Future<?> from queue()
+     * <p>
+     * The cache now supports automatic size limiting with LRU eviction policy.
      */
-    private static final HystrixRequestVariableHolder<ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>> requestVariableForCache = new HystrixRequestVariableHolder<ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>>(new HystrixRequestVariableLifecycle<ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>>() {
+    private static final HystrixRequestVariableHolder<Map<ValueCacheKey, HystrixCachedObservable<?>>> requestVariableForCache = new HystrixRequestVariableHolder<Map<ValueCacheKey, HystrixCachedObservable<?>>>(new HystrixRequestVariableLifecycle<Map<ValueCacheKey, HystrixCachedObservable<?>>>() {
 
         @Override
-        public ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> initialValue() {
-            return new ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>>();
+        public Map<ValueCacheKey, HystrixCachedObservable<?>> initialValue() {
+            // Create synchronized LRU cache with default max size of 1000 entries
+            return createLRUCache(1000);
         }
 
         @Override
-        public void shutdown(ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> value) {
+        public void shutdown(Map<ValueCacheKey, HystrixCachedObservable<?>> value) {
             // nothing to shutdown
         }
 
@@ -63,6 +68,22 @@ public class HystrixRequestCache {
     private HystrixRequestCache(RequestCacheKey rcKey, HystrixConcurrencyStrategy concurrencyStrategy) {
         this.rcKey = rcKey;
         this.concurrencyStrategy = concurrencyStrategy;
+    }
+
+    /**
+     * Creates a synchronized LRU cache with the specified maximum size.
+     * When the cache reaches its maximum size, the least recently used entry is evicted.
+     *
+     * @param maxSize maximum number of entries in the cache
+     * @return synchronized LRU cache
+     */
+    private static Map<ValueCacheKey, HystrixCachedObservable<?>> createLRUCache(final int maxSize) {
+        return java.util.Collections.synchronizedMap(new LinkedHashMap<ValueCacheKey, HystrixCachedObservable<?>>(16, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<ValueCacheKey, HystrixCachedObservable<?>> eldest) {
+                return size() > maxSize;
+            }
+        });
     }
 
     public static HystrixRequestCache getInstance(HystrixCommandKey key, HystrixConcurrencyStrategy concurrencyStrategy) {
@@ -94,16 +115,16 @@ public class HystrixRequestCache {
      * 
      * @return {@code Future<T>}
      */
-    // suppressing warnings because we are using a raw Future since it's in a heterogeneous ConcurrentHashMap cache
+    // suppressing warnings because we are using a raw Future since it's in a heterogeneous LRU cache
     @SuppressWarnings({ "unchecked" })
     /* package */<T> HystrixCachedObservable<T> get(String cacheKey) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
-            ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+            Map<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
             if (cacheInstance == null) {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }
-            /* look for the stored value */
+            /* look for the stored value - this will update LRU order */
             return (HystrixCachedObservable<T>) cacheInstance.get(key);
         }
         return null;
@@ -121,20 +142,25 @@ public class HystrixRequestCache {
      * 
      * @return null if nothing else was in the cache (or this {@link HystrixCommand} does not have a cacheKey) or previous value if another thread beat us to adding to the cache
      */
-    // suppressing warnings because we are using a raw Future since it's in a heterogeneous ConcurrentHashMap cache
+    // suppressing warnings because we are using a raw Future since it's in a heterogeneous LRU cache
     @SuppressWarnings({ "unchecked" })
     /* package */<T> HystrixCachedObservable<T> putIfAbsent(String cacheKey, HystrixCachedObservable<T> f) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
             /* look for the stored value */
-            ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+            Map<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
             if (cacheInstance == null) {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }
-            HystrixCachedObservable<T> alreadySet = (HystrixCachedObservable<T>) cacheInstance.putIfAbsent(key, f);
-            if (alreadySet != null) {
-                // someone beat us so we didn't cache this
-                return alreadySet;
+            // Since we're using a synchronized Map, we need to handle putIfAbsent manually
+            synchronized (cacheInstance) {
+                HystrixCachedObservable<T> alreadySet = (HystrixCachedObservable<T>) cacheInstance.get(key);
+                if (alreadySet != null) {
+                    // someone beat us so we didn't cache this
+                    return alreadySet;
+                }
+                // Add to cache - may trigger LRU eviction if cache is full
+                cacheInstance.put(key, f);
             }
         }
         // we either set it in the cache or do not have a cache key
@@ -150,7 +176,7 @@ public class HystrixRequestCache {
     public void clear(String cacheKey) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
-            ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+            Map<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
             if (cacheInstance == null) {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }

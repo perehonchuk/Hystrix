@@ -42,6 +42,7 @@ public enum HystrixEventType {
     FALLBACK_MISSING(true),
     EXCEPTION_THROWN(false),
     RESPONSE_FROM_CACHE(true),
+    CACHE_EVICTED(false),
     CANCELLED(true),
     COLLAPSED(false),
     COMMAND_MAX_ACTIVE(false);
