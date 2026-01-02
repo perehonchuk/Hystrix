@@ -649,9 +649,17 @@ import java.util.concurrent.atomic.AtomicReference;
     private Observable<R> executeCommandWithSpecifiedIsolation(final AbstractCommand<R> _cmd) {
         if (properties.executionIsolationStrategy().get() == ExecutionIsolationStrategy.THREAD) {
             // mark that we are executing in a thread (even if we end up being rejected we still were a THREAD execution and not SEMAPHORE)
+            // Mark that command is being queued for thread pool execution
+            eventNotifier.markEvent(HystrixEventType.THREAD_POOL_QUEUED, commandKey);
+            metrics.markEvent(HystrixRollingNumberEvent.THREAD_POOL_QUEUED);
+
             return Observable.defer(new Func0<Observable<R>>() {
                 @Override
                 public Observable<R> call() {
+                    // Mark that command was removed from queue and is starting execution
+                    eventNotifier.markEvent(HystrixEventType.QUEUE_REMOVED, commandKey);
+                    metrics.markEvent(HystrixRollingNumberEvent.QUEUE_REMOVED);
+
                     executionResult = executionResult.setExecutionOccurred();
                     if (!commandState.compareAndSet(CommandState.OBSERVABLE_CHAIN_CREATED, CommandState.USER_CODE_EXECUTED)) {
                         return Observable.error(new IllegalStateException("execution attempted while in state : " + commandState.get().name()));

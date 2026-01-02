@@ -44,7 +44,9 @@ public enum HystrixEventType {
     RESPONSE_FROM_CACHE(true),
     CANCELLED(true),
     COLLAPSED(false),
-    COMMAND_MAX_ACTIVE(false);
+    COMMAND_MAX_ACTIVE(false),
+    THREAD_POOL_QUEUED(false),
+    QUEUE_REMOVED(false);
 
     private final boolean isTerminal;
 
@@ -76,6 +78,8 @@ public enum HystrixEventType {
             case COLLAPSED: return COLLAPSED;
             case BAD_REQUEST: return BAD_REQUEST;
             case COMMAND_MAX_ACTIVE: return COMMAND_MAX_ACTIVE;
+            case THREAD_POOL_QUEUED: return THREAD_POOL_QUEUED;
+            case QUEUE_REMOVED: return QUEUE_REMOVED;
             default:
                 throw new RuntimeException("Not an event that can be converted to HystrixEventType : " + event);
         }
