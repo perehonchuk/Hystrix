@@ -286,11 +286,29 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * If {@link #getFallback()} fails in any way then this method will be invoked to provide a secondary fallback response.
+     * <p>
+     * This provides an additional layer of fallback protection beyond the primary fallback.
+     * The secondary fallback should be even more resilient than the primary fallback - typically returning
+     * a static default value or cached response that cannot fail.
+     * <p>
+     * This is useful when the primary fallback may involve some computation or external state that could fail,
+     * and you want a guaranteed safe fallback as a last resort before throwing an exception.
+     * <p>
+     * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
+     *
+     * @return R or throw UnsupportedOperationException if not implemented
+     */
+    protected R getSecondaryFallback() {
+        throw new UnsupportedOperationException("No secondary fallback available.");
     }
 
     @Override
@@ -323,6 +341,22 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
                 } catch (Throwable ex) {
                     return Observable.error(ex);
                 }
+            }
+        }).onErrorResumeNext(new rx.functions.Func1<Throwable, Observable<? extends R>>() {
+            @Override
+            public Observable<? extends R> call(Throwable primaryFallbackError) {
+                // Primary fallback failed, try secondary fallback
+                return Observable.defer(new Func0<Observable<R>>() {
+                    @Override
+                    public Observable<R> call() {
+                        try {
+                            return Observable.just(getSecondaryFallback());
+                        } catch (Throwable ex) {
+                            // Secondary fallback also failed, propagate original primary fallback error
+                            return Observable.error(primaryFallbackError);
+                        }
+                    }
+                });
             }
         });
     }

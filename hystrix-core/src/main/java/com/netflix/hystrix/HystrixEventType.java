@@ -40,6 +40,9 @@ public enum HystrixEventType {
     FALLBACK_REJECTION(true),
     FALLBACK_DISABLED(true),
     FALLBACK_MISSING(true),
+    SECONDARY_FALLBACK_EMIT(false),
+    SECONDARY_FALLBACK_SUCCESS(true),
+    SECONDARY_FALLBACK_FAILURE(true),
     EXCEPTION_THROWN(false),
     RESPONSE_FROM_CACHE(true),
     CANCELLED(true),
@@ -71,6 +74,9 @@ public enum HystrixEventType {
             case FALLBACK_REJECTION: return FALLBACK_REJECTION;
             case FALLBACK_DISABLED: return FALLBACK_DISABLED;
             case FALLBACK_MISSING: return FALLBACK_MISSING;
+            case SECONDARY_FALLBACK_EMIT: return SECONDARY_FALLBACK_EMIT;
+            case SECONDARY_FALLBACK_SUCCESS: return SECONDARY_FALLBACK_SUCCESS;
+            case SECONDARY_FALLBACK_FAILURE: return SECONDARY_FALLBACK_FAILURE;
             case EXCEPTION_THROWN: return EXCEPTION_THROWN;
             case RESPONSE_FROM_CACHE: return RESPONSE_FROM_CACHE;
             case COLLAPSED: return COLLAPSED;
@@ -97,6 +103,7 @@ public enum HystrixEventType {
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_DISABLED);
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_MISSING);
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_REJECTION);
+        EXCEPTION_PRODUCING_EVENT_TYPES.add(SECONDARY_FALLBACK_FAILURE);
 
         for (HystrixEventType eventType: HystrixEventType.values()) {
             if (eventType.isTerminal()) {
