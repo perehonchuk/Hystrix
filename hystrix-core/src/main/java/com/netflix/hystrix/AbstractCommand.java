@@ -476,7 +476,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
                 /* try from cache first */
                 if (requestCacheEnabled) {
-                    HystrixCommandResponseFromCache<R> fromCache = (HystrixCommandResponseFromCache<R>) requestCache.get(cacheKey);
+                    final boolean ttlEnabled = properties.requestCacheTTLEnabled().get();
+                    final long ttlInMillis = properties.requestCacheTTLInMilliseconds().get();
+                    HystrixCommandResponseFromCache<R> fromCache = (HystrixCommandResponseFromCache<R>) requestCache.get(cacheKey, ttlInMillis, ttlEnabled);
                     if (fromCache != null) {
                         isResponseFromCache = true;
                         return handleRequestCacheHitAndEmitValues(fromCache, _cmd);

@@ -91,12 +91,27 @@ public class HystrixRequestCache {
 
     /**
      * Retrieve a cached Future for this request scope if a matching command has already been executed/queued.
-     * 
+     *
      * @return {@code Future<T>}
      */
     // suppressing warnings because we are using a raw Future since it's in a heterogeneous ConcurrentHashMap cache
     @SuppressWarnings({ "unchecked" })
     /* package */<T> HystrixCachedObservable<T> get(String cacheKey) {
+        return get(cacheKey, 0, false);
+    }
+
+    /**
+     * Retrieve a cached Future for this request scope if a matching command has already been executed/queued.
+     * Optionally checks for TTL-based expiration.
+     *
+     * @param cacheKey the cache key
+     * @param ttlInMillis time-to-live in milliseconds (only checked if ttlEnabled is true)
+     * @param ttlEnabled whether to check TTL expiration
+     * @return {@code Future<T>}
+     */
+    // suppressing warnings because we are using a raw Future since it's in a heterogeneous ConcurrentHashMap cache
+    @SuppressWarnings({ "unchecked" })
+    /* package */<T> HystrixCachedObservable<T> get(String cacheKey, long ttlInMillis, boolean ttlEnabled) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
             ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
@@ -104,7 +119,16 @@ public class HystrixRequestCache {
                 throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
             }
             /* look for the stored value */
-            return (HystrixCachedObservable<T>) cacheInstance.get(key);
+            HystrixCachedObservable<T> cached = (HystrixCachedObservable<T>) cacheInstance.get(key);
+
+            // Check if TTL-based expiration is enabled and if the entry has expired
+            if (cached != null && ttlEnabled && cached.isExpired(ttlInMillis)) {
+                // Remove expired entry
+                cacheInstance.remove(key);
+                return null;
+            }
+
+            return cached;
         }
         return null;
     }
