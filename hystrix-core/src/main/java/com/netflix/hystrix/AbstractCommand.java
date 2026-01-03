@@ -19,6 +19,7 @@ import com.netflix.hystrix.HystrixCircuitBreaker.NoOpCircuitBreaker;
 import com.netflix.hystrix.HystrixCommandProperties.ExecutionIsolationStrategy;
 import com.netflix.hystrix.exception.ExceptionNotWrappedByHystrix;
 import com.netflix.hystrix.exception.HystrixBadRequestException;
+import com.netflix.hystrix.exception.HystrixNonCriticalException;
 import com.netflix.hystrix.exception.HystrixRuntimeException;
 import com.netflix.hystrix.exception.HystrixRuntimeException.FailureType;
 import com.netflix.hystrix.exception.HystrixTimeoutException;
@@ -611,12 +612,22 @@ import java.util.concurrent.atomic.AtomicReference;
                     return handleTimeoutViaFallback();
                 } else if (t instanceof HystrixBadRequestException) {
                     return handleBadRequestByEmittingError(e);
+                } else if (t instanceof HystrixNonCriticalException) {
+                    return handleNonCriticalFailureByEmittingError(e);
                 } else {
                     /*
                      * Treat HystrixBadRequestException from ExecutionHook like a plain HystrixBadRequestException.
                      */
                     if (e instanceof HystrixBadRequestException) {
                         eventNotifier.markEvent(HystrixEventType.BAD_REQUEST, commandKey);
+                        return Observable.error(e);
+                    }
+
+                    /*
+                     * Treat HystrixNonCriticalException from ExecutionHook like a plain HystrixNonCriticalException.
+                     */
+                    if (e instanceof HystrixNonCriticalException) {
+                        eventNotifier.markEvent(HystrixEventType.NON_CRITICAL_FAILURE, commandKey);
                         return Observable.error(e);
                     }
 
@@ -1017,6 +1028,30 @@ import java.util.concurrent.atomic.AtomicReference;
         }
         /*
          * HystrixBadRequestException is treated differently and allowed to propagate without any stats tracking or fallback logic
+         */
+        return Observable.error(toEmit);
+    }
+
+    private Observable<R> handleNonCriticalFailureByEmittingError(Exception underlying) {
+        Exception toEmit = underlying;
+
+        try {
+            long executionLatency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+            eventNotifier.markEvent(HystrixEventType.NON_CRITICAL_FAILURE, commandKey);
+            executionResult = executionResult.addEvent((int) executionLatency, HystrixEventType.NON_CRITICAL_FAILURE);
+            Exception decorated = executionHook.onError(this, FailureType.COMMAND_EXCEPTION, underlying);
+
+            if (decorated instanceof HystrixNonCriticalException) {
+                toEmit = decorated;
+            } else {
+                logger.warn("ExecutionHook.onError returned an exception that was not an instance of HystrixNonCriticalException so will be ignored.", decorated);
+            }
+        } catch (Exception hookEx) {
+            logger.warn("Error calling HystrixCommandExecutionHook.onError", hookEx);
+        }
+        /*
+         * HystrixNonCriticalException propagates directly to the caller without triggering fallback,
+         * but unlike HystrixBadRequestException it DOES count against failure metrics and can trigger the circuit breaker.
          */
         return Observable.error(toEmit);
     }

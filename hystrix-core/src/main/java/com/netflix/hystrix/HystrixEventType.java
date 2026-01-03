@@ -31,6 +31,7 @@ public enum HystrixEventType {
     FAILURE(false),
     TIMEOUT(false),
     BAD_REQUEST(true),
+    NON_CRITICAL_FAILURE(true),
     SHORT_CIRCUITED(false),
     THREAD_POOL_REJECTED(false),
     SEMAPHORE_REJECTED(false),
@@ -75,6 +76,7 @@ public enum HystrixEventType {
             case RESPONSE_FROM_CACHE: return RESPONSE_FROM_CACHE;
             case COLLAPSED: return COLLAPSED;
             case BAD_REQUEST: return BAD_REQUEST;
+            case NON_CRITICAL_FAILURE: return NON_CRITICAL_FAILURE;
             case COMMAND_MAX_ACTIVE: return COMMAND_MAX_ACTIVE;
             default:
                 throw new RuntimeException("Not an event that can be converted to HystrixEventType : " + event);
@@ -93,6 +95,7 @@ public enum HystrixEventType {
 
     static {
         EXCEPTION_PRODUCING_EVENT_TYPES.add(BAD_REQUEST);
+        EXCEPTION_PRODUCING_EVENT_TYPES.add(NON_CRITICAL_FAILURE);
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_FAILURE);
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_DISABLED);
         EXCEPTION_PRODUCING_EVENT_TYPES.add(FALLBACK_MISSING);
