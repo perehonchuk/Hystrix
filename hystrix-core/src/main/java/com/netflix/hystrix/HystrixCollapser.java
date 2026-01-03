@@ -86,6 +86,36 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
     }
 
     /**
+     * Priority levels for request collapsing. Requests with different priorities will be batched separately.
+     * <p>
+     * When priority-based batching is enabled, the collapser will automatically split batches by priority level,
+     * ensuring that HIGH priority requests are not delayed waiting for LOW priority requests to accumulate.
+     * <p>
+     * This is useful for scenarios where:
+     * <ul>
+     * <li>User-facing requests need to be processed faster than background/analytics requests</li>
+     * <li>Premium tier users should get faster batch processing than free tier users</li>
+     * <li>Critical operations should not be delayed by non-critical operations</li>
+     * </ul>
+     */
+    public static enum Priority {
+        /**
+         * High priority requests - processed in separate batches, not mixed with NORMAL or LOW priority
+         */
+        HIGH,
+
+        /**
+         * Normal priority requests - the default priority level
+         */
+        NORMAL,
+
+        /**
+         * Low priority requests - processed in separate batches, suitable for background operations
+         */
+        LOW
+    }
+
+    /**
      * Collapser with default {@link HystrixCollapserKey} derived from the implementing class name and scoped to {@link Scope#REQUEST} and default configuration.
      */
     protected HystrixCollapser() {
@@ -178,6 +208,11 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
                 return self.getCollapserKey();
             }
 
+            @Override
+            public Priority getRequestPriority() {
+                return self.getRequestPriority();
+            }
+
         };
     }
 
@@ -227,10 +262,34 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * Typically this means to take the argument(s) provided to the constructor and return it here.
      * <p>
      * If there are multiple arguments that need to be bundled, create a single object to contain them, or use a Tuple.
-     * 
+     *
      * @return RequestArgumentType
      */
     public abstract RequestArgumentType getRequestArgument();
+
+    /**
+     * The priority of this request for batch processing.
+     * <p>
+     * Override this method to enable priority-based batching. When multiple requests with different priorities
+     * are queued for collapsing, they will be automatically separated into different batches based on their priority level.
+     * <p>
+     * This ensures that HIGH priority requests are not delayed waiting for LOW priority requests to accumulate,
+     * and vice versa. Each priority level maintains its own independent batch.
+     * <p>
+     * Use cases:
+     * <ul>
+     * <li>Separate user-facing requests (HIGH) from background analytics requests (LOW)</li>
+     * <li>Prioritize premium tier users (HIGH) over free tier users (NORMAL or LOW)</li>
+     * <li>Process critical operations faster by giving them HIGH priority</li>
+     * </ul>
+     * <p>
+     * Default: {@link Priority#NORMAL}
+     *
+     * @return {@link Priority} level for this request
+     */
+    protected Priority getRequestPriority() {
+        return Priority.NORMAL;
+    }
 
     /**
      * Factory method to create a new {@link HystrixCommand}{@code <BatchReturnType>} command object each time a batch needs to be executed.
@@ -395,7 +454,7 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
                 }
 
                 RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType> requestCollapser = collapserFactory.getRequestCollapser(collapserInstanceWrapper);
-                Observable<ResponseType> response = requestCollapser.submitRequest(getRequestArgument());
+                Observable<ResponseType> response = requestCollapser.submitRequest(getRequestArgument(), getRequestPriority());
 
                 if (isRequestCacheEnabled && cacheKey != null) {
                     HystrixCachedObservable<ResponseType> toCache = HystrixCachedObservable.from(response);
@@ -504,10 +563,20 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
     public interface CollapsedRequest<ResponseType, RequestArgumentType> {
         /**
          * The request argument passed into the {@link HystrixCollapser} instance constructor which was then collapsed.
-         * 
+         *
          * @return RequestArgumentType
          */
         RequestArgumentType getArgument();
+
+        /**
+         * The priority level of this collapsed request.
+         * <p>
+         * Requests with different priorities are automatically batched separately to ensure
+         * that high-priority requests are not delayed by low-priority requests.
+         *
+         * @return {@link Priority} level of this request
+         */
+        Priority getPriority();
 
         /**
          * This corresponds in a OnNext(Response); OnCompleted pair of emissions.  It represents a single-value usecase.

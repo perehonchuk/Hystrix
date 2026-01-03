@@ -39,4 +39,11 @@ public interface HystrixCollapserBridge<BatchReturnType, ResponseType, RequestAr
 
     HystrixCollapserKey getCollapserKey();
 
+    /**
+     * Get the priority level for a request argument.
+     *
+     * @return the priority level
+     */
+    com.netflix.hystrix.HystrixCollapser.Priority getRequestPriority();
+
 }

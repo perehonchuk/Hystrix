@@ -59,9 +59,11 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
     }
 
     /**
+     * @param arg the request argument
+     * @param priority the priority level of this request
      * @return Observable if offer accepted, null if batch is full, already started or completed
      */
-    public Observable<ResponseType> offer(RequestArgumentType arg) {
+    public Observable<ResponseType> offer(RequestArgumentType arg, com.netflix.hystrix.HystrixCollapser.Priority priority) {
         /* short-cut - if the batch is started we reject the offer */
         if (batchStarted.get()) {
             return null;
@@ -81,7 +83,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     return null;
                 } else {
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
-                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
+                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this, priority);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
                     /**
                      * If the argument already exists in the batch, then there are 2 options:
@@ -163,10 +165,18 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
-                // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
-                for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
+                // First, automatically shard by priority - separate HIGH, NORMAL, and LOW priority requests
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> priorityShards = shardByPriority(argumentMap.values());
+
+                // Then apply user-defined sharding logic to each priority shard
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> allShards = new java.util.ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+                for (Collection<CollapsedRequest<ResponseType, RequestArgumentType>> priorityShard : priorityShards) {
+                    Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> userShards = commandCollapser.shardRequests(priorityShard);
+                    allShards.addAll(userShards);
+                }
+
+                // for each shard execute its requests
+                for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : allShards) {
                     try {
                         // create a new command to handle this batch of requests
                         Observable<BatchReturnType> o = commandCollapser.createObservableCommand(shardRequests);
@@ -285,5 +295,38 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     public int getSize() {
         return argumentMap.size();
+    }
+
+    /**
+     * Shards requests by priority level. Requests with different priorities are placed in separate collections
+     * to ensure they are batched and executed independently.
+     * <p>
+     * This prevents high-priority requests from being delayed by low-priority requests and vice versa.
+     *
+     * @param requests all requests in this batch
+     * @return collection of collections, where each inner collection contains requests of the same priority
+     */
+    private Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardByPriority(
+            Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+
+        java.util.Map<com.netflix.hystrix.HystrixCollapser.Priority, java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>>> priorityMap =
+                new java.util.HashMap<com.netflix.hystrix.HystrixCollapser.Priority, java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+
+        // Group requests by priority
+        for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+            com.netflix.hystrix.HystrixCollapser.Priority priority = request.getPriority();
+            if (priority == null) {
+                priority = com.netflix.hystrix.HystrixCollapser.Priority.NORMAL; // default to NORMAL if null
+            }
+            java.util.List<CollapsedRequest<ResponseType, RequestArgumentType>> priorityList = priorityMap.get(priority);
+            if (priorityList == null) {
+                priorityList = new java.util.ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+                priorityMap.put(priority, priorityList);
+            }
+            priorityList.add(request);
+        }
+
+        // Convert map values to collection of collections
+        return new java.util.ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>(priorityMap.values());
     }
 }
