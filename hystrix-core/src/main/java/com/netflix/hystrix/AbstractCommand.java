@@ -340,6 +340,15 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getFallbackObservable();
 
     /**
+     * Override this to provide conditional execution logic based on runtime business rules.
+     * This is called after circuit breaker check but before command execution.
+     * Returning false skips execution and goes directly to fallback.
+     *
+     * @return true to execute, false to skip to fallback
+     */
+    protected abstract boolean shouldExecute();
+
+    /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
      * <p>
      * This lazily starts execution of the command once the {@link Observable} is subscribed to.
@@ -631,6 +640,19 @@ import java.util.concurrent.atomic.AtomicReference;
                 setRequestContextIfNeeded(currentRequestContext);
             }
         };
+
+        // Check if execution should be skipped based on business logic
+        if (!shouldExecute()) {
+            // Mark that execution was skipped
+            eventNotifier.markEvent(HystrixEventType.EXECUTION_SKIPPED, commandKey);
+            executionResult = executionResult.addEvent(HystrixEventType.EXECUTION_SKIPPED);
+
+            // Skip directly to fallback
+            return getFallbackOrThrowException(this, HystrixEventType.EXECUTION_SKIPPED, FailureType.COMMAND_EXCEPTION,
+                    "execution skipped by shouldExecute()",
+                    new RuntimeException("Execution conditionally skipped by shouldExecute() method"))
+                .doOnEach(setRequestContext);
+        }
 
         Observable<R> execution;
         if (properties.executionTimeoutEnabled().get()) {

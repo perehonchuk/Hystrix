@@ -293,6 +293,32 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
         throw new UnsupportedOperationException("No fallback available.");
     }
 
+    /**
+     * Override this method to provide conditional execution logic based on runtime business rules or context.
+     * <p>
+     * This method is called BEFORE the command's run() method is executed, but AFTER the circuit breaker check.
+     * If this method returns false, the command will skip execution and immediately invoke the fallback method.
+     * <p>
+     * Use this for scenarios where you want to conditionally skip execution based on:
+     * <ul>
+     * <li>Business rules (e.g., feature flags, A/B test groups)</li>
+     * <li>Runtime context (e.g., user permissions, tenant configuration)</li>
+     * <li>Request attributes (e.g., cache presence, data freshness requirements)</li>
+     * </ul>
+     * <p>
+     * Note: Unlike circuit breaker logic which is based on failure statistics, this is based on
+     * application-specific business logic determined at the time of each execution.
+     * <p>
+     * Note: Returning false does NOT count as a failure and does NOT affect circuit breaker metrics.
+     * <p>
+     * DEFAULT BEHAVIOR: Returns true (always execute).
+     *
+     * @return true to proceed with execution, false to skip to fallback
+     */
+    protected boolean shouldExecute() {
+        return true;
+    }
+
     @Override
     final protected Observable<R> getExecutionObservable() {
         return Observable.defer(new Func0<Observable<R>>() {
