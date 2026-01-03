@@ -504,10 +504,18 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
     public interface CollapsedRequest<ResponseType, RequestArgumentType> {
         /**
          * The request argument passed into the {@link HystrixCollapser} instance constructor which was then collapsed.
-         * 
+         *
          * @return RequestArgumentType
          */
         RequestArgumentType getArgument();
+
+        /**
+         * The sequence number representing the order in which this request was added to the batch.
+         * Lower sequence numbers indicate earlier arrival. This enables ordered processing of batched requests.
+         *
+         * @return long sequence number, starting from 0 for the first request in a batch
+         */
+        long getSequence();
 
         /**
          * This corresponds in a OnNext(Response); OnCompleted pair of emissions.  It represents a single-value usecase.

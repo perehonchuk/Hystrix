@@ -16,9 +16,11 @@
 package com.netflix.hystrix.collapser;
 
 import java.util.Collection;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.slf4j.Logger;
@@ -33,7 +35,7 @@ import com.netflix.hystrix.HystrixCollapserProperties;
 
 /**
  * A batch of requests collapsed together by a RequestCollapser instance. When full or time has expired it will execute and stop accepting further submissions.
- * 
+ *
  * @param <BatchReturnType>
  * @param <ResponseType>
  * @param <RequestArgumentType>
@@ -46,9 +48,10 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
     private final int maxBatchSize;
     private final AtomicBoolean batchStarted = new AtomicBoolean();
 
-    private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
-            new ConcurrentHashMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>();
+    private final Map<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
+            Collections.synchronizedMap(new LinkedHashMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>());
     private final HystrixCollapserProperties properties;
+    private final AtomicLong sequenceGenerator = new AtomicLong(0);
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
 
@@ -80,9 +83,17 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 if (argumentMap.size() >= maxBatchSize) {
                     return null;
                 } else {
+                    long sequence = sequenceGenerator.getAndIncrement();
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
-                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
-                    final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
+                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this, sequence);
+                    final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing;
+                    synchronized (argumentMap) {
+                        existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.put(arg, collapsedRequest);
+                        if (existing != null) {
+                            // restore the old value if duplicate found
+                            argumentMap.put(arg, existing);
+                        }
+                    }
                     /**
                      * If the argument already exists in the batch, then there are 2 options:
                      * A) If request caching is ON (the default): only keep 1 argument in the batch and let all responses
