@@ -247,11 +247,31 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
         return Observable.error(new UnsupportedOperationException("No fallback available."));
     }
 
+    /**
+     * Override this method to provide chained fallback logic at the specified depth level.
+     * This method will be called if the primary {@link #resumeWithFallback()} fails and fallback chaining is enabled.
+     * <p>
+     * Depth 1 is the first fallback after primary fallback fails, depth 2 is the second, etc.
+     * <p>
+     * DEFAULT BEHAVIOR: The default implementation returns null (no chained fallback).
+     *
+     * @param depth the depth level of the chained fallback (1-based)
+     * @return Observable or null if no chained fallback available at this depth
+     */
+    protected Observable<R> resumeWithChainedFallback(int depth) {
+        return null;
+    }
+
+    @Override
+    protected Observable<R> getChainedFallbackObservable(int depth) {
+        return resumeWithChainedFallback(depth);
+    }
+
     @Override
     final protected Observable<R> getExecutionObservable() {
         return construct();
     }
-    
+
     @Override
     final protected Observable<R> getFallbackObservable() {
         return resumeWithFallback();

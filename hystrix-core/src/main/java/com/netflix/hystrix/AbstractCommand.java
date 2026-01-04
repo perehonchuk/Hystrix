@@ -340,6 +340,51 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getFallbackObservable();
 
     /**
+     * Override this method to provide chained fallback logic at the specified depth level.
+     * Depth 1 is the first fallback after primary fallback fails, depth 2 is the second, etc.
+     * Return null to indicate no fallback available at this depth.
+     *
+     * @param depth the depth level of the chained fallback (1-based)
+     * @return Observable for the chained fallback, or null if not available
+     */
+    protected Observable<R> getChainedFallbackObservable(int depth) {
+        // Default implementation returns null (no chained fallback)
+        return null;
+    }
+
+    /**
+     * Helper method to try chained fallbacks up to the maximum depth.
+     */
+    private Observable<R> tryChainedFallback(int currentDepth, int maxDepth) {
+        if (currentDepth > maxDepth) {
+            return null;
+        }
+
+        try {
+            Observable<R> chainedFallback = getChainedFallbackObservable(currentDepth);
+            if (chainedFallback != null) {
+                final int nextDepth = currentDepth + 1;
+                return chainedFallback.onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                    @Override
+                    public Observable<R> call(Throwable throwable) {
+                        // If this chained fallback fails, try the next one
+                        Observable<R> nextFallback = tryChainedFallback(nextDepth, maxDepth);
+                        if (nextFallback != null) {
+                            return nextFallback;
+                        }
+                        return Observable.error(throwable);
+                    }
+                });
+            }
+        } catch (Throwable ex) {
+            logger.debug("Chained fallback at depth " + currentDepth + " threw exception", ex);
+        }
+
+        // Try next depth if this one is not available
+        return tryChainedFallback(currentDepth + 1, maxDepth);
+    }
+
+    /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
      * <p>
      * This lazily starts execution of the command once the {@link Observable} is subscribed to.
@@ -811,6 +856,16 @@ import java.util.concurrent.atomic.AtomicReference;
 
                         long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
                         Exception toEmit;
+
+                        // Check if we should try chained fallback
+                        if (properties.fallbackChainEnabled().get() && !(fe instanceof UnsupportedOperationException)) {
+                            int maxDepth = properties.fallbackChainMaxDepth().get();
+                            Observable<R> chainedFallback = tryChainedFallback(1, maxDepth);
+                            if (chainedFallback != null) {
+                                logger.debug("HystrixCommand primary fallback failed, attempting chained fallback.", fe);
+                                return chainedFallback;
+                            }
+                        }
 
                         if (fe instanceof UnsupportedOperationException) {
                             logger.debug("No fallback for HystrixCommand. ", fe); // debug only since we're throwing the exception and someone higher will do something with it

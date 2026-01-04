@@ -286,11 +286,35 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * Override this method to provide chained fallback logic at the specified depth level.
+     * This method will be called if the primary {@link #getFallback()} fails and fallback chaining is enabled.
+     * <p>
+     * Depth 1 is the first fallback after primary fallback fails, depth 2 is the second, etc.
+     * <p>
+     * DEFAULT BEHAVIOR: The default implementation returns null (no chained fallback).
+     *
+     * @param depth the depth level of the chained fallback (1-based)
+     * @return R or null if no chained fallback available at this depth
+     */
+    protected R getChainedFallback(int depth) {
+        return null;
+    }
+
+    @Override
+    protected Observable<R> getChainedFallbackObservable(int depth) {
+        final R fallback = getChainedFallback(depth);
+        if (fallback != null) {
+            return Observable.just(fallback);
+        }
+        return null;
     }
 
     @Override
