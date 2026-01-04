@@ -98,6 +98,10 @@ public class RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType
             }
             // it will always get an Observable unless we hit the max batch size
             if (response != null) {
+                // Check if eager execution threshold has been reached
+                if (b.shouldExecuteEagerly()) {
+                    createNewBatchAndExecutePreviousIfNeeded(b);
+                }
                 return response;
             } else {
                 // this batch can't accept requests so create a new one and set it if another thread doesn't beat us

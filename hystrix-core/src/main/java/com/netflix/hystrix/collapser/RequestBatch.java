@@ -44,6 +44,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private final HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser;
     private final int maxBatchSize;
+    private final int eagerExecutionThreshold;
     private final AtomicBoolean batchStarted = new AtomicBoolean();
 
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
@@ -56,6 +57,14 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
         this.maxBatchSize = maxBatchSize;
+
+        // Calculate the eager execution threshold based on percentage
+        if (properties.eagerBatchExecutionEnabled().get() && maxBatchSize < Integer.MAX_VALUE) {
+            int percentage = properties.eagerBatchSizeThresholdPercentage().get();
+            this.eagerExecutionThreshold = (int) Math.ceil((maxBatchSize * percentage) / 100.0);
+        } else {
+            this.eagerExecutionThreshold = Integer.MAX_VALUE;
+        }
     }
 
     /**
@@ -246,6 +255,14 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 batchLock.writeLock().unlock();
             }
         }
+    }
+
+    /**
+     * Check if the batch size has reached the eager execution threshold
+     * @return true if eager execution should be triggered, false otherwise
+     */
+    public boolean shouldExecuteEagerly() {
+        return argumentMap.size() >= eagerExecutionThreshold;
     }
 
     public void shutdown() {

@@ -35,6 +35,8 @@ public abstract class HystrixCollapserProperties {
     private static final Integer default_maxRequestsInBatch = Integer.MAX_VALUE;
     private static final Integer default_timerDelayInMilliseconds = 10;
     private static final Boolean default_requestCacheEnabled = true;
+    private static final Boolean default_eagerBatchExecutionEnabled = true;
+    private static final Integer default_eagerBatchSizeThresholdPercentage = 75;
     /* package */ static final Integer default_metricsRollingStatisticalWindow = 10000;// default => statisticalWindow: 10000 = 10 seconds (and default of 10 buckets so each bucket is 1 second)
     private static final Integer default_metricsRollingStatisticalWindowBuckets = 10;// default => statisticalWindowBuckets: 10 = 10 buckets in a 10 second window so each bucket is 1 second
     private static final Boolean default_metricsRollingPercentileEnabled = true;
@@ -45,6 +47,8 @@ public abstract class HystrixCollapserProperties {
     private final HystrixProperty<Integer> maxRequestsInBatch;
     private final HystrixProperty<Integer> timerDelayInMilliseconds;
     private final HystrixProperty<Boolean> requestCacheEnabled;
+    private final HystrixProperty<Boolean> eagerBatchExecutionEnabled;
+    private final HystrixProperty<Integer> eagerBatchSizeThresholdPercentage;
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowBuckets; // number of buckets in the statisticalWindow
     private final HystrixProperty<Boolean> metricsRollingPercentileEnabled; // Whether monitoring should be enabled
@@ -64,6 +68,8 @@ public abstract class HystrixCollapserProperties {
         this.maxRequestsInBatch = getProperty(propertyPrefix, key, "maxRequestsInBatch", builder.getMaxRequestsInBatch(), default_maxRequestsInBatch);
         this.timerDelayInMilliseconds = getProperty(propertyPrefix, key, "timerDelayInMilliseconds", builder.getTimerDelayInMilliseconds(), default_timerDelayInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
+        this.eagerBatchExecutionEnabled = getProperty(propertyPrefix, key, "eagerBatchExecution.enabled", builder.getEagerBatchExecutionEnabled(), default_eagerBatchExecutionEnabled);
+        this.eagerBatchSizeThresholdPercentage = getProperty(propertyPrefix, key, "eagerBatchExecution.sizeThresholdPercentage", builder.getEagerBatchSizeThresholdPercentage(), default_eagerBatchSizeThresholdPercentage);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -120,11 +126,32 @@ public abstract class HystrixCollapserProperties {
 
     /**
      * The number of milliseconds between batch executions (unless {@link #maxRequestsInBatch} is hit which will cause a batch to execute early.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> timerDelayInMilliseconds() {
         return timerDelayInMilliseconds;
+    }
+
+    /**
+     * Whether eager batch execution is enabled. When enabled, batches will execute as soon as they reach
+     * the threshold percentage of maxRequestsInBatch, rather than waiting for the timer delay.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> eagerBatchExecutionEnabled() {
+        return eagerBatchExecutionEnabled;
+    }
+
+    /**
+     * The percentage (0-100) of maxRequestsInBatch that triggers eager batch execution.
+     * For example, if maxRequestsInBatch is 100 and this is set to 75, the batch will execute
+     * when 75 requests have been collected, without waiting for the timer.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> eagerBatchSizeThresholdPercentage() {
+        return eagerBatchSizeThresholdPercentage;
     }
 
     /**
@@ -217,6 +244,8 @@ public abstract class HystrixCollapserProperties {
         private Integer maxRequestsInBatch = null;
         private Integer timerDelayInMilliseconds = null;
         private Boolean requestCacheEnabled = null;
+        private Boolean eagerBatchExecutionEnabled = null;
+        private Integer eagerBatchSizeThresholdPercentage = null;
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Integer metricsRollingPercentileBucketSize = null;
@@ -245,6 +274,14 @@ public abstract class HystrixCollapserProperties {
 
         public Boolean getRequestCacheEnabled() {
             return requestCacheEnabled;
+        }
+
+        public Boolean getEagerBatchExecutionEnabled() {
+            return eagerBatchExecutionEnabled;
+        }
+
+        public Integer getEagerBatchSizeThresholdPercentage() {
+            return eagerBatchSizeThresholdPercentage;
         }
 
         public Integer getMetricsRollingStatisticalWindowInMilliseconds() {
@@ -292,6 +329,16 @@ public abstract class HystrixCollapserProperties {
 
         public Setter withRequestCacheEnabled(boolean value) {
             this.requestCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withEagerBatchExecutionEnabled(boolean value) {
+            this.eagerBatchExecutionEnabled = value;
+            return this;
+        }
+
+        public Setter withEagerBatchSizeThresholdPercentage(int value) {
+            this.eagerBatchSizeThresholdPercentage = value;
             return this;
         }
 
