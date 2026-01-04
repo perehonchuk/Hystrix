@@ -44,7 +44,8 @@ public enum HystrixEventType {
     RESPONSE_FROM_CACHE(true),
     CANCELLED(true),
     COLLAPSED(false),
-    COMMAND_MAX_ACTIVE(false);
+    COMMAND_MAX_ACTIVE(false),
+    CIRCUIT_BREAKER_WARM_UP(false);
 
     private final boolean isTerminal;
 
