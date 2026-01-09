@@ -51,6 +51,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
     private final HystrixCollapserProperties properties;
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
+    private volatile long lastRequestTimestamp = System.currentTimeMillis();
 
     public RequestBatch(HystrixCollapserProperties properties, HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser, int maxBatchSize) {
         this.properties = properties;
@@ -80,6 +81,9 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 if (argumentMap.size() >= maxBatchSize) {
                     return null;
                 } else {
+                    // Update last request timestamp for adaptive batching
+                    lastRequestTimestamp = System.currentTimeMillis();
+
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
                             new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
@@ -285,5 +289,34 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     public int getSize() {
         return argumentMap.size();
+    }
+
+    /**
+     * Returns the timestamp (in milliseconds) of the last request added to this batch.
+     * Used for adaptive batching to determine if the request flow has slowed down.
+     *
+     * @return timestamp in milliseconds since epoch
+     */
+    public long getLastRequestTimestamp() {
+        return lastRequestTimestamp;
+    }
+
+    /**
+     * Checks if this batch should be executed early due to idle time.
+     * Returns true if adaptive batching is enabled and no new requests have arrived
+     * for longer than the configured idle threshold.
+     *
+     * @return true if batch should execute due to idle time
+     */
+    public boolean shouldExecuteDueToIdleTime() {
+        if (!properties.adaptiveBatchingEnabled().get()) {
+            return false;
+        }
+
+        long idleThreshold = properties.adaptiveBatchingIdleThresholdMs().get();
+        long currentTime = System.currentTimeMillis();
+        long timeSinceLastRequest = currentTime - lastRequestTimestamp;
+
+        return timeSinceLastRequest >= idleThreshold;
     }
 }

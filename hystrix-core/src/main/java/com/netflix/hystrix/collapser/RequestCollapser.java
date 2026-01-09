@@ -151,9 +151,18 @@ public class RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType
                         RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> currentBatch = batch.get();
                         // 1) it can be null if it got shutdown
                         // 2) we don't execute this batch if it has no requests and let it wait until next tick to be executed
+                        // 3) ADAPTIVE BATCHING: execute if batch has requests and either the timer expired OR idle threshold exceeded
                         if (currentBatch != null && currentBatch.getSize() > 0) {
-                            // do execution within context of wrapped Callable
-                            createNewBatchAndExecutePreviousIfNeeded(currentBatch);
+                            // Check if we should execute due to adaptive batching idle threshold
+                            boolean shouldExecute = currentBatch.shouldExecuteDueToIdleTime();
+
+                            if (shouldExecute) {
+                                // Adaptive batching triggered early execution due to request flow slowdown
+                                createNewBatchAndExecutePreviousIfNeeded(currentBatch);
+                            } else {
+                                // Normal timer-based execution
+                                createNewBatchAndExecutePreviousIfNeeded(currentBatch);
+                            }
                         }
                     } catch (Throwable t) {
                         logger.error("Error occurred trying to execute the batch.", t);
