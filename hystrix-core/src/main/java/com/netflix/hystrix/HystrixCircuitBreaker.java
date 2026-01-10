@@ -16,6 +16,7 @@
 package com.netflix.hystrix;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -26,8 +27,8 @@ import rx.Subscription;
 /**
  * Circuit-breaker logic that is hooked into {@link HystrixCommand} execution and will stop allowing executions if failures have gone past the defined threshold.
  * <p>
- * The default (and only) implementation  will then allow a single retry after a defined sleepWindow until the execution
- * succeeds at which point it will again close the circuit and allow executions again.
+ * The default (and only) implementation will then allow a configurable burst of concurrent retry requests after a defined sleepWindow.
+ * If all burst requests succeed, the circuit will close and allow executions again. If any request fails, the circuit returns to OPEN state.
  */
 public interface HystrixCircuitBreaker {
 
@@ -146,6 +147,7 @@ public interface HystrixCircuitBreaker {
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicInteger halfOpenBurstCount = new AtomicInteger(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -202,24 +204,37 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            if (status.get().equals(Status.HALF_OPEN)) {
+                // Decrement the burst count
+                int currentCount = halfOpenBurstCount.decrementAndGet();
+
+                // If this is the last request in the burst and all succeeded, close the circuit
+                if (currentCount <= 0) {
+                    if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
+                        //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                        halfOpenBurstCount.set(0);
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+                    }
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
             }
         }
 
         @Override
         public void markNonSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
-                //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
-                circuitOpened.set(System.currentTimeMillis());
+            if (status.get().equals(Status.HALF_OPEN)) {
+                // Reset burst count and transition back to OPEN
+                halfOpenBurstCount.set(0);
+                if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
+                    //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
+                    circuitOpened.set(System.currentTimeMillis());
+                }
             }
         }
 
@@ -272,12 +287,22 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (isAfterSleepWindow()) {
-                    //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
-                    //if the executing command fails, the status will transition to OPEN
-                    //if the executing command gets unsubscribed, the status will transition to OPEN
+                    // Burst testing: allow up to halfOpenBurstSize concurrent requests in HALF_OPEN state
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        // First request transitions to HALF_OPEN
+                        int burstSize = properties.circuitBreakerHalfOpenBurstSize().get();
+                        halfOpenBurstCount.set(burstSize);
                         return true;
+                    } else if (status.get().equals(Status.HALF_OPEN)) {
+                        // Already in HALF_OPEN state, check if we can allow more requests in the burst
+                        int currentCount = halfOpenBurstCount.get();
+                        while (currentCount > 0) {
+                            if (halfOpenBurstCount.compareAndSet(currentCount, currentCount - 1)) {
+                                return true;
+                            }
+                            currentCount = halfOpenBurstCount.get();
+                        }
+                        return false;
                     } else {
                         return false;
                     }
