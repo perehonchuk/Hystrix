@@ -62,6 +62,8 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Integer default_circuitBreakerHalfOpenProbeCount = 3; // default => halfOpenProbeCount: 3 = allow 3 concurrent probe requests in half-open state
+    private static final Integer default_circuitBreakerHalfOpenSuccessThreshold = 2; // default => halfOpenSuccessThreshold: 2 = require 2 successful probes to close circuit
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -70,6 +72,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> circuitBreakerErrorThresholdPercentage; // % of 'marks' that must be failed to trip the circuit
     private final HystrixProperty<Boolean> circuitBreakerForceOpen; // a property to allow forcing the circuit open (stopping all requests)
     private final HystrixProperty<Boolean> circuitBreakerForceClosed; // a property to allow ignoring errors and therefore never trip 'open' (ie. allow all traffic through)
+    private final HystrixProperty<Integer> circuitBreakerHalfOpenProbeCount; // number of concurrent probe requests allowed in half-open state
+    private final HystrixProperty<Integer> circuitBreakerHalfOpenSuccessThreshold; // number of successful probes required to transition from half-open to closed
     private final HystrixProperty<ExecutionIsolationStrategy> executionIsolationStrategy; // Whether a command should be executed in a separate thread or not.
     private final HystrixProperty<Integer> executionTimeoutInMilliseconds; // Timeout value in milliseconds for a command
     private final HystrixProperty<Boolean> executionTimeoutEnabled; //Whether timeout should be triggered
@@ -118,6 +122,8 @@ public abstract class HystrixCommandProperties {
         this.circuitBreakerErrorThresholdPercentage = getProperty(propertyPrefix, key, "circuitBreaker.errorThresholdPercentage", builder.getCircuitBreakerErrorThresholdPercentage(), default_circuitBreakerErrorThresholdPercentage);
         this.circuitBreakerForceOpen = getProperty(propertyPrefix, key, "circuitBreaker.forceOpen", builder.getCircuitBreakerForceOpen(), default_circuitBreakerForceOpen);
         this.circuitBreakerForceClosed = getProperty(propertyPrefix, key, "circuitBreaker.forceClosed", builder.getCircuitBreakerForceClosed(), default_circuitBreakerForceClosed);
+        this.circuitBreakerHalfOpenProbeCount = getProperty(propertyPrefix, key, "circuitBreaker.halfOpenProbeCount", builder.getCircuitBreakerHalfOpenProbeCount(), default_circuitBreakerHalfOpenProbeCount);
+        this.circuitBreakerHalfOpenSuccessThreshold = getProperty(propertyPrefix, key, "circuitBreaker.halfOpenSuccessThreshold", builder.getCircuitBreakerHalfOpenSuccessThreshold(), default_circuitBreakerHalfOpenSuccessThreshold);
         this.executionIsolationStrategy = getProperty(propertyPrefix, key, "execution.isolation.strategy", builder.getExecutionIsolationStrategy(), default_executionIsolationStrategy);
         //this property name is now misleading.  //TODO figure out a good way to deprecate this property name
         this.executionTimeoutInMilliseconds = getProperty(propertyPrefix, key, "execution.isolation.thread.timeoutInMilliseconds", builder.getExecutionIsolationThreadTimeoutInMilliseconds(), default_executionTimeoutInMilliseconds);
@@ -201,11 +207,29 @@ public abstract class HystrixCommandProperties {
 
     /**
      * The time in milliseconds after a {@link HystrixCircuitBreaker} trips open that it should wait before trying requests again.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> circuitBreakerSleepWindowInMilliseconds() {
         return circuitBreakerSleepWindowInMilliseconds;
+    }
+
+    /**
+     * Number of concurrent probe requests allowed in half-open state.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerHalfOpenProbeCount() {
+        return circuitBreakerHalfOpenProbeCount;
+    }
+
+    /**
+     * Number of successful probe requests required to transition from half-open to closed state.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerHalfOpenSuccessThreshold() {
+        return circuitBreakerHalfOpenSuccessThreshold;
     }
 
     /**
@@ -542,6 +566,8 @@ public abstract class HystrixCommandProperties {
         private Boolean circuitBreakerForceOpen = null;
         private Integer circuitBreakerRequestVolumeThreshold = null;
         private Integer circuitBreakerSleepWindowInMilliseconds = null;
+        private Integer circuitBreakerHalfOpenProbeCount = null;
+        private Integer circuitBreakerHalfOpenSuccessThreshold = null;
         private Integer executionIsolationSemaphoreMaxConcurrentRequests = null;
         private ExecutionIsolationStrategy executionIsolationStrategy = null;
         private Boolean executionIsolationThreadInterruptOnTimeout = null;
@@ -586,6 +612,14 @@ public abstract class HystrixCommandProperties {
 
         public Integer getCircuitBreakerSleepWindowInMilliseconds() {
             return circuitBreakerSleepWindowInMilliseconds;
+        }
+
+        public Integer getCircuitBreakerHalfOpenProbeCount() {
+            return circuitBreakerHalfOpenProbeCount;
+        }
+
+        public Integer getCircuitBreakerHalfOpenSuccessThreshold() {
+            return circuitBreakerHalfOpenSuccessThreshold;
         }
 
         public Integer getExecutionIsolationSemaphoreMaxConcurrentRequests() {
@@ -691,6 +725,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withCircuitBreakerSleepWindowInMilliseconds(int value) {
             this.circuitBreakerSleepWindowInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerHalfOpenProbeCount(int value) {
+            this.circuitBreakerHalfOpenProbeCount = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerHalfOpenSuccessThreshold(int value) {
+            this.circuitBreakerHalfOpenSuccessThreshold = value;
             return this;
         }
 

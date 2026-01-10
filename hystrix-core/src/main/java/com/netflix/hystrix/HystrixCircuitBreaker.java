@@ -146,6 +146,8 @@ public interface HystrixCircuitBreaker {
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicLong halfOpenProbesInFlight = new AtomicLong(0);
+        private final AtomicLong halfOpenSuccessfulProbes = new AtomicLong(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -202,24 +204,45 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            if (status.get() == Status.HALF_OPEN) {
+                // Decrement in-flight counter
+                halfOpenProbesInFlight.decrementAndGet();
+
+                // Increment successful probe counter
+                long successCount = halfOpenSuccessfulProbes.incrementAndGet();
+
+                // Check if we've reached the success threshold
+                if (successCount >= properties.circuitBreakerHalfOpenSuccessThreshold().get()) {
+                    if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
+                        //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+                        halfOpenProbesInFlight.set(0);
+                        halfOpenSuccessfulProbes.set(0);
+                    }
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
             }
         }
 
         @Override
         public void markNonSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
-                //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
-                circuitOpened.set(System.currentTimeMillis());
+            if (status.get() == Status.HALF_OPEN) {
+                // Decrement in-flight counter
+                halfOpenProbesInFlight.decrementAndGet();
+
+                // Any failure in half-open state immediately reopens the circuit
+                if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
+                    //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
+                    circuitOpened.set(System.currentTimeMillis());
+                    halfOpenProbesInFlight.set(0);
+                    halfOpenSuccessfulProbes.set(0);
+                }
             }
         }
 
@@ -272,14 +295,32 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (isAfterSleepWindow()) {
-                    //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
-                    //if the executing command fails, the status will transition to OPEN
-                    //if the executing command gets unsubscribed, the status will transition to OPEN
+                    // Allow multiple probe requests in half-open state
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        // First request transitions to HALF_OPEN and is allowed
+                        halfOpenProbesInFlight.incrementAndGet();
                         return true;
+                    } else if (status.get() == Status.HALF_OPEN) {
+                        // Check if we can allow another probe request
+                        long currentProbes = halfOpenProbesInFlight.get();
+                        int maxProbes = properties.circuitBreakerHalfOpenProbeCount().get();
+
+                        if (currentProbes < maxProbes) {
+                            // Atomically increment only if below threshold
+                            long newValue = halfOpenProbesInFlight.incrementAndGet();
+                            if (newValue <= maxProbes) {
+                                return true;
+                            } else {
+                                // We exceeded the limit, decrement back and reject
+                                halfOpenProbesInFlight.decrementAndGet();
+                                return false;
+                            }
+                        } else {
+                            return false;
+                        }
                     } else {
-                        return false;
+                        // Circuit is CLOSED (someone else closed it), allow execution
+                        return true;
                     }
                 } else {
                     return false;
