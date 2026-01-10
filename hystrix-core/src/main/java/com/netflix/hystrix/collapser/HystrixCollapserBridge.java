@@ -24,7 +24,7 @@ import com.netflix.hystrix.HystrixCollapserKey;
 
 /**
  * Bridge between HystrixCollapser and RequestCollapser to expose 'protected' and 'private' functionality across packages.
- * 
+ *
  * @param <BatchReturnType>
  * @param <ResponseType>
  * @param <RequestArgumentType>
@@ -38,5 +38,14 @@ public interface HystrixCollapserBridge<BatchReturnType, ResponseType, RequestAr
     Observable<Void> mapResponseToRequests(Observable<BatchReturnType> batchResponse, Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
 
     HystrixCollapserKey getCollapserKey();
+
+    /**
+     * Get the priority for a given request argument. Used for priority-based batching.
+     * Higher values indicate higher priority. Requests are grouped by priority before execution.
+     *
+     * @param requestArgument the request argument
+     * @return priority value (default 0 if not overridden)
+     */
+    int getRequestPriority(RequestArgumentType requestArgument);
 
 }

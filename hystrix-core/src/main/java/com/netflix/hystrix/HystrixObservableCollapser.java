@@ -234,6 +234,11 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
                 return self.getCollapserKey();
             }
 
+            @Override
+            public int getRequestPriority(RequestArgumentType requestArgument) {
+                return self.getRequestPriority(requestArgument);
+            }
+
         };
     }
 
@@ -335,6 +340,22 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      */
     protected Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
         return Collections.singletonList(requests);
+    }
+
+    /**
+     * Override to provide priority-based batching of requests.
+     * <p>
+     * Requests are grouped by priority level before being batched and executed.
+     * Higher priority requests are executed in separate batches before lower priority requests.
+     * <p>
+     * Default behavior: All requests have priority 0 (no prioritization).
+     *
+     * @param requestArgument
+     *            The request argument for which to determine priority
+     * @return priority value (higher values = higher priority, default is 0)
+     */
+    protected int getRequestPriority(RequestArgumentType requestArgument) {
+        return 0; // default: all requests have the same priority
     }
 
     /**

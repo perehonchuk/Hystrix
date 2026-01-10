@@ -15,7 +15,13 @@
  */
 package com.netflix.hystrix.collapser;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -80,8 +86,9 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 if (argumentMap.size() >= maxBatchSize) {
                     return null;
                 } else {
+                    int priority = commandCollapser.getRequestPriority(arg == RequestCollapser.NULL_SENTINEL ? null : arg);
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
-                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
+                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, priority, this);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
                     /**
                      * If the argument already exists in the batch, then there are 2 options:
@@ -163,10 +170,23 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
-                // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
-                for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
+                // Group requests by priority first, then shard within each priority group
+                Map<Integer, List<CollapsedRequest<ResponseType, RequestArgumentType>>> requestsByPriority =
+                        groupRequestsByPriority(argumentMap.values());
+
+                // Process priority groups in descending order (highest priority first)
+                List<Integer> priorities = new ArrayList<Integer>(requestsByPriority.keySet());
+                Collections.sort(priorities, Collections.reverseOrder());
+
+                for (Integer priority : priorities) {
+                    List<CollapsedRequest<ResponseType, RequestArgumentType>> priorityRequests = requestsByPriority.get(priority);
+
+                    // shard batches within this priority group
+                    Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards =
+                            commandCollapser.shardRequests(priorityRequests);
+
+                    // for each shard execute its requests
+                    for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests
                         Observable<BatchReturnType> o = commandCollapser.createObservableCommand(shardRequests);
@@ -231,6 +251,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                         }
                     }
                 }
+                }
 
             } catch (Exception e) {
                 logger.error("Exception while sharding requests.", e);
@@ -246,6 +267,34 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 batchLock.writeLock().unlock();
             }
         }
+    }
+
+    /**
+     * Groups requests by their priority level for priority-based batch execution.
+     * Requests with the same priority are grouped together.
+     *
+     * @param requests collection of all requests in the batch
+     * @return map of priority to list of requests with that priority
+     */
+    private Map<Integer, List<CollapsedRequest<ResponseType, RequestArgumentType>>> groupRequestsByPriority(
+            Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        Map<Integer, List<CollapsedRequest<ResponseType, RequestArgumentType>>> grouped = new LinkedHashMap<Integer, List<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+
+        for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+            int priority = 0; // default priority
+            if (request instanceof CollapsedRequestSubject) {
+                priority = ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) request).getPriority();
+            }
+
+            List<CollapsedRequest<ResponseType, RequestArgumentType>> priorityList = grouped.get(priority);
+            if (priorityList == null) {
+                priorityList = new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+                grouped.put(priority, priorityList);
+            }
+            priorityList.add(request);
+        }
+
+        return grouped;
     }
 
     public void shutdown() {
