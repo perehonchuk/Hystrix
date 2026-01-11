@@ -91,7 +91,7 @@ public class HystrixRequestCache {
 
     /**
      * Retrieve a cached Future for this request scope if a matching command has already been executed/queued.
-     * 
+     *
      * @return {@code Future<T>}
      */
     // suppressing warnings because we are using a raw Future since it's in a heterogeneous ConcurrentHashMap cache
@@ -105,6 +105,33 @@ public class HystrixRequestCache {
             }
             /* look for the stored value */
             return (HystrixCachedObservable<T>) cacheInstance.get(key);
+        }
+        return null;
+    }
+
+    /**
+     * Retrieve a cached Future for this request scope if a matching command has already been executed/queued
+     * and the cached entry has not exceeded its TTL.
+     *
+     * @param cacheKey the cache key
+     * @param ttlInMillis time-to-live in milliseconds (0 or negative means no expiration)
+     * @return {@code HystrixCachedObservable<T>} if found and not expired, null otherwise
+     */
+    @SuppressWarnings({ "unchecked" })
+    /* package */<T> HystrixCachedObservable<T> get(String cacheKey, long ttlInMillis) {
+        ValueCacheKey key = getRequestCacheKey(cacheKey);
+        if (key != null) {
+            ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+            if (cacheInstance == null) {
+                throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
+            }
+            HystrixCachedObservable<T> cached = (HystrixCachedObservable<T>) cacheInstance.get(key);
+            if (cached != null && cached.isExpired(ttlInMillis)) {
+                // Cache entry has expired, remove it and return null
+                cacheInstance.remove(key);
+                return null;
+            }
+            return cached;
         }
         return null;
     }
