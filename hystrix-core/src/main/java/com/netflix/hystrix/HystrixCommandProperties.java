@@ -45,7 +45,8 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_circuitBreakerSleepWindowInMilliseconds = 5000;// default => sleepWindow: 5000 = 5 seconds that we will sleep before trying again after tripping the circuit
     private static final Integer default_circuitBreakerErrorThresholdPercentage = 50;// default => errorThresholdPercentage = 50 = if 50%+ of requests in 10 seconds are failures or latent then we will trip the circuit
     private static final Boolean default_circuitBreakerForceOpen = false;// default => forceCircuitOpen = false (we want to allow traffic)
-    /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false 
+    /* package */ static final Boolean default_circuitBreakerForceClosed = false;// default => ignoreErrors = false
+    private static final Integer default_circuitBreakerRecoverySuccessThreshold = 3;// default => recoverySuccessThreshold: 3 successful requests required to close circuit from RECOVERING state 
     private static final Integer default_executionTimeoutInMilliseconds = 1000; // default => executionTimeoutInMilliseconds: 1000 = 1 second
     private static final Boolean default_executionTimeoutEnabled = true;
     private static final ExecutionIsolationStrategy default_executionIsolationStrategy = ExecutionIsolationStrategy.THREAD;
@@ -70,6 +71,7 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> circuitBreakerErrorThresholdPercentage; // % of 'marks' that must be failed to trip the circuit
     private final HystrixProperty<Boolean> circuitBreakerForceOpen; // a property to allow forcing the circuit open (stopping all requests)
     private final HystrixProperty<Boolean> circuitBreakerForceClosed; // a property to allow ignoring errors and therefore never trip 'open' (ie. allow all traffic through)
+    private final HystrixProperty<Integer> circuitBreakerRecoverySuccessThreshold; // number of successful requests required in RECOVERING state before transitioning to CLOSED
     private final HystrixProperty<ExecutionIsolationStrategy> executionIsolationStrategy; // Whether a command should be executed in a separate thread or not.
     private final HystrixProperty<Integer> executionTimeoutInMilliseconds; // Timeout value in milliseconds for a command
     private final HystrixProperty<Boolean> executionTimeoutEnabled; //Whether timeout should be triggered
@@ -118,6 +120,7 @@ public abstract class HystrixCommandProperties {
         this.circuitBreakerErrorThresholdPercentage = getProperty(propertyPrefix, key, "circuitBreaker.errorThresholdPercentage", builder.getCircuitBreakerErrorThresholdPercentage(), default_circuitBreakerErrorThresholdPercentage);
         this.circuitBreakerForceOpen = getProperty(propertyPrefix, key, "circuitBreaker.forceOpen", builder.getCircuitBreakerForceOpen(), default_circuitBreakerForceOpen);
         this.circuitBreakerForceClosed = getProperty(propertyPrefix, key, "circuitBreaker.forceClosed", builder.getCircuitBreakerForceClosed(), default_circuitBreakerForceClosed);
+        this.circuitBreakerRecoverySuccessThreshold = getProperty(propertyPrefix, key, "circuitBreaker.recoverySuccessThreshold", builder.getCircuitBreakerRecoverySuccessThreshold(), default_circuitBreakerRecoverySuccessThreshold);
         this.executionIsolationStrategy = getProperty(propertyPrefix, key, "execution.isolation.strategy", builder.getExecutionIsolationStrategy(), default_executionIsolationStrategy);
         //this property name is now misleading.  //TODO figure out a good way to deprecate this property name
         this.executionTimeoutInMilliseconds = getProperty(propertyPrefix, key, "execution.isolation.thread.timeoutInMilliseconds", builder.getExecutionIsolationThreadTimeoutInMilliseconds(), default_executionTimeoutInMilliseconds);
@@ -181,11 +184,26 @@ public abstract class HystrixCommandProperties {
      * If true the {@link HystrixCircuitBreaker#allowRequest()} will always return false, causing the circuit to be open (tripped) and reject all requests.
      * <p>
      * This property takes precedence over {@link #circuitBreakerForceClosed()};
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> circuitBreakerForceOpen() {
         return circuitBreakerForceOpen;
+    }
+
+    /**
+     * Number of successful requests required in the RECOVERING state before the circuit transitions to CLOSED.
+     * <p>
+     * After the sleep window elapses and the circuit enters HALF_OPEN state, the first successful request
+     * transitions the circuit to RECOVERING state. The circuit then requires this many successful requests
+     * before fully closing. Any failure during RECOVERING will reopen the circuit.
+     * <p>
+     * Default value is 3.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerRecoverySuccessThreshold() {
+        return circuitBreakerRecoverySuccessThreshold;
     }
 
     /**
@@ -542,6 +560,7 @@ public abstract class HystrixCommandProperties {
         private Boolean circuitBreakerForceOpen = null;
         private Integer circuitBreakerRequestVolumeThreshold = null;
         private Integer circuitBreakerSleepWindowInMilliseconds = null;
+        private Integer circuitBreakerRecoverySuccessThreshold = null;
         private Integer executionIsolationSemaphoreMaxConcurrentRequests = null;
         private ExecutionIsolationStrategy executionIsolationStrategy = null;
         private Boolean executionIsolationThreadInterruptOnTimeout = null;
@@ -586,6 +605,10 @@ public abstract class HystrixCommandProperties {
 
         public Integer getCircuitBreakerSleepWindowInMilliseconds() {
             return circuitBreakerSleepWindowInMilliseconds;
+        }
+
+        public Integer getCircuitBreakerRecoverySuccessThreshold() {
+            return circuitBreakerRecoverySuccessThreshold;
         }
 
         public Integer getExecutionIsolationSemaphoreMaxConcurrentRequests() {
@@ -691,6 +714,11 @@ public abstract class HystrixCommandProperties {
 
         public Setter withCircuitBreakerSleepWindowInMilliseconds(int value) {
             this.circuitBreakerSleepWindowInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerRecoverySuccessThreshold(int value) {
+            this.circuitBreakerRecoverySuccessThreshold = value;
             return this;
         }
 

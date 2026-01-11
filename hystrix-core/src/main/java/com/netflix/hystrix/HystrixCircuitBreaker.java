@@ -140,12 +140,13 @@ public interface HystrixCircuitBreaker {
         private final HystrixCommandMetrics metrics;
 
         enum Status {
-            CLOSED, OPEN, HALF_OPEN;
+            CLOSED, OPEN, HALF_OPEN, RECOVERING;
         }
 
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicLong recoveringSuccessCount = new AtomicLong(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -202,24 +203,48 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            // Handle HALF_OPEN -> RECOVERING transition
+            if (status.compareAndSet(Status.HALF_OPEN, Status.RECOVERING)) {
+                // First successful request after half-open moves to recovering state
+                recoveringSuccessCount.set(1);
+                return;
+            }
+
+            // Handle success in RECOVERING state
+            Status currentStatus = status.get();
+            if (currentStatus == Status.RECOVERING) {
+                long successCount = recoveringSuccessCount.incrementAndGet();
+                int requiredSuccesses = properties.circuitBreakerRecoverySuccessThreshold().get();
+
+                if (successCount >= requiredSuccesses) {
+                    // Enough successful requests, transition to CLOSED
+                    if (status.compareAndSet(Status.RECOVERING, Status.CLOSED)) {
+                        //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+                        recoveringSuccessCount.set(0);
+                    }
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
             }
         }
 
         @Override
         public void markNonSuccess() {
+            // Any failure in HALF_OPEN or RECOVERING reopens the circuit
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+                recoveringSuccessCount.set(0);
+            } else if (status.compareAndSet(Status.RECOVERING, Status.OPEN)) {
+                //Circuit was recovering but failed - reopen and reset recovery counter
+                circuitOpened.set(System.currentTimeMillis());
+                recoveringSuccessCount.set(0);
             }
         }
 
@@ -245,8 +270,12 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (status.get().equals(Status.HALF_OPEN)) {
+                Status currentStatus = status.get();
+                if (currentStatus.equals(Status.HALF_OPEN)) {
                     return false;
+                } else if (currentStatus.equals(Status.RECOVERING)) {
+                    // Allow requests through during recovery to test health
+                    return true;
                 } else {
                     return isAfterSleepWindow();
                 }
@@ -271,9 +300,15 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
+                Status currentStatus = status.get();
+                // Allow all requests through when RECOVERING
+                if (currentStatus.equals(Status.RECOVERING)) {
+                    return true;
+                }
+
                 if (isAfterSleepWindow()) {
                     //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
+                    //if the executing command succeeds, the status will transition to RECOVERING
                     //if the executing command fails, the status will transition to OPEN
                     //if the executing command gets unsubscribed, the status will transition to OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
