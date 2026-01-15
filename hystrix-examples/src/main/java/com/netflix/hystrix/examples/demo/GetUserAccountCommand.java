@@ -19,11 +19,18 @@ import java.net.HttpCookie;
 
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
+import com.netflix.hystrix.HystrixCommandKey;
+import com.netflix.hystrix.HystrixCommandProperties;
+import com.netflix.hystrix.HystrixCommandProperties.ExecutionIsolationStrategy;
+import com.netflix.hystrix.HystrixThreadPoolKey;
 
 /**
  * Sample HystrixCommand simulating one that would fetch UserAccount objects from a remote service or database.
  * <p>
- * This uses request caching and fallback behavior.
+ * This uses request caching, automatic primary/secondary failover, and fallback behavior.
+ * <p>
+ * This facade command uses semaphore isolation and automatic failover to try the secondary database
+ * when the primary database call fails.
  */
 public class GetUserAccountCommand extends HystrixCommand<UserAccount> {
 
@@ -31,13 +38,18 @@ public class GetUserAccountCommand extends HystrixCommand<UserAccount> {
     private final UserCookie userCookie;
 
     /**
-     * 
+     *
      * @param cookie
      * @throws IllegalArgumentException
      *             if cookie is invalid meaning the user is not authenticated
      */
     public GetUserAccountCommand(HttpCookie cookie) {
-        super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("User")));
+        super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("User"))
+                .andCommandKey(HystrixCommandKey.Factory.asKey("GetUserAccount"))
+                .andCommandPropertiesDefaults(
+                        HystrixCommandProperties.Setter()
+                                .withExecutionIsolationStrategy(ExecutionIsolationStrategy.SEMAPHORE)
+                                .withPrimarySecondaryFailoverEnabled(true)));
         this.httpCookie = cookie;
         /* parse or throw an IllegalArgumentException */
         this.userCookie = UserCookie.parseCookie(httpCookie);
@@ -45,30 +57,93 @@ public class GetUserAccountCommand extends HystrixCommand<UserAccount> {
 
     @Override
     protected UserAccount run() {
-        /* simulate performing network call to retrieve user information */
+        /* Try primary database first */
         try {
-            Thread.sleep((int) (Math.random() * 10) + 2);
-        } catch (InterruptedException e) {
-            // do nothing
+            return new PrimaryDatabaseCommand(httpCookie).execute();
+        } catch (Exception primaryException) {
+            /* Automatic failover to secondary database when primary fails */
+            return new SecondaryDatabaseCommand(httpCookie).execute();
+        }
+    }
+
+    /**
+     * Primary database command that connects to the main user database
+     */
+    private static class PrimaryDatabaseCommand extends HystrixCommand<UserAccount> {
+        private final HttpCookie cookie;
+
+        public PrimaryDatabaseCommand(HttpCookie cookie) {
+            super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("User"))
+                    .andCommandKey(HystrixCommandKey.Factory.asKey("PrimaryDatabase"))
+                    .andThreadPoolKey(HystrixThreadPoolKey.Factory.asKey("PrimaryDatabase"))
+                    .andCommandPropertiesDefaults(
+                            HystrixCommandProperties.Setter()
+                                    .withExecutionTimeoutInMilliseconds(500)));
+            this.cookie = cookie;
         }
 
-        /* fail 5% of the time to show how fallback works */
-        if (Math.random() > 0.95) {
-            throw new RuntimeException("random failure processing UserAccount network response");
-        }
-
-        /* latency spike 5% of the time so timeouts can be triggered occasionally */
-        if (Math.random() > 0.95) {
-            // random latency spike
+        @Override
+        protected UserAccount run() {
+            /* simulate performing network call to retrieve user information from primary DB */
             try {
-                Thread.sleep((int) (Math.random() * 300) + 25);
+                Thread.sleep((int) (Math.random() * 10) + 2);
             } catch (InterruptedException e) {
                 // do nothing
             }
+
+            /* fail 30% of the time to demonstrate automatic failover */
+            if (Math.random() > 0.70) {
+                throw new RuntimeException("primary database connection failed");
+            }
+
+            /* latency spike 5% of the time so timeouts can be triggered occasionally */
+            if (Math.random() > 0.95) {
+                // random latency spike
+                try {
+                    Thread.sleep((int) (Math.random() * 300) + 25);
+                } catch (InterruptedException e) {
+                    // do nothing
+                }
+            }
+
+            /* success ... create UserAccount with data "from" the primary database */
+            return new UserAccount(86975, "John James", 2, true, false, true);
+        }
+    }
+
+    /**
+     * Secondary database command that connects to the backup user database
+     */
+    private static class SecondaryDatabaseCommand extends HystrixCommand<UserAccount> {
+        private final HttpCookie cookie;
+
+        public SecondaryDatabaseCommand(HttpCookie cookie) {
+            super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("User"))
+                    .andCommandKey(HystrixCommandKey.Factory.asKey("SecondaryDatabase"))
+                    .andThreadPoolKey(HystrixThreadPoolKey.Factory.asKey("SecondaryDatabase"))
+                    .andCommandPropertiesDefaults(
+                            HystrixCommandProperties.Setter()
+                                    .withExecutionTimeoutInMilliseconds(200)));
+            this.cookie = cookie;
         }
 
-        /* success ... create UserAccount with data "from" the remote service response */
-        return new UserAccount(86975, "John James", 2, true, false, true);
+        @Override
+        protected UserAccount run() {
+            /* simulate performing network call to retrieve user information from secondary DB */
+            try {
+                Thread.sleep((int) (Math.random() * 5) + 1);
+            } catch (InterruptedException e) {
+                // do nothing
+            }
+
+            /* fail 5% of the time - secondary is more reliable */
+            if (Math.random() > 0.95) {
+                throw new RuntimeException("secondary database connection failed");
+            }
+
+            /* success ... create UserAccount with data "from" the secondary database */
+            return new UserAccount(86975, "John James", 2, true, false, true);
+        }
     }
 
     /**

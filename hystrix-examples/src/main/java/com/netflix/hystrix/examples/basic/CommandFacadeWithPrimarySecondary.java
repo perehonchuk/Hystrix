@@ -48,14 +48,20 @@ public class CommandFacadeWithPrimarySecondary extends HystrixCommand<String> {
                         // we want to default to semaphore-isolation since this wraps
                         // 2 others commands that are already thread isolated
                         HystrixCommandProperties.Setter()
-                                .withExecutionIsolationStrategy(ExecutionIsolationStrategy.SEMAPHORE)));
+                                .withExecutionIsolationStrategy(ExecutionIsolationStrategy.SEMAPHORE)
+                                .withPrimarySecondaryFailoverEnabled(true)));
         this.id = id;
     }
 
     @Override
     protected String run() {
         if (usePrimary.get()) {
-            return new PrimaryCommand(id).execute();
+            try {
+                return new PrimaryCommand(id).execute();
+            } catch (Exception primaryException) {
+                // Automatic failover: if primary fails, try secondary before going to fallback
+                return new SecondaryCommand(id).execute();
+            }
         } else {
             return new SecondaryCommand(id).execute();
         }

@@ -22,6 +22,7 @@ import org.junit.Test;
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
 import com.netflix.hystrix.HystrixCommandKey;
+import com.netflix.hystrix.HystrixCommandProperties;
 import com.netflix.hystrix.HystrixEventType;
 import com.netflix.hystrix.HystrixInvokableInfo;
 import com.netflix.hystrix.HystrixRequestLog;
@@ -43,7 +44,11 @@ public class CommandWithFallbackViaNetwork extends HystrixCommand<String> {
 
     protected CommandWithFallbackViaNetwork(int id) {
         super(Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("RemoteServiceX"))
-                .andCommandKey(HystrixCommandKey.Factory.asKey("GetValueCommand")));
+                .andCommandKey(HystrixCommandKey.Factory.asKey("GetValueCommand"))
+                .andCommandPropertiesDefaults(
+                        // enable automatic failover for primary/secondary pattern
+                        HystrixCommandProperties.Setter()
+                                .withPrimarySecondaryFailoverEnabled(true)));
         this.id = id;
     }
 
