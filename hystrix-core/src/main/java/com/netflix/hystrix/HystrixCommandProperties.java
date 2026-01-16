@@ -62,11 +62,15 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Integer default_circuitBreakerHalfOpenConcurrentTestRequests = 3; // default => halfOpenConcurrentTestRequests: 3 = allow 3 concurrent test requests in half-open state
+    private static final Integer default_circuitBreakerHalfOpenSuccessThreshold = 2; // default => halfOpenSuccessThreshold: 2 = require 2 successful test requests to close circuit
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
     private final HystrixProperty<Integer> circuitBreakerSleepWindowInMilliseconds; // milliseconds after tripping circuit before allowing retry
     private final HystrixProperty<Boolean> circuitBreakerEnabled; // Whether circuit breaker should be enabled.
+    private final HystrixProperty<Integer> circuitBreakerHalfOpenConcurrentTestRequests; // number of concurrent test requests allowed in half-open state
+    private final HystrixProperty<Integer> circuitBreakerHalfOpenSuccessThreshold; // number of successful test requests required to close circuit from half-open
     private final HystrixProperty<Integer> circuitBreakerErrorThresholdPercentage; // % of 'marks' that must be failed to trip the circuit
     private final HystrixProperty<Boolean> circuitBreakerForceOpen; // a property to allow forcing the circuit open (stopping all requests)
     private final HystrixProperty<Boolean> circuitBreakerForceClosed; // a property to allow ignoring errors and therefore never trip 'open' (ie. allow all traffic through)
@@ -115,6 +119,8 @@ public abstract class HystrixCommandProperties {
         this.circuitBreakerEnabled = getProperty(propertyPrefix, key, "circuitBreaker.enabled", builder.getCircuitBreakerEnabled(), default_circuitBreakerEnabled);
         this.circuitBreakerRequestVolumeThreshold = getProperty(propertyPrefix, key, "circuitBreaker.requestVolumeThreshold", builder.getCircuitBreakerRequestVolumeThreshold(), default_circuitBreakerRequestVolumeThreshold);
         this.circuitBreakerSleepWindowInMilliseconds = getProperty(propertyPrefix, key, "circuitBreaker.sleepWindowInMilliseconds", builder.getCircuitBreakerSleepWindowInMilliseconds(), default_circuitBreakerSleepWindowInMilliseconds);
+        this.circuitBreakerHalfOpenConcurrentTestRequests = getProperty(propertyPrefix, key, "circuitBreaker.halfOpenConcurrentTestRequests", builder.getCircuitBreakerHalfOpenConcurrentTestRequests(), default_circuitBreakerHalfOpenConcurrentTestRequests);
+        this.circuitBreakerHalfOpenSuccessThreshold = getProperty(propertyPrefix, key, "circuitBreaker.halfOpenSuccessThreshold", builder.getCircuitBreakerHalfOpenSuccessThreshold(), default_circuitBreakerHalfOpenSuccessThreshold);
         this.circuitBreakerErrorThresholdPercentage = getProperty(propertyPrefix, key, "circuitBreaker.errorThresholdPercentage", builder.getCircuitBreakerErrorThresholdPercentage(), default_circuitBreakerErrorThresholdPercentage);
         this.circuitBreakerForceOpen = getProperty(propertyPrefix, key, "circuitBreaker.forceOpen", builder.getCircuitBreakerForceOpen(), default_circuitBreakerForceOpen);
         this.circuitBreakerForceClosed = getProperty(propertyPrefix, key, "circuitBreaker.forceClosed", builder.getCircuitBreakerForceClosed(), default_circuitBreakerForceClosed);
@@ -201,11 +207,29 @@ public abstract class HystrixCommandProperties {
 
     /**
      * The time in milliseconds after a {@link HystrixCircuitBreaker} trips open that it should wait before trying requests again.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> circuitBreakerSleepWindowInMilliseconds() {
         return circuitBreakerSleepWindowInMilliseconds;
+    }
+
+    /**
+     * Number of concurrent test requests allowed in half-open state for circuit breaker recovery.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerHalfOpenConcurrentTestRequests() {
+        return circuitBreakerHalfOpenConcurrentTestRequests;
+    }
+
+    /**
+     * Number of successful test requests required to close the circuit from half-open state.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerHalfOpenSuccessThreshold() {
+        return circuitBreakerHalfOpenSuccessThreshold;
     }
 
     /**
@@ -542,6 +566,8 @@ public abstract class HystrixCommandProperties {
         private Boolean circuitBreakerForceOpen = null;
         private Integer circuitBreakerRequestVolumeThreshold = null;
         private Integer circuitBreakerSleepWindowInMilliseconds = null;
+        private Integer circuitBreakerHalfOpenConcurrentTestRequests = null;
+        private Integer circuitBreakerHalfOpenSuccessThreshold = null;
         private Integer executionIsolationSemaphoreMaxConcurrentRequests = null;
         private ExecutionIsolationStrategy executionIsolationStrategy = null;
         private Boolean executionIsolationThreadInterruptOnTimeout = null;
@@ -586,6 +612,14 @@ public abstract class HystrixCommandProperties {
 
         public Integer getCircuitBreakerSleepWindowInMilliseconds() {
             return circuitBreakerSleepWindowInMilliseconds;
+        }
+
+        public Integer getCircuitBreakerHalfOpenConcurrentTestRequests() {
+            return circuitBreakerHalfOpenConcurrentTestRequests;
+        }
+
+        public Integer getCircuitBreakerHalfOpenSuccessThreshold() {
+            return circuitBreakerHalfOpenSuccessThreshold;
         }
 
         public Integer getExecutionIsolationSemaphoreMaxConcurrentRequests() {
@@ -691,6 +725,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withCircuitBreakerSleepWindowInMilliseconds(int value) {
             this.circuitBreakerSleepWindowInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerHalfOpenConcurrentTestRequests(int value) {
+            this.circuitBreakerHalfOpenConcurrentTestRequests = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerHalfOpenSuccessThreshold(int value) {
+            this.circuitBreakerHalfOpenSuccessThreshold = value;
             return this;
         }
 

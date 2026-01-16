@@ -146,6 +146,8 @@ public interface HystrixCircuitBreaker {
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicLong halfOpenTestRequestsInFlight = new AtomicLong(0);
+        private final AtomicLong halfOpenSuccessfulTests = new AtomicLong(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -202,24 +204,42 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            if (status.get() == Status.HALF_OPEN) {
+                // Decrement in-flight counter
+                halfOpenTestRequestsInFlight.decrementAndGet();
+                // Increment success counter
+                long successCount = halfOpenSuccessfulTests.incrementAndGet();
+                // Check if we've met the threshold to close the circuit
+                if (successCount >= properties.circuitBreakerHalfOpenSuccessThreshold().get()) {
+                    if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
+                        //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+                        halfOpenTestRequestsInFlight.set(0);
+                        halfOpenSuccessfulTests.set(0);
+                    }
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
             }
         }
 
         @Override
         public void markNonSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
-                //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
-                circuitOpened.set(System.currentTimeMillis());
+            if (status.get() == Status.HALF_OPEN) {
+                // Decrement in-flight counter
+                halfOpenTestRequestsInFlight.decrementAndGet();
+                // Any failure in half-open state reopens the circuit
+                if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
+                    //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
+                    circuitOpened.set(System.currentTimeMillis());
+                    halfOpenTestRequestsInFlight.set(0);
+                    halfOpenSuccessfulTests.set(0);
+                }
             }
         }
 
@@ -246,7 +266,8 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (status.get().equals(Status.HALF_OPEN)) {
-                    return false;
+                    // In half-open state, allow requests if under concurrent test limit
+                    return halfOpenTestRequestsInFlight.get() < properties.circuitBreakerHalfOpenConcurrentTestRequests().get();
                 } else {
                     return isAfterSleepWindow();
                 }
@@ -272,12 +293,28 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (isAfterSleepWindow()) {
-                    //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
-                    //if the executing command fails, the status will transition to OPEN
-                    //if the executing command gets unsubscribed, the status will transition to OPEN
+                    // Try to transition from OPEN to HALF_OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        // First request after sleep window - transition to HALF_OPEN and allow
+                        halfOpenTestRequestsInFlight.incrementAndGet();
                         return true;
+                    } else if (status.get() == Status.HALF_OPEN) {
+                        // Already in HALF_OPEN state - check if we can allow more concurrent test requests
+                        int maxConcurrentTests = properties.circuitBreakerHalfOpenConcurrentTestRequests().get();
+                        long currentInFlight = halfOpenTestRequestsInFlight.get();
+                        if (currentInFlight < maxConcurrentTests) {
+                            // Atomically increment if still under limit
+                            long newInFlight = halfOpenTestRequestsInFlight.incrementAndGet();
+                            if (newInFlight <= maxConcurrentTests) {
+                                return true;
+                            } else {
+                                // Raced past the limit, decrement and reject
+                                halfOpenTestRequestsInFlight.decrementAndGet();
+                                return false;
+                            }
+                        } else {
+                            return false;
+                        }
                     } else {
                         return false;
                     }
