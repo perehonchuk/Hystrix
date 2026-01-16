@@ -39,4 +39,12 @@ public interface HystrixCollapserBridge<BatchReturnType, ResponseType, RequestAr
 
     HystrixCollapserKey getCollapserKey();
 
+    /**
+     * Get the priority level for a specific request argument.
+     *
+     * @param argument the request argument
+     * @return priority level (0-10, where 0 is highest priority)
+     */
+    int getRequestPriority(RequestArgumentType argument);
+
 }

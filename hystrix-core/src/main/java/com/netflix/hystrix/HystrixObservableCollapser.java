@@ -234,6 +234,11 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
                 return self.getCollapserKey();
             }
 
+            @Override
+            public int getRequestPriority(RequestArgumentType argument) {
+                return self.getRequestPriority();
+            }
+
         };
     }
 
@@ -295,10 +300,35 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      * Typically this means to take the argument(s) provided to the constructor and return it here.
      * <p>
      * If there are multiple arguments that need to be bundled, create a single object to contain them, or use a Tuple.
-     * 
+     *
      * @return RequestArgumentType
      */
     public abstract RequestArgumentType getRequestArgument();
+
+    /**
+     * The priority level for this request within a batch.
+     * <p>
+     * When batches are executed, requests are grouped by priority level and higher priority
+     * requests are placed first in the batch execution order. This allows critical requests
+     * to be processed before lower priority ones within the same batch.
+     * <p>
+     * Priority levels:
+     * <ul>
+     * <li>0 (highest priority): Critical/urgent requests that must be processed first</li>
+     * <li>1-4: High to medium priority requests</li>
+     * <li>5 (default): Normal priority requests</li>
+     * <li>6-9: Low priority requests</li>
+     * <li>10 (lowest): Background/best-effort requests</li>
+     * </ul>
+     * <p>
+     * Default implementation returns 5 (normal priority).
+     * Override this method to assign custom priorities based on request characteristics.
+     *
+     * @return integer priority level (0-10, where 0 is highest priority)
+     */
+    public int getRequestPriority() {
+        return 5; // default: normal priority
+    }
 
     /**
      * Factory method to create a new {@link HystrixObservableCommand}{@code <BatchReturnType>} command object each time a batch needs to be executed.

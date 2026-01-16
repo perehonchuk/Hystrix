@@ -15,7 +15,11 @@
  */
 package com.netflix.hystrix.collapser;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -80,8 +84,9 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 if (argumentMap.size() >= maxBatchSize) {
                     return null;
                 } else {
+                    int priority = commandCollapser.getRequestPriority(arg);
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
-                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this);
+                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this, priority);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
                     /**
                      * If the argument already exists in the batch, then there are 2 options:
@@ -163,9 +168,25 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             batchLock.writeLock().lock();
 
             try {
-                // shard batches
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
+                // Sort requests by priority before sharding
+                // Convert argumentMap.values() to a list and sort by priority (lower number = higher priority)
+                List<CollapsedRequest<ResponseType, RequestArgumentType>> sortedRequests =
+                        new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>(argumentMap.values());
+                Collections.sort(sortedRequests, new Comparator<CollapsedRequest<ResponseType, RequestArgumentType>>() {
+                    @Override
+                    public int compare(CollapsedRequest<ResponseType, RequestArgumentType> r1,
+                                     CollapsedRequest<ResponseType, RequestArgumentType> r2) {
+                        int p1 = (r1 instanceof CollapsedRequestSubject) ?
+                                ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) r1).getPriority() : 5;
+                        int p2 = (r2 instanceof CollapsedRequestSubject) ?
+                                ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) r2).getPriority() : 5;
+                        return Integer.compare(p1, p2); // lower priority number comes first
+                    }
+                });
+
+                // shard batches (now with priority-sorted requests)
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(sortedRequests);
+                // for each shard execute its requests
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests
