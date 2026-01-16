@@ -153,6 +153,11 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
             }
 
             @Override
+            public Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> batchRequestsByPriority(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+                return self.batchRequestsByPriority(requests);
+            }
+
+            @Override
             public Observable<BatchReturnType> createObservableCommand(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
                 final HystrixCommand<BatchReturnType> command = self.createCommand(requests);
 
@@ -258,14 +263,46 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * executed for them.
      * <p>
      * By default this method does nothing to the Collection and is a pass-thru.
-     * 
+     *
      * @param requests
      *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects containing the arguments of each request collapsed in this batch.
      * @return Collection of {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} objects sharded according to business rules.
      *         <p>The CollapsedRequest instances should not be modified or wrapped as the CollapsedRequest instance object contains state information needed to complete the execution.
      */
     protected Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> priorityBatches = batchRequestsByPriority(requests);
+        if (priorityBatches != null && !priorityBatches.isEmpty()) {
+            return priorityBatches;
+        }
         return Collections.singletonList(requests);
+    }
+
+    /**
+     * Override to batch requests by priority level before execution.
+     * <p>
+     * This allows requests to be grouped according to their priority, enabling higher-priority requests
+     * to be batched and executed separately from lower-priority requests. This is useful when you want
+     * to ensure that critical requests are processed with higher precedence.
+     * <p>
+     * For example, a batch of 100 requests could be split into 3 priority-based batches:
+     * HIGH priority (20 requests), MEDIUM priority (50 requests), and LOW priority (30 requests).
+     * Each priority batch will result in a separate {@link HystrixCommand} being created and executed.
+     * <p>
+     * By default this method returns null, which means priority-based batching is disabled and the
+     * default sharding behavior will be used.
+     * <p>
+     * Priority-based batching happens BEFORE geographical/logical sharding. If both priority batching
+     * and shardRequests are overridden, requests will first be grouped by priority, and then each
+     * priority group can be further sharded by shardRequests logic.
+     *
+     * @param requests
+     *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects containing the arguments of each request collapsed in this batch.
+     * @return Collection of {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} objects batched by priority level.
+     *         Return null or empty collection to disable priority-based batching.
+     *         <p>The CollapsedRequest instances should not be modified or wrapped as the CollapsedRequest instance object contains state information needed to complete the execution.
+     */
+    protected Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> batchRequestsByPriority(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        return null;
     }
 
     /**
