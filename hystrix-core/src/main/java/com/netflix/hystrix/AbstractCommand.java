@@ -92,6 +92,8 @@ import java.util.concurrent.atomic.AtomicReference;
     protected final TryableSemaphore fallbackSemaphoreOverride;
     /* each circuit has a semaphore to restrict concurrent fallback execution */
     protected static final ConcurrentHashMap<String, TryableSemaphore> fallbackSemaphorePerCircuit = new ConcurrentHashMap<String, TryableSemaphore>();
+    /* track currently executing fallback priorities per circuit for priority-based preemption */
+    protected static final ConcurrentHashMap<String, ConcurrentHashMap<HystrixCommand.FallbackPriority, AtomicInteger>> fallbackPrioritiesPerCircuit = new ConcurrentHashMap<String, ConcurrentHashMap<HystrixCommand.FallbackPriority, AtomicInteger>>();
     /* END FALLBACK Semaphore */
 
     /* EXECUTION Semaphore */
@@ -338,6 +340,16 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getExecutionObservable();
 
     protected abstract Observable<R> getFallbackObservable();
+
+    /**
+     * Returns the priority level for fallback execution. Subclasses should override
+     * to provide their specific priority.
+     *
+     * @return FallbackPriority for this command's fallback
+     */
+    protected HystrixCommand.FallbackPriority getFallbackPriority() {
+        return HystrixCommand.FallbackPriority.NORMAL;
+    }
 
     /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
@@ -837,19 +849,34 @@ import java.util.concurrent.atomic.AtomicReference;
 
                 final TryableSemaphore fallbackSemaphore = getFallbackSemaphore();
                 final AtomicBoolean semaphoreHasBeenReleased = new AtomicBoolean(false);
+                final boolean priorityBasedEnabled = properties.fallbackPriorityBasedExecutionEnabled().get();
+                final HystrixCommand.FallbackPriority currentPriority = getFallbackPriority();
                 final Action0 singleSemaphoreRelease = new Action0() {
                     @Override
                     public void call() {
                         if (semaphoreHasBeenReleased.compareAndSet(false, true)) {
                             fallbackSemaphore.release();
+                            // If priority-based execution is enabled, decrement priority tracking
+                            if (priorityBasedEnabled) {
+                                trackFallbackPriority(currentPriority, -1);
+                            }
                         }
                     }
                 };
 
                 Observable<R> fallbackExecutionChain;
 
-                // acquire a permit
-                if (fallbackSemaphore.tryAcquire()) {
+                // acquire a permit - check if priority-based execution is enabled
+                boolean acquired = false;
+                if (priorityBasedEnabled) {
+                    // Priority-based fallback execution: try to acquire or preempt
+                    acquired = tryAcquireFallbackSemaphoreWithPriority(fallbackSemaphore, currentPriority);
+                } else {
+                    // Standard fallback execution: simple tryAcquire
+                    acquired = fallbackSemaphore.tryAcquire();
+                }
+
+                if (acquired) {
                     try {
                         if (isFallbackUserDefined()) {
                             executionHook.onFallbackStart(this);
@@ -1229,7 +1256,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
     /**
      * Get the TryableSemaphore this HystrixCommand should use if a fallback occurs.
-     * 
+     *
      * @return TryableSemaphore
      */
     protected TryableSemaphore getFallbackSemaphore() {
@@ -1246,6 +1273,84 @@ import java.util.concurrent.atomic.AtomicReference;
         } else {
             return fallbackSemaphoreOverride;
         }
+    }
+
+    /**
+     * Try to acquire fallback semaphore with priority-based preemption support.
+     * If the semaphore is full, check if any currently executing fallbacks have lower priority
+     * and can be preempted by this higher priority request.
+     *
+     * @param semaphore The fallback semaphore to acquire
+     * @param priority The priority of this fallback request
+     * @return true if semaphore was acquired (either directly or via preemption), false otherwise
+     */
+    protected boolean tryAcquireFallbackSemaphoreWithPriority(TryableSemaphore semaphore, HystrixCommand.FallbackPriority priority) {
+        // First try normal acquisition
+        if (semaphore.tryAcquire()) {
+            // Track this priority level
+            trackFallbackPriority(priority, 1);
+            return true;
+        }
+
+        // Semaphore is full - check if we can preempt a lower priority fallback
+        ConcurrentHashMap<HystrixCommand.FallbackPriority, AtomicInteger> priorityCounts = fallbackPrioritiesPerCircuit.get(commandKey.name());
+        if (priorityCounts != null) {
+            // Check priorities from lowest to highest to find a preemptable fallback
+            for (HystrixCommand.FallbackPriority checkPriority : new HystrixCommand.FallbackPriority[]{
+                    HystrixCommand.FallbackPriority.LOW,
+                    HystrixCommand.FallbackPriority.NORMAL}) {
+
+                if (priority.canPreempt(checkPriority)) {
+                    AtomicInteger count = priorityCounts.get(checkPriority);
+                    if (count != null && count.get() > 0) {
+                        // Found a lower priority fallback that can be preempted
+                        // Decrement the lower priority count (simulating preemption)
+                        if (count.decrementAndGet() >= 0) {
+                            // Successfully preempted - track this priority and return success
+                            trackFallbackPriority(priority, 1);
+                            return true;
+                        } else {
+                            // Race condition - restore count and continue
+                            count.incrementAndGet();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Could not acquire or preempt
+        return false;
+    }
+
+    /**
+     * Track fallback execution by priority level.
+     *
+     * @param priority The priority level to track
+     * @param delta The change in count (1 to increment, -1 to decrement)
+     */
+    protected void trackFallbackPriority(HystrixCommand.FallbackPriority priority, int delta) {
+        ConcurrentHashMap<HystrixCommand.FallbackPriority, AtomicInteger> priorityCounts =
+                fallbackPrioritiesPerCircuit.get(commandKey.name());
+
+        if (priorityCounts == null) {
+            priorityCounts = new ConcurrentHashMap<HystrixCommand.FallbackPriority, AtomicInteger>();
+            ConcurrentHashMap<HystrixCommand.FallbackPriority, AtomicInteger> existing =
+                    fallbackPrioritiesPerCircuit.putIfAbsent(commandKey.name(), priorityCounts);
+            if (existing != null) {
+                priorityCounts = existing;
+            }
+        }
+
+        AtomicInteger count = priorityCounts.get(priority);
+        if (count == null) {
+            count = new AtomicInteger(0);
+            AtomicInteger existing = priorityCounts.putIfAbsent(priority, count);
+            if (existing != null) {
+                count = existing;
+            }
+        }
+
+        count.addAndGet(delta);
     }
 
     /**

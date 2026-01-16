@@ -263,6 +263,33 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
 
     }
 
+	/**
+     * Enum representing the priority level for fallback execution.
+     * When the fallback semaphore is at capacity, higher priority fallbacks
+     * can preempt lower priority ones currently executing.
+     * <p>
+     * CRITICAL: Highest priority, will preempt NORMAL and LOW priority fallbacks
+     * NORMAL: Default priority, will preempt LOW priority fallbacks
+     * LOW: Lowest priority, can be preempted by all other priorities
+     */
+    public static enum FallbackPriority {
+        LOW(0), NORMAL(1), CRITICAL(2);
+
+        private final int level;
+
+        FallbackPriority(int level) {
+            this.level = level;
+        }
+
+        public int getLevel() {
+            return level;
+        }
+
+        public boolean canPreempt(FallbackPriority other) {
+            return this.level > other.level;
+        }
+    }
+
 	private final AtomicReference<Thread> executionThread = new AtomicReference<Thread>();
 	private final AtomicBoolean interruptOnFutureCancel = new AtomicBoolean(false);
 
@@ -286,11 +313,24 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * Override this method to specify the priority level for this command's fallback execution.
+     * This is used when priority-based fallback execution is enabled to determine which
+     * fallbacks can preempt others when the fallback semaphore is at capacity.
+     * <p>
+     * DEFAULT BEHAVIOR: Returns FallbackPriority.NORMAL
+     *
+     * @return FallbackPriority priority level for fallback execution
+     */
+    protected FallbackPriority getFallbackPriority() {
+        return FallbackPriority.NORMAL;
     }
 
     @Override

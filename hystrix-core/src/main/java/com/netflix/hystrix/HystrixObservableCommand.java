@@ -247,11 +247,24 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
         return Observable.error(new UnsupportedOperationException("No fallback available."));
     }
 
+    /**
+     * Override this method to specify the priority level for this command's fallback execution.
+     * This is used when priority-based fallback execution is enabled to determine which
+     * fallbacks can preempt others when the fallback semaphore is at capacity.
+     * <p>
+     * DEFAULT BEHAVIOR: Returns FallbackPriority.NORMAL
+     *
+     * @return FallbackPriority priority level for fallback execution
+     */
+    protected HystrixCommand.FallbackPriority getFallbackPriority() {
+        return HystrixCommand.FallbackPriority.NORMAL;
+    }
+
     @Override
     final protected Observable<R> getExecutionObservable() {
         return construct();
     }
-    
+
     @Override
     final protected Observable<R> getFallbackObservable() {
         return resumeWithFallback();
