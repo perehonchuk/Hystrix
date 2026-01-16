@@ -318,8 +318,6 @@ import java.util.concurrent.atomic.AtomicReference;
      *             </ul>
      * @throws HystrixBadRequestException
      *             via {@code Observer#onError} if invalid arguments or state were used representing a user failure, not a system failure
-     * @throws IllegalStateException
-     *             if invoked more than once
      */
     public Observable<R> observe() {
         // us a ReplaySubject to buffer the eagerly subscribed-to Observable
@@ -346,8 +344,10 @@ import java.util.concurrent.atomic.AtomicReference;
      * <p>
      * An eager {@link Observable} can be obtained from {@link #observe()}.
      * <p>
+     * Commands are now reusable and can be invoked multiple times. Each execution will reset internal state automatically.
+     * <p>
      * See https://github.com/ReactiveX/RxJava/wiki for more information.
-     * 
+     *
      * @return {@code Observable<R>} that executes and calls back with the result of command execution or a fallback if the command fails for any reason.
      * @throws HystrixRuntimeException
      *             if a fallback does not exist
@@ -358,8 +358,6 @@ import java.util.concurrent.atomic.AtomicReference;
      *             </ul>
      * @throws HystrixBadRequestException
      *             via {@code Observer#onError} if invalid arguments or state were used representing a user failure, not a system failure
-     * @throws IllegalStateException
-     *             if invoked more than once
      */
     public Observable<R> toObservable() {
         final AbstractCommand<R> _cmd = this;
@@ -455,11 +453,14 @@ import java.util.concurrent.atomic.AtomicReference;
         return Observable.defer(new Func0<Observable<R>>() {
             @Override
             public Observable<R> call() {
-                 /* this is a stateful object so can only be used once */
+                 /* allow command reuse by resetting state for each execution */
                 if (!commandState.compareAndSet(CommandState.NOT_STARTED, CommandState.OBSERVABLE_CHAIN_CREATED)) {
-                    IllegalStateException ex = new IllegalStateException("This instance can only be executed once. Please instantiate a new instance.");
-                    //TODO make a new error type for this
-                    throw new HystrixRuntimeException(FailureType.BAD_REQUEST_EXCEPTION, _cmd.getClass(), getLogMessagePrefix() + " command executed multiple times - this is not permitted.", ex, null);
+                    // Command has been executed before - reset state for reuse
+                    resetCommandState();
+                    if (!commandState.compareAndSet(CommandState.NOT_STARTED, CommandState.OBSERVABLE_CHAIN_CREATED)) {
+                        IllegalStateException ex = new IllegalStateException("Failed to reset command state for reuse.");
+                        throw new HystrixRuntimeException(FailureType.BAD_REQUEST_EXCEPTION, _cmd.getClass(), getLogMessagePrefix() + " command state reset failed.", ex, null);
+                    }
                 }
 
                 commandStartTimestamp = System.currentTimeMillis();
@@ -1729,6 +1730,44 @@ import java.util.concurrent.atomic.AtomicReference;
 
     protected String getLogMessagePrefix() {
         return getCommandKey().name();
+    }
+
+    /**
+     * Resets the command state to allow reuse of the same command instance.
+     * This method is called automatically when a command is executed more than once.
+     */
+    private void resetCommandState() {
+        // Reset command state
+        commandState.set(CommandState.NOT_STARTED);
+        threadState.set(ThreadState.NOT_USING_THREAD);
+
+        // Reset execution result
+        executionResult = ExecutionResult.EMPTY;
+
+        // Reset response from cache flag
+        isResponseFromCache = false;
+
+        // Reset cancellation result
+        executionResultAtTimeOfCancellation = null;
+
+        // Reset start timestamp
+        commandStartTimestamp = -1L;
+
+        // Reset timeout status
+        isCommandTimedOut.set(TimedOutStatus.NOT_EXECUTED);
+
+        // Clear timeout timer
+        Reference<TimerListener> _timerReference = timeoutTimer.get();
+        if (_timerReference != null) {
+            TimerListener _listener = _timerReference.get();
+            if (_listener != null) {
+                _listener.clear();
+            }
+        }
+        timeoutTimer.set(null);
+
+        // Reset thread execution action
+        endCurrentThreadExecutingCommand = null;
     }
 
     /**

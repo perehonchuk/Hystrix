@@ -329,15 +329,15 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
 
     /**
      * Used for synchronous execution of command.
-     * 
+     * <p>
+     * Commands are now reusable and can be invoked multiple times. Each execution will reset internal state automatically.
+     *
      * @return R
      *         Result of {@link #run()} execution or a fallback from {@link #getFallback()} if the command fails for any reason.
      * @throws HystrixRuntimeException
      *             if a failure occurs and a fallback cannot be retrieved
      * @throws HystrixBadRequestException
      *             if invalid arguments or state were used representing a user failure, not a system failure
-     * @throws IllegalStateException
-     *             if invoked more than once
      */
     public R execute() {
         try {
@@ -355,7 +355,9 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * NOTE: If configured to not run in a separate thread, this will have the same effect as {@link #execute()} and will block.
      * <p>
      * We don't throw an exception but just flip to synchronous execution so code doesn't need to change in order to switch a command from running on a separate thread to the calling thread.
-     * 
+     * <p>
+     * Commands are now reusable and can be invoked multiple times. Each execution will reset internal state automatically.
+     *
      * @return {@code Future<R>} Result of {@link #run()} execution or a fallback from {@link #getFallback()} if the command fails for any reason.
      * @throws HystrixRuntimeException
      *             if a fallback does not exist
@@ -366,8 +368,6 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      *             </ul>
      * @throws HystrixBadRequestException
      *             via {@code Future.get()} in {@link ExecutionException#getCause()} if invalid arguments or state were used representing a user failure, not a system failure
-     * @throws IllegalStateException
-     *             if invoked more than once
      */
     public Future<R> queue() {
         /*
