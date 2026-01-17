@@ -103,6 +103,21 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                             return Observable.error(new IllegalArgumentException("Duplicate argument in collapser batch : [" + arg + "]  This is not supported.  Please turn request-caching on for HystrixCollapser:" + commandCollapser.getCollapserKey().name() + " or prevent duplicates from making it into the batch!"));
                         }
                     } else {
+                        // Check if eager execution should be triggered
+                        boolean eagerExecutionEnabled = properties.eagerExecutionEnabled().get();
+                        int eagerExecutionThreshold = properties.eagerExecutionThreshold().get();
+
+                        if (eagerExecutionEnabled && argumentMap.size() >= eagerExecutionThreshold) {
+                            // Trigger eager execution on a separate thread to avoid blocking the offer
+                            logger.debug("Triggering eager batch execution - size: {} threshold: {}", argumentMap.size(), eagerExecutionThreshold);
+                            new Thread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    executeBatchIfNotAlreadyStarted();
+                                }
+                            }, "HystrixCollapser-EagerExecution").start();
+                        }
+
                         return collapsedRequest.toObservable();
                     }
 
