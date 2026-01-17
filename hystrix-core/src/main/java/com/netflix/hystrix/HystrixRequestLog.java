@@ -72,6 +72,15 @@ public class HystrixRequestLog {
      */
     private LinkedBlockingQueue<HystrixInvokableInfo<?>> allExecutedCommands = new LinkedBlockingQueue<HystrixInvokableInfo<?>>(MAX_STORAGE);
 
+    /**
+     * Categorized command storage for better filtering and analysis.
+     * Commands are categorized based on their execution outcome.
+     */
+    private LinkedBlockingQueue<HystrixInvokableInfo<?>> successfulCommands = new LinkedBlockingQueue<HystrixInvokableInfo<?>>(MAX_STORAGE);
+    private LinkedBlockingQueue<HystrixInvokableInfo<?>> failedCommands = new LinkedBlockingQueue<HystrixInvokableInfo<?>>(MAX_STORAGE);
+    private LinkedBlockingQueue<HystrixInvokableInfo<?>> shortCircuitedCommands = new LinkedBlockingQueue<HystrixInvokableInfo<?>>(MAX_STORAGE);
+    private LinkedBlockingQueue<HystrixInvokableInfo<?>> timedOutCommands = new LinkedBlockingQueue<HystrixInvokableInfo<?>>(MAX_STORAGE);
+
     // prevent public instantiation
     private HystrixRequestLog() {
     }
@@ -109,7 +118,7 @@ public class HystrixRequestLog {
 
     /**
      * Retrieve {@link HystrixCommand} instances that were executed during this {@link HystrixRequestContext}.
-     * 
+     *
      * @return {@code Collection<HystrixCommand<?>>}
      */
     public Collection<HystrixInvokableInfo<?>> getAllExecutedCommands() {
@@ -117,8 +126,63 @@ public class HystrixRequestLog {
     }
 
     /**
+     * Retrieve {@link HystrixInvokableInfo} instances that completed successfully during this {@link HystrixRequestContext}.
+     * This includes commands that either succeeded directly or succeeded via fallback.
+     *
+     * @return {@code Collection<HystrixInvokableInfo<?>>}
+     */
+    public Collection<HystrixInvokableInfo<?>> getSuccessfulCommands() {
+        return Collections.unmodifiableCollection(successfulCommands);
+    }
+
+    /**
+     * Retrieve {@link HystrixInvokableInfo} instances that failed during this {@link HystrixRequestContext}.
+     * This includes commands with FAILURE, FALLBACK_FAILURE, or EXCEPTION_THROWN events.
+     *
+     * @return {@code Collection<HystrixInvokableInfo<?>>}
+     */
+    public Collection<HystrixInvokableInfo<?>> getFailedCommands() {
+        return Collections.unmodifiableCollection(failedCommands);
+    }
+
+    /**
+     * Retrieve {@link HystrixInvokableInfo} instances that were short-circuited during this {@link HystrixRequestContext}.
+     * Short-circuited commands are rejected immediately when the circuit breaker is open.
+     *
+     * @return {@code Collection<HystrixInvokableInfo<?>>}
+     */
+    public Collection<HystrixInvokableInfo<?>> getShortCircuitedCommands() {
+        return Collections.unmodifiableCollection(shortCircuitedCommands);
+    }
+
+    /**
+     * Retrieve {@link HystrixInvokableInfo} instances that timed out during this {@link HystrixRequestContext}.
+     *
+     * @return {@code Collection<HystrixInvokableInfo<?>>}
+     */
+    public Collection<HystrixInvokableInfo<?>> getTimedOutCommands() {
+        return Collections.unmodifiableCollection(timedOutCommands);
+    }
+
+    /**
+     * Get counts of commands by category for summary statistics.
+     * Returns a map with keys: "total", "successful", "failed", "short_circuited", "timed_out"
+     *
+     * @return {@code Map<String, Integer>} containing counts for each category
+     */
+    public Map<String, Integer> getCategoryCounts() {
+        Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
+        counts.put("total", allExecutedCommands.size());
+        counts.put("successful", successfulCommands.size());
+        counts.put("failed", failedCommands.size());
+        counts.put("short_circuited", shortCircuitedCommands.size());
+        counts.put("timed_out", timedOutCommands.size());
+        return Collections.unmodifiableMap(counts);
+    }
+
+    /**
      * Add {@link HystrixCommand} instance to the request log.
-     * 
+     *
      * @param command
      *            {@code HystrixCommand<?>}
      */
@@ -128,6 +192,9 @@ public class HystrixRequestLog {
             logger.warn("RequestLog ignoring command after reaching limit of " + MAX_STORAGE + ". See https://github.com/Netflix/Hystrix/issues/53 for more information.");
         }
 
+        // Categorize command based on execution events
+        categorizeCommand(command);
+
         // TODO remove this when deprecation completed
         if (command instanceof HystrixCommand) {
             @SuppressWarnings("rawtypes")
@@ -136,6 +203,38 @@ public class HystrixRequestLog {
                 // see RequestLog: Reduce Chance of Memory Leak https://github.com/Netflix/Hystrix/issues/53
                 logger.warn("RequestLog ignoring command after reaching limit of " + MAX_STORAGE + ". See https://github.com/Netflix/Hystrix/issues/53 for more information.");
             }
+        }
+    }
+
+    /**
+     * Categorize a command based on its execution events into appropriate category queues.
+     * A command can belong to multiple categories based on its execution outcome.
+     *
+     * @param command the command to categorize
+     */
+    private void categorizeCommand(HystrixInvokableInfo<?> command) {
+        List<HystrixEventType> events = new ArrayList<HystrixEventType>(command.getExecutionEvents());
+
+        // Check for short circuit
+        if (events.contains(HystrixEventType.SHORT_CIRCUITED)) {
+            shortCircuitedCommands.offer(command);
+        }
+
+        // Check for timeout
+        if (events.contains(HystrixEventType.TIMEOUT)) {
+            timedOutCommands.offer(command);
+        }
+
+        // Check for failure (failure, fallback_failure, or exceptions)
+        if (events.contains(HystrixEventType.FAILURE) ||
+            events.contains(HystrixEventType.FALLBACK_FAILURE) ||
+            events.contains(HystrixEventType.EXCEPTION_THROWN)) {
+            failedCommands.offer(command);
+        }
+        // Check for success (only if not failed)
+        else if (events.contains(HystrixEventType.SUCCESS) ||
+                 events.contains(HystrixEventType.FALLBACK_SUCCESS)) {
+            successfulCommands.offer(command);
         }
     }
 

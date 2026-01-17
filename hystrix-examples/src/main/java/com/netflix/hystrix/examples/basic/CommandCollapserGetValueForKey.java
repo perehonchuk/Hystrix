@@ -111,10 +111,15 @@ public class CommandCollapserGetValueForKey extends HystrixCollapser<List<String
 
                 System.err.println("HystrixRequestLog.getCurrentRequest().getAllExecutedCommands(): " + HystrixRequestLog.getCurrentRequest().getAllExecutedCommands());
 
+                // Use the new category-based retrieval
+                HystrixRequestLog requestLog = HystrixRequestLog.getCurrentRequest();
+                System.err.println("Successful commands: " + requestLog.getSuccessfulCommands().size());
+                System.err.println("Failed commands: " + requestLog.getFailedCommands().size());
+
                 int numLogs = 0;
-                for (HystrixInvokableInfo<?> command : HystrixRequestLog.getCurrentRequest().getAllExecutedCommands()) {
+                for (HystrixInvokableInfo<?> command : requestLog.getAllExecutedCommands()) {
                     numLogs++;
-                    
+
                     // assert the command is the one we're expecting
                     assertEquals("GetValueForKey", command.getCommandKey().name());
 
@@ -125,6 +130,8 @@ public class CommandCollapserGetValueForKey extends HystrixCollapser<List<String
                     assertTrue(command.getExecutionEvents().contains(HystrixEventType.SUCCESS));
                 }
 
+                // Verify commands appear in the successful category
+                assertEquals(numExecuted, requestLog.getSuccessfulCommands().size());
                 assertEquals(numExecuted, numLogs);
             } finally {
                 context.shutdown();

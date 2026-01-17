@@ -75,7 +75,12 @@ public class HystrixCommandDemo {
                 try {
                     executeSimulatedUserRequestForOrderConfirmationAndCreditCardPayment();
 
-                    System.out.println("Request => " + HystrixRequestLog.getCurrentRequest().getExecutedCommandsAsString());
+                    HystrixRequestLog log = HystrixRequestLog.getCurrentRequest();
+                    System.out.println("Request => " + log.getExecutedCommandsAsString());
+                    System.out.println("  Successful: " + log.getSuccessfulCommands().size() +
+                                       ", Failed: " + log.getFailedCommands().size() +
+                                       ", Short-Circuited: " + log.getShortCircuitedCommands().size() +
+                                       ", Timed Out: " + log.getTimedOutCommands().size());
                 } catch (Exception e) {
                     e.printStackTrace();
                 } finally {
