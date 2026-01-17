@@ -968,6 +968,8 @@ import java.util.concurrent.atomic.AtomicReference;
         executionResult = executionResult.setExecutionException(semaphoreRejectionException);
         eventNotifier.markEvent(HystrixEventType.SEMAPHORE_REJECTED, commandKey);
         logger.debug("HystrixCommand Execution Rejection by Semaphore."); // debug only since we're throwing the exception and someone higher will do something with it
+        // invoke execution hook for semaphore rejection
+        executionHook.onSemaphoreRejected(this, "execution");
         // retrieve a fallback or throw an exception if no fallback available
         return getFallbackOrThrowException(this, HystrixEventType.SEMAPHORE_REJECTED, FailureType.REJECTED_SEMAPHORE_EXECUTION,
                 "could not acquire a semaphore for execution", semaphoreRejectionException);
@@ -990,6 +992,8 @@ import java.util.concurrent.atomic.AtomicReference;
     private Observable<R> handleThreadPoolRejectionViaFallback(Exception underlying) {
         eventNotifier.markEvent(HystrixEventType.THREAD_POOL_REJECTED, commandKey);
         threadPool.markThreadRejection();
+        // invoke execution hook for thread pool rejection
+        executionHook.onThreadPoolRejected(this);
         // use a fallback instead (or throw exception if not implemented)
         return getFallbackOrThrowException(this, HystrixEventType.THREAD_POOL_REJECTED, FailureType.REJECTED_THREAD_EXECUTION, "could not be queued for execution", underlying);
     }
@@ -1040,6 +1044,8 @@ import java.util.concurrent.atomic.AtomicReference;
         eventNotifier.markEvent(HystrixEventType.FALLBACK_REJECTION, commandKey);
         executionResult = executionResult.addEvent((int) latencyWithFallback, HystrixEventType.FALLBACK_REJECTION);
         logger.debug("HystrixCommand Fallback Rejection."); // debug only since we're throwing the exception and someone higher will do something with it
+        // invoke execution hook for fallback semaphore rejection
+        executionHook.onSemaphoreRejected(this, "fallback");
         // if we couldn't acquire a permit, we "fail fast" by throwing an exception
         return Observable.error(new HystrixRuntimeException(FailureType.REJECTED_SEMAPHORE_FALLBACK, this.getClass(), getLogMessagePrefix() + " fallback execution rejected.", null, null));
     }
@@ -1145,6 +1151,10 @@ import java.util.concurrent.atomic.AtomicReference;
                     if (originalCommand.isCommandTimedOut.compareAndSet(TimedOutStatus.NOT_EXECUTED, TimedOutStatus.TIMED_OUT)) {
                         // report timeout failure
                         originalCommand.eventNotifier.markEvent(HystrixEventType.TIMEOUT, originalCommand.commandKey);
+
+                        // invoke execution hook for timeout
+                        long timeoutValue = originalCommand.properties.executionTimeoutInMilliseconds().get();
+                        originalCommand.executionHook.onTimeout(originalCommand, timeoutValue);
 
                         // shut down the original request
                         s.unsubscribe();

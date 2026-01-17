@@ -228,6 +228,42 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked when the command execution is rejected due to semaphore limits being reached.
+     * This applies to both execution semaphore and fallback semaphore rejections.
+     *
+     * @param commandInstance The HystrixInvokable instance that was rejected.
+     * @param semaphoreType The type of semaphore that caused the rejection ("execution" or "fallback")
+     *
+     * @since 1.6
+     */
+    public <T> void onSemaphoreRejected(HystrixInvokable<T> commandInstance, String semaphoreType) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the command execution is rejected due to the thread pool being full.
+     *
+     * @param commandInstance The HystrixInvokable instance that was rejected.
+     *
+     * @since 1.6
+     */
+    public <T> void onThreadPoolRejected(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when the command execution times out.
+     *
+     * @param commandInstance The HystrixInvokable instance that timed out.
+     * @param timeoutInMilliseconds The timeout value in milliseconds that was exceeded.
+     *
+     * @since 1.6
+     */
+    public <T> void onTimeout(HystrixInvokable<T> commandInstance, long timeoutInMilliseconds) {
+        //do nothing by default
+    }
+
+    /**
      * DEPRECATED: Change usages of this to {@link #onExecutionStart}.
      *
      * Invoked before {@link HystrixCommand#run()} is about to be executed.
