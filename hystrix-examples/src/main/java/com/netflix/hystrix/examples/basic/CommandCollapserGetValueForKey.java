@@ -40,14 +40,25 @@ import com.netflix.hystrix.strategy.concurrency.HystrixRequestContext;
 public class CommandCollapserGetValueForKey extends HystrixCollapser<List<String>, String, Integer> {
 
     private final Integer key;
+    private final int priority;
 
     public CommandCollapserGetValueForKey(Integer key) {
+        this(key, 5); // default priority
+    }
+
+    public CommandCollapserGetValueForKey(Integer key, int priority) {
         this.key = key;
+        this.priority = priority;
     }
 
     @Override
     public Integer getRequestArgument() {
         return key;
+    }
+
+    @Override
+    protected int getRequestPriority() {
+        return priority;
     }
 
     @Override
@@ -77,7 +88,8 @@ public class CommandCollapserGetValueForKey extends HystrixCollapser<List<String
             ArrayList<String> response = new ArrayList<String>();
             for (CollapsedRequest<String, Integer> request : requests) {
                 // artificial response for each argument received in the batch
-                response.add("ValueForKey: " + request.getArgument());
+                // include priority for demonstration
+                response.add("ValueForKey: " + request.getArgument() + " (priority=" + request.getPriority() + ")");
             }
             return response;
         }

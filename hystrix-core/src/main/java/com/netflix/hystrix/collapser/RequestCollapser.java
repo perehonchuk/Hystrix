@@ -83,6 +83,9 @@ public class RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType
             timerListenerReference.set(timer.addListener(new CollapsedTask()));
         }
 
+        // get priority from the collapser instance
+        int priority = commandCollapser.getRequestPriority();
+
         // loop until succeed (compare-and-set spin-loop)
         while (true) {
             final RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> b = batch.get();
@@ -92,9 +95,9 @@ public class RequestCollapser<BatchReturnType, ResponseType, RequestArgumentType
 
             final Observable<ResponseType> response;
             if (arg != null) {
-                response = b.offer(arg);
+                response = b.offer(arg, priority);
             } else {
-                response = b.offer( (RequestArgumentType) NULL_SENTINEL);
+                response = b.offer((RequestArgumentType) NULL_SENTINEL, priority);
             }
             // it will always get an Observable unless we hit the max batch size
             if (response != null) {

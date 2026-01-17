@@ -146,6 +146,11 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
         collapserInstanceWrapper = new HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType>() {
 
             @Override
+            public int getRequestPriority() {
+                return self.getRequestPriority();
+            }
+
+            @Override
             public Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = self.shardRequests(requests);
                 self.metrics.markShards(shards.size());
@@ -227,10 +232,23 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      * Typically this means to take the argument(s) provided to the constructor and return it here.
      * <p>
      * If there are multiple arguments that need to be bundled, create a single object to contain them, or use a Tuple.
-     * 
+     *
      * @return RequestArgumentType
      */
     public abstract RequestArgumentType getRequestArgument();
+
+    /**
+     * The priority of this request for batch ordering (0 = highest priority, higher numbers = lower priority).
+     * Default is 5 (normal priority).
+     * <p>
+     * When a batch is executed, requests are sorted by priority before being passed to createCommand(),
+     * allowing high-priority requests to be processed first within each batch.
+     *
+     * @return int priority level (default 5)
+     */
+    protected int getRequestPriority() {
+        return 5; // default normal priority
+    }
 
     /**
      * Factory method to create a new {@link HystrixCommand}{@code <BatchReturnType>} command object each time a batch needs to be executed.
@@ -504,10 +522,18 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
     public interface CollapsedRequest<ResponseType, RequestArgumentType> {
         /**
          * The request argument passed into the {@link HystrixCollapser} instance constructor which was then collapsed.
-         * 
+         *
          * @return RequestArgumentType
          */
         RequestArgumentType getArgument();
+
+        /**
+         * Get the priority level of this request (0 = highest priority, higher numbers = lower priority).
+         * Default priority is 5 (normal priority).
+         *
+         * @return int priority level
+         */
+        int getPriority();
 
         /**
          * This corresponds in a OnNext(Response); OnCompleted pair of emissions.  It represents a single-value usecase.
@@ -529,7 +555,7 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
 
         /**
          * When set, any Observer will be OnErrored this exception
-         * 
+         *
          * @param exception exception to set on response
          * @throws IllegalStateException
          *             if called more than once or after setResponse/setComplete.

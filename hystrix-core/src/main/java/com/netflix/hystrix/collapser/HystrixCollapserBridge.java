@@ -39,4 +39,6 @@ public interface HystrixCollapserBridge<BatchReturnType, ResponseType, RequestAr
 
     HystrixCollapserKey getCollapserKey();
 
+    int getRequestPriority();
+
 }
