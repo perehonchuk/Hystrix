@@ -165,13 +165,48 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             try {
                 // shard batches
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
-                for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
-                    try {
-                        // create a new command to handle this batch of requests
-                        Observable<BatchReturnType> o = commandCollapser.createObservableCommand(shardRequests);
 
-                        commandCollapser.mapResponseToRequests(o, shardRequests).doOnError(new Action1<Throwable>() {
+                // check if sequential shard execution is enabled
+                boolean sequentialExecution = properties.sequentialShardExecution().get();
+
+                if (sequentialExecution) {
+                    // Execute shards sequentially - each shard completes before the next one starts
+                    Observable<Void> sequentialChain = Observable.empty();
+                    for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
+                        sequentialChain = sequentialChain.concatWith(executeShard(shardRequests));
+                    }
+                    // Subscribe to trigger execution
+                    sequentialChain.subscribe();
+                } else {
+                    // Execute shards in parallel (original behavior)
+                    executeShardsParallel(shards);
+                }
+
+            } catch (Exception e) {
+                logger.error("Exception while sharding requests.", e);
+                // same error handling as we do around the shards, but this is a wider net in case the shardRequest method fails
+                for (CollapsedRequest<ResponseType, RequestArgumentType> request : argumentMap.values()) {
+                    try {
+                        request.setException(e);
+                    } catch (IllegalStateException e2) {
+                        logger.debug("Failed trying to setException on CollapsedRequest", e2);
+                    }
+                }
+            } finally {
+                batchLock.writeLock().unlock();
+            }
+        }
+    }
+
+    /**
+     * Execute a single shard and return an Observable that completes when the shard execution is done.
+     */
+    private Observable<Void> executeShard(final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests) {
+        try {
+            // create a new command to handle this batch of requests
+            Observable<BatchReturnType> o = commandCollapser.createObservableCommand(shardRequests);
+
+            return commandCollapser.mapResponseToRequests(o, shardRequests).doOnError(new Action1<Throwable>() {
 
                             /**
                              * This handles failed completions
@@ -217,33 +252,93 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                                 }
                             }
 
-                        }).subscribe();
-                        
-                    } catch (Exception e) {
-                        logger.error("Exception while creating and queueing command with batch.", e);
-                        // if a failure occurs we want to pass that exception to all of the Futures that we've returned
-                        for (CollapsedRequest<ResponseType, RequestArgumentType> request : shardRequests) {
-                            try {
-                                request.setException(e);
-                            } catch (IllegalStateException e2) {
-                                logger.debug("Failed trying to setException on CollapsedRequest", e2);
-                            }
+                        });
+        } catch (Exception e) {
+            logger.error("Exception while creating and queueing command with batch.", e);
+            // if a failure occurs we want to pass that exception to all of the Futures that we've returned
+            return Observable.error(e).doOnError(new Action1<Throwable>() {
+                @Override
+                public void call(Throwable throwable) {
+                    for (CollapsedRequest<ResponseType, RequestArgumentType> request : shardRequests) {
+                        try {
+                            request.setException(e);
+                        } catch (IllegalStateException e2) {
+                            logger.debug("Failed trying to setException on CollapsedRequest", e2);
                         }
                     }
                 }
+            }).cast(Void.class);
+        }
+    }
+
+    /**
+     * Execute shards in parallel (original behavior).
+     */
+    private void executeShardsParallel(Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards) {
+        // for each shard execute its requests
+        for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
+            try {
+                // create a new command to handle this batch of requests
+                Observable<BatchReturnType> o = commandCollapser.createObservableCommand(shardRequests);
+
+                commandCollapser.mapResponseToRequests(o, shardRequests).doOnError(new Action1<Throwable>() {
+
+                    /**
+                     * This handles failed completions
+                     */
+                    @Override
+                    public void call(Throwable e) {
+                        // handle Throwable in case anything is thrown so we don't block Observers waiting for onError/onCompleted
+                        Exception ee;
+                        if (e instanceof Exception) {
+                            ee = (Exception) e;
+                        } else {
+                            ee = new RuntimeException("Throwable caught while executing batch and mapping responses.", e);
+                        }
+                        logger.debug("Exception mapping responses to requests.", e);
+                        // if a failure occurs we want to pass that exception to all of the Futures that we've returned
+                        for (CollapsedRequest<ResponseType, RequestArgumentType> request : argumentMap.values()) {
+                            try {
+                                ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) request).setExceptionIfResponseNotReceived(ee);
+                            } catch (IllegalStateException e2) {
+                                // if we have partial responses set in mapResponseToRequests
+                                // then we may get IllegalStateException as we loop over them
+                                // so we'll log but continue to the rest
+                                logger.error("Partial success of 'mapResponseToRequests' resulted in IllegalStateException while setting Exception. Continuing ... ", e2);
+                            }
+                        }
+                    }
+
+                }).doOnCompleted(new Action0() {
+
+                    /**
+                     * This handles successful completions
+                     */
+                    @Override
+                    public void call() {
+                        // check that all requests had setResponse or setException invoked in case 'mapResponseToRequests' was implemented poorly
+                        Exception e = null;
+                        for (CollapsedRequest<ResponseType, RequestArgumentType> request : shardRequests) {
+                            try {
+                               e = ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) request).setExceptionIfResponseNotReceived(e,"No response set by " + commandCollapser.getCollapserKey().name() + " 'mapResponseToRequests' implementation.");
+                            } catch (IllegalStateException e2) {
+                                logger.debug("Partial success of 'mapResponseToRequests' resulted in IllegalStateException while setting 'No response set' Exception. Continuing ... ", e2);
+                            }
+                        }
+                    }
+
+                }).subscribe();
 
             } catch (Exception e) {
-                logger.error("Exception while sharding requests.", e);
-                // same error handling as we do around the shards, but this is a wider net in case the shardRequest method fails
-                for (CollapsedRequest<ResponseType, RequestArgumentType> request : argumentMap.values()) {
+                logger.error("Exception while creating and queueing command with batch.", e);
+                // if a failure occurs we want to pass that exception to all of the Futures that we've returned
+                for (CollapsedRequest<ResponseType, RequestArgumentType> request : shardRequests) {
                     try {
                         request.setException(e);
                     } catch (IllegalStateException e2) {
                         logger.debug("Failed trying to setException on CollapsedRequest", e2);
                     }
                 }
-            } finally {
-                batchLock.writeLock().unlock();
             }
         }
     }
