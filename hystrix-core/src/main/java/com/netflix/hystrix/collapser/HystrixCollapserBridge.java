@@ -33,6 +33,8 @@ public interface HystrixCollapserBridge<BatchReturnType, ResponseType, RequestAr
 
     Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
 
+    Collection<CollapsedRequest<ResponseType, RequestArgumentType>> orderRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
+
     Observable<BatchReturnType> createObservableCommand(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);
 
     Observable<Void> mapResponseToRequests(Observable<BatchReturnType> batchResponse, Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests);

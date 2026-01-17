@@ -153,6 +153,11 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
             }
 
             @Override
+            public Collection<CollapsedRequest<ResponseType, RequestArgumentType>> orderRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+                return self.orderRequests(requests);
+            }
+
+            @Override
             public Observable<BatchReturnType> createObservableCommand(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
                 final HystrixCommand<BatchReturnType> command = self.createCommand(requests);
 
@@ -266,6 +271,34 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      */
     protected Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
         return Collections.singletonList(requests);
+    }
+
+    /**
+     * Override to control the ordering of requests within a batch before execution.
+     * <p>
+     * This allows requests to be sorted or prioritized based on custom logic before being passed to {@link #createCommand}.
+     * The ordering can be used to optimize backend processing, implement priority-based execution, or ensure
+     * deterministic batch processing order.
+     * <p>
+     * For example, requests could be ordered by:
+     * <ul>
+     * <li>Priority level (high priority requests first)</li>
+     * <li>Request argument value (alphabetical, numerical sorting)</li>
+     * <li>Request creation time (FIFO or LIFO ordering)</li>
+     * <li>Custom business logic (VIP customers first, etc.)</li>
+     * </ul>
+     * <p>
+     * IMPORTANT: This method is called AFTER {@link #shardRequests}, so ordering happens within each shard.
+     * <p>
+     * By default this method returns the requests in their original (undefined) order.
+     *
+     * @param requests
+     *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects to be ordered
+     * @return {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} in the desired execution order
+     *         <p>The CollapsedRequest instances should not be modified or wrapped as the CollapsedRequest instance object contains state information needed to complete the execution.
+     */
+    protected Collection<CollapsedRequest<ResponseType, RequestArgumentType>> orderRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
+        return requests;
     }
 
     /**

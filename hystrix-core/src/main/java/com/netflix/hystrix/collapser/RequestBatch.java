@@ -165,13 +165,15 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
             try {
                 // shard batches
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(argumentMap.values());
-                // for each shard execute its requests 
+                // for each shard execute its requests
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
+                        // order requests within the shard
+                        final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> orderedRequests = commandCollapser.orderRequests(shardRequests);
                         // create a new command to handle this batch of requests
-                        Observable<BatchReturnType> o = commandCollapser.createObservableCommand(shardRequests);
+                        Observable<BatchReturnType> o = commandCollapser.createObservableCommand(orderedRequests);
 
-                        commandCollapser.mapResponseToRequests(o, shardRequests).doOnError(new Action1<Throwable>() {
+                        commandCollapser.mapResponseToRequests(o, orderedRequests).doOnError(new Action1<Throwable>() {
 
                             /**
                              * This handles failed completions
@@ -208,7 +210,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                             public void call() {
                                 // check that all requests had setResponse or setException invoked in case 'mapResponseToRequests' was implemented poorly
                                 Exception e = null;
-                                for (CollapsedRequest<ResponseType, RequestArgumentType> request : shardRequests) {
+                                for (CollapsedRequest<ResponseType, RequestArgumentType> request : orderedRequests) {
                                     try {
                                        e = ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) request).setExceptionIfResponseNotReceived(e,"No response set by " + commandCollapser.getCollapserKey().name() + " 'mapResponseToRequests' implementation.");
                                     } catch (IllegalStateException e2) {
@@ -218,11 +220,11 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                             }
 
                         }).subscribe();
-                        
+
                     } catch (Exception e) {
                         logger.error("Exception while creating and queueing command with batch.", e);
                         // if a failure occurs we want to pass that exception to all of the Futures that we've returned
-                        for (CollapsedRequest<ResponseType, RequestArgumentType> request : shardRequests) {
+                        for (CollapsedRequest<ResponseType, RequestArgumentType> request : orderedRequests) {
                             try {
                                 request.setException(e);
                             } catch (IllegalStateException e2) {
