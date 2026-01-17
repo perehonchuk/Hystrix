@@ -16,6 +16,7 @@
 package com.netflix.hystrix;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -146,6 +147,7 @@ public interface HystrixCircuitBreaker {
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicInteger halfOpenRequestCount = new AtomicInteger(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -204,6 +206,7 @@ public interface HystrixCircuitBreaker {
         public void markSuccess() {
             if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
                 //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                halfOpenRequestCount.set(0);
                 metrics.resetStream();
                 Subscription previousSubscription = activeSubscription.get();
                 if (previousSubscription != null) {
@@ -212,6 +215,9 @@ public interface HystrixCircuitBreaker {
                 Subscription newSubscription = subscribeToStream();
                 activeSubscription.set(newSubscription);
                 circuitOpened.set(-1L);
+            } else {
+                // Even if we didn't transition, decrement the half-open counter
+                halfOpenRequestCount.decrementAndGet();
             }
         }
 
@@ -219,7 +225,11 @@ public interface HystrixCircuitBreaker {
         public void markNonSuccess() {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
+                halfOpenRequestCount.set(0);
                 circuitOpened.set(System.currentTimeMillis());
+            } else {
+                // Even if we didn't transition, decrement the half-open counter
+                halfOpenRequestCount.decrementAndGet();
             }
         }
 
@@ -246,7 +256,8 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (status.get().equals(Status.HALF_OPEN)) {
-                    return false;
+                    // In HALF_OPEN state, allow requests up to the configured limit
+                    return halfOpenRequestCount.get() < properties.circuitBreakerHalfOpenRequestLimit().get();
                 } else {
                     return isAfterSleepWindow();
                 }
@@ -272,12 +283,29 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (isAfterSleepWindow()) {
-                    //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
-                    //if the executing command fails, the status will transition to OPEN
-                    //if the executing command gets unsubscribed, the status will transition to OPEN
+                    // Try to transition from OPEN to HALF_OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        // Successfully transitioned to HALF_OPEN, allow this request
+                        halfOpenRequestCount.incrementAndGet();
                         return true;
+                    } else if (status.get().equals(Status.HALF_OPEN)) {
+                        // Already in HALF_OPEN state, check if we can allow more requests
+                        int currentCount = halfOpenRequestCount.get();
+                        int limit = properties.circuitBreakerHalfOpenRequestLimit().get();
+
+                        if (currentCount < limit) {
+                            // Try to increment the counter
+                            int newCount = halfOpenRequestCount.incrementAndGet();
+                            if (newCount <= limit) {
+                                return true;
+                            } else {
+                                // We exceeded the limit, decrement and reject
+                                halfOpenRequestCount.decrementAndGet();
+                                return false;
+                            }
+                        } else {
+                            return false;
+                        }
                     } else {
                         return false;
                     }
