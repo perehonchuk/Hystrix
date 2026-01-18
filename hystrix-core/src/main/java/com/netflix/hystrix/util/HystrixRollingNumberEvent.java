@@ -34,7 +34,7 @@ public enum HystrixRollingNumberEvent {
     SUCCESS(1), FAILURE(1), TIMEOUT(1), SHORT_CIRCUITED(1), THREAD_POOL_REJECTED(1), SEMAPHORE_REJECTED(1), BAD_REQUEST(1),
     FALLBACK_SUCCESS(1), FALLBACK_FAILURE(1), FALLBACK_REJECTION(1), FALLBACK_DISABLED(1), FALLBACK_MISSING(1), EXCEPTION_THROWN(1), COMMAND_MAX_ACTIVE(2), EMIT(1), FALLBACK_EMIT(1),
     THREAD_EXECUTION(1), THREAD_MAX_ACTIVE(2), COLLAPSED(1), RESPONSE_FROM_CACHE(1),
-    COLLAPSER_REQUEST_BATCHED(1), COLLAPSER_BATCH(1);
+    COLLAPSER_REQUEST_BATCHED(1), COLLAPSER_BATCH(1), RETRY_ATTEMPTED(1), RETRY_SUCCESS(1), RETRY_EXHAUSTED(1);
 
     private final int type;
 
@@ -69,6 +69,9 @@ public enum HystrixRollingNumberEvent {
             case SUCCESS: return HystrixRollingNumberEvent.SUCCESS;
             case THREAD_POOL_REJECTED: return HystrixRollingNumberEvent.THREAD_POOL_REJECTED;
             case TIMEOUT: return HystrixRollingNumberEvent.TIMEOUT;
+            case RETRY_ATTEMPTED: return HystrixRollingNumberEvent.RETRY_ATTEMPTED;
+            case RETRY_SUCCESS: return HystrixRollingNumberEvent.RETRY_SUCCESS;
+            case RETRY_EXHAUSTED: return HystrixRollingNumberEvent.RETRY_EXHAUSTED;
             default: throw new RuntimeException("Unknown HystrixEventType : " + eventType);
         }
     }
