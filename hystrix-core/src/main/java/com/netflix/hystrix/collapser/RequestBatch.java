@@ -189,60 +189,12 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
                 // shard batches (now with priority-ordered requests)
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(sortedRequests);
-                // for each shard execute its requests 
+                // for each shard execute its requests
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests
-                        Observable<BatchReturnType> o = commandCollapser.createObservableCommand(shardRequests);
+                        executeBatchWithRetry(shardRequests, 0);
 
-                        commandCollapser.mapResponseToRequests(o, shardRequests).doOnError(new Action1<Throwable>() {
-
-                            /**
-                             * This handles failed completions
-                             */
-                            @Override
-                            public void call(Throwable e) {
-                                // handle Throwable in case anything is thrown so we don't block Observers waiting for onError/onCompleted
-                                Exception ee;
-                                if (e instanceof Exception) {
-                                    ee = (Exception) e;
-                                } else {
-                                    ee = new RuntimeException("Throwable caught while executing batch and mapping responses.", e);
-                                }
-                                logger.debug("Exception mapping responses to requests.", e);
-                                // if a failure occurs we want to pass that exception to all of the Futures that we've returned
-                                for (CollapsedRequest<ResponseType, RequestArgumentType> request : argumentMap.values()) {
-                                    try {
-                                        ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) request).setExceptionIfResponseNotReceived(ee);
-                                    } catch (IllegalStateException e2) {
-                                        // if we have partial responses set in mapResponseToRequests
-                                        // then we may get IllegalStateException as we loop over them
-                                        // so we'll log but continue to the rest
-                                        logger.error("Partial success of 'mapResponseToRequests' resulted in IllegalStateException while setting Exception. Continuing ... ", e2);
-                                    }
-                                }
-                            }
-
-                        }).doOnCompleted(new Action0() {
-
-                            /**
-                             * This handles successful completions
-                             */
-                            @Override
-                            public void call() {
-                                // check that all requests had setResponse or setException invoked in case 'mapResponseToRequests' was implemented poorly
-                                Exception e = null;
-                                for (CollapsedRequest<ResponseType, RequestArgumentType> request : shardRequests) {
-                                    try {
-                                       e = ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) request).setExceptionIfResponseNotReceived(e,"No response set by " + commandCollapser.getCollapserKey().name() + " 'mapResponseToRequests' implementation.");
-                                    } catch (IllegalStateException e2) {
-                                        logger.debug("Partial success of 'mapResponseToRequests' resulted in IllegalStateException while setting 'No response set' Exception. Continuing ... ", e2);
-                                    }
-                                }
-                            }
-
-                        }).subscribe();
-                        
                     } catch (Exception e) {
                         logger.error("Exception while creating and queueing command with batch.", e);
                         // if a failure occurs we want to pass that exception to all of the Futures that we've returned
@@ -270,6 +222,86 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 batchLock.writeLock().unlock();
             }
         }
+    }
+
+    /**
+     * Execute a batch of requests with automatic retry on failure.
+     * If batch failure retry is enabled and the batch fails, this method will split the batch
+     * into smaller sub-batches and retry them.
+     */
+    private void executeBatchWithRetry(final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests, final int retryAttempt) {
+        Observable<BatchReturnType> o = commandCollapser.createObservableCommand(requests);
+
+        commandCollapser.mapResponseToRequests(o, requests).doOnError(new Action1<Throwable>() {
+            /**
+             * This handles failed completions
+             */
+            @Override
+            public void call(Throwable e) {
+                // handle Throwable in case anything is thrown so we don't block Observers waiting for onError/onCompleted
+                Exception ee;
+                if (e instanceof Exception) {
+                    ee = (Exception) e;
+                } else {
+                    ee = new RuntimeException("Throwable caught while executing batch and mapping responses.", e);
+                }
+                logger.debug("Exception mapping responses to requests.", e);
+
+                // Check if we should retry with sub-batches
+                boolean shouldRetry = properties.batchFailureRetryEnabled().get() &&
+                                     retryAttempt < properties.batchFailureMaxRetries().get() &&
+                                     requests.size() > 1;
+
+                if (shouldRetry) {
+                    int subBatchSize = properties.batchFailureRetrySubBatchSize().get();
+                    logger.info("Batch execution failed, splitting into sub-batches of size {} for retry attempt {}", subBatchSize, retryAttempt + 1);
+
+                    // Split requests into sub-batches
+                    List<CollapsedRequest<ResponseType, RequestArgumentType>> requestList =
+                            new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>(requests);
+                    List<List<CollapsedRequest<ResponseType, RequestArgumentType>>> subBatches =
+                            new ArrayList<List<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+
+                    for (int i = 0; i < requestList.size(); i += subBatchSize) {
+                        int end = Math.min(i + subBatchSize, requestList.size());
+                        subBatches.add(requestList.subList(i, end));
+                    }
+
+                    // Execute each sub-batch with retry
+                    for (List<CollapsedRequest<ResponseType, RequestArgumentType>> subBatch : subBatches) {
+                        executeBatchWithRetry(subBatch, retryAttempt + 1);
+                    }
+                } else {
+                    // No retry, fail all requests
+                    for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+                        try {
+                            ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) request).setExceptionIfResponseNotReceived(ee);
+                        } catch (IllegalStateException e2) {
+                            // if we have partial responses set in mapResponseToRequests
+                            // then we may get IllegalStateException as we loop over them
+                            // so we'll log but continue to the rest
+                            logger.error("Partial success of 'mapResponseToRequests' resulted in IllegalStateException while setting Exception. Continuing ... ", e2);
+                        }
+                    }
+                }
+            }
+        }).doOnCompleted(new Action0() {
+            /**
+             * This handles successful completions
+             */
+            @Override
+            public void call() {
+                // check that all requests had setResponse or setException invoked in case 'mapResponseToRequests' was implemented poorly
+                Exception e = null;
+                for (CollapsedRequest<ResponseType, RequestArgumentType> request : requests) {
+                    try {
+                        e = ((CollapsedRequestSubject<ResponseType, RequestArgumentType>) request).setExceptionIfResponseNotReceived(e,"No response set by " + commandCollapser.getCollapserKey().name() + " 'mapResponseToRequests' implementation.");
+                    } catch (IllegalStateException e2) {
+                        logger.debug("Partial success of 'mapResponseToRequests' resulted in IllegalStateException while setting 'No response set' Exception. Continuing ... ", e2);
+                    }
+                }
+            }
+        }).subscribe();
     }
 
     public void shutdown() {

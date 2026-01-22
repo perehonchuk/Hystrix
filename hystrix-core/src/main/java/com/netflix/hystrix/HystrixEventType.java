@@ -130,7 +130,7 @@ public enum HystrixEventType {
     }
 
     public enum Collapser {
-        BATCH_EXECUTED, ADDED_TO_BATCH, RESPONSE_FROM_CACHE;
+        BATCH_EXECUTED, ADDED_TO_BATCH, RESPONSE_FROM_CACHE, BATCH_RETRY_ATTEMPTED, BATCH_SPLIT_FOR_RETRY;
 
         public static Collapser from(HystrixRollingNumberEvent event) {
             switch (event) {
