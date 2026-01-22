@@ -581,7 +581,19 @@ import java.util.concurrent.atomic.AtomicReference;
                     eventNotifier.markEvent(HystrixEventType.SUCCESS, commandKey);
                     executionResult = executionResult.addEvent((int) latency, HystrixEventType.SUCCESS);
                     eventNotifier.markCommandExecution(getCommandKey(), properties.executionIsolationStrategy().get(), (int) latency, executionResult.getOrderedList());
+
+                    //Mark success on circuit breaker and emit recovery events if applicable
+                    boolean wasRecovering = isCircuitBreakerRecovering();
                     circuitBreaker.markSuccess();
+                    if (wasRecovering) {
+                        eventNotifier.markEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERING_SUCCESS, commandKey);
+                        executionResult = executionResult.addEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERING_SUCCESS);
+                        if (!isCircuitBreakerRecovering()) {
+                            //Fully recovered
+                            eventNotifier.markEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERED, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERED);
+                        }
+                    }
                 }
             }
         };
@@ -594,7 +606,19 @@ import java.util.concurrent.atomic.AtomicReference;
                     eventNotifier.markEvent(HystrixEventType.SUCCESS, commandKey);
                     executionResult = executionResult.addEvent((int) latency, HystrixEventType.SUCCESS);
                     eventNotifier.markCommandExecution(getCommandKey(), properties.executionIsolationStrategy().get(), (int) latency, executionResult.getOrderedList());
+
+                    //Mark success on circuit breaker and emit recovery events if applicable
+                    boolean wasRecovering = isCircuitBreakerRecovering();
                     circuitBreaker.markSuccess();
+                    if (wasRecovering) {
+                        eventNotifier.markEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERING_SUCCESS, commandKey);
+                        executionResult = executionResult.addEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERING_SUCCESS);
+                        if (!isCircuitBreakerRecovering()) {
+                            //Fully recovered
+                            eventNotifier.markEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERED, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERED);
+                        }
+                    }
                 }
             }
         };
@@ -602,7 +626,17 @@ import java.util.concurrent.atomic.AtomicReference;
         final Func1<Throwable, Observable<R>> handleFallback = new Func1<Throwable, Observable<R>>() {
             @Override
             public Observable<R> call(Throwable t) {
+                boolean wasRecovering = isCircuitBreakerRecovering();
                 circuitBreaker.markNonSuccess();
+                if (wasRecovering) {
+                    eventNotifier.markEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERING_FAILURE, commandKey);
+                    executionResult = executionResult.addEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERING_FAILURE);
+                    if (!isCircuitBreakerRecovering()) {
+                        //Recovery failed - circuit reopened
+                        eventNotifier.markEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERY_FAILED, commandKey);
+                        executionResult = executionResult.addEvent(HystrixEventType.CIRCUIT_BREAKER_RECOVERY_FAILED);
+                    }
+                }
                 Exception e = getExceptionFromThrowable(t);
                 executionResult = executionResult.setExecutionException(e);
                 if (e instanceof RejectedExecutionException) {
@@ -1753,8 +1787,21 @@ import java.util.concurrent.atomic.AtomicReference;
     }
 
     /**
+     * Whether the circuit breaker is currently in RECOVERING state.
+     *
+     * @return boolean
+     */
+    private boolean isCircuitBreakerRecovering() {
+        if (circuitBreaker instanceof HystrixCircuitBreaker.HystrixCircuitBreakerImpl) {
+            HystrixCircuitBreaker.HystrixCircuitBreakerImpl impl = (HystrixCircuitBreaker.HystrixCircuitBreakerImpl) circuitBreaker;
+            return impl.isRecovering();
+        }
+        return false;
+    }
+
+    /**
      * If this command has completed execution either successfully, via fallback or failure.
-     * 
+     *
      * @return boolean
      */
     public boolean isExecutionComplete() {

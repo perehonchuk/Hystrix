@@ -140,12 +140,15 @@ public interface HystrixCircuitBreaker {
         private final HystrixCommandMetrics metrics;
 
         enum Status {
-            CLOSED, OPEN, HALF_OPEN;
+            CLOSED, OPEN, HALF_OPEN, RECOVERING;
         }
 
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicLong recoveringStarted = new AtomicLong(-1);
+        private final AtomicLong successfulRequestsInRecovery = new AtomicLong(0);
+        private final AtomicLong totalRequestsInRecovery = new AtomicLong(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -202,16 +205,35 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            if (status.compareAndSet(Status.HALF_OPEN, Status.RECOVERING)) {
+                //This thread wins the race to transition to RECOVERING state
+                //In RECOVERING, we gradually increase traffic to test stability
+                recoveringStarted.set(System.currentTimeMillis());
+                successfulRequestsInRecovery.set(1);
+                totalRequestsInRecovery.set(1);
+            } else if (status.get().equals(Status.RECOVERING)) {
+                //Already in RECOVERING state, track this success
+                long successful = successfulRequestsInRecovery.incrementAndGet();
+                long total = totalRequestsInRecovery.incrementAndGet();
+
+                //Check if we've met the threshold to fully close the circuit
+                //Need at least 10 successful requests with >80% success rate
+                if (total >= 10 && (successful * 100 / total) >= 80) {
+                    if (status.compareAndSet(Status.RECOVERING, Status.CLOSED)) {
+                        //Fully recovered - reset everything
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+                        recoveringStarted.set(-1L);
+                        successfulRequestsInRecovery.set(0);
+                        totalRequestsInRecovery.set(0);
+                    }
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
             }
         }
 
@@ -220,6 +242,21 @@ public interface HystrixCircuitBreaker {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+            } else if (status.get().equals(Status.RECOVERING)) {
+                //Track failures during recovery
+                long total = totalRequestsInRecovery.incrementAndGet();
+                long successful = successfulRequestsInRecovery.get();
+
+                //If failure rate exceeds 20%, reopen the circuit
+                if (total >= 5 && (successful * 100 / total) < 80) {
+                    if (status.compareAndSet(Status.RECOVERING, Status.OPEN)) {
+                        //Recovery failed - reopen the circuit
+                        circuitOpened.set(System.currentTimeMillis());
+                        recoveringStarted.set(-1L);
+                        successfulRequestsInRecovery.set(0);
+                        totalRequestsInRecovery.set(0);
+                    }
+                }
             }
         }
 
@@ -234,6 +271,16 @@ public interface HystrixCircuitBreaker {
             return circuitOpened.get() >= 0;
         }
 
+        /**
+         * Check if the circuit breaker is currently in RECOVERING state.
+         * Package-private for use by AbstractCommand.
+         *
+         * @return true if in RECOVERING state
+         */
+        /* package */ boolean isRecovering() {
+            return status.get().equals(Status.RECOVERING);
+        }
+
         @Override
         public boolean allowRequest() {
             if (properties.circuitBreakerForceOpen().get()) {
@@ -245,8 +292,16 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (status.get().equals(Status.HALF_OPEN)) {
+                Status currentStatus = status.get();
+                if (currentStatus.equals(Status.HALF_OPEN)) {
                     return false;
+                } else if (currentStatus.equals(Status.RECOVERING)) {
+                    //In RECOVERING state, allow only a percentage of requests through
+                    //Start at 25% and gradually increase based on time in recovery
+                    long timeInRecovery = System.currentTimeMillis() - recoveringStarted.get();
+                    int allowedPercentage = Math.min(25 + (int)(timeInRecovery / 1000), 100);
+                    //Use simple modulo for deterministic distribution
+                    return (System.nanoTime() % 100) < allowedPercentage;
                 } else {
                     return isAfterSleepWindow();
                 }
@@ -271,9 +326,15 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (isAfterSleepWindow()) {
+                Status currentStatus = status.get();
+                if (currentStatus.equals(Status.RECOVERING)) {
+                    //In RECOVERING state, allow requests based on percentage
+                    long timeInRecovery = System.currentTimeMillis() - recoveringStarted.get();
+                    int allowedPercentage = Math.min(25 + (int)(timeInRecovery / 1000), 100);
+                    return (System.nanoTime() % 100) < allowedPercentage;
+                } else if (isAfterSleepWindow()) {
                     //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
+                    //if the executing command succeeds, the status will transition to RECOVERING
                     //if the executing command fails, the status will transition to OPEN
                     //if the executing command gets unsubscribed, the status will transition to OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
