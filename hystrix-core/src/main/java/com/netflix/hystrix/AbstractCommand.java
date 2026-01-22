@@ -863,6 +863,39 @@ import java.util.concurrent.atomic.AtomicReference;
                         fallbackExecutionChain = Observable.error(ex);
                     }
 
+                    // Apply retry logic if configured
+                    final int retryCount = properties.fallbackRetryCount().get();
+                    final int retryDelay = properties.fallbackRetryDelayInMilliseconds().get();
+
+                    if (retryCount > 0) {
+                        fallbackExecutionChain = fallbackExecutionChain.retryWhen(new rx.functions.Func1<Observable<? extends Throwable>, Observable<?>>() {
+                            @Override
+                            public Observable<?> call(Observable<? extends Throwable> attempts) {
+                                return attempts.zipWith(Observable.range(1, retryCount + 1), new rx.functions.Func2<Throwable, Integer, Integer>() {
+                                    @Override
+                                    public Integer call(Throwable throwable, Integer attemptNumber) {
+                                        return attemptNumber;
+                                    }
+                                }).flatMap(new rx.functions.Func1<Integer, Observable<?>>() {
+                                    @Override
+                                    public Observable<?> call(Integer attemptNumber) {
+                                        if (attemptNumber > retryCount) {
+                                            return Observable.error(new RuntimeException("Fallback retries exhausted"));
+                                        }
+                                        // Mark retry event
+                                        eventNotifier.markEvent(HystrixEventType.FALLBACK_RETRY, commandKey);
+                                        executionResult = executionResult.addEvent(HystrixEventType.FALLBACK_RETRY);
+                                        // Add delay before retry
+                                        if (retryDelay > 0) {
+                                            return Observable.timer(retryDelay, java.util.concurrent.TimeUnit.MILLISECONDS);
+                                        }
+                                        return Observable.just(attemptNumber);
+                                    }
+                                });
+                            }
+                        });
+                    }
+
                     return fallbackExecutionChain
                             .doOnEach(setRequestContext)
                             .lift(new FallbackHookApplication(_cmd))
