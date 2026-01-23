@@ -268,12 +268,24 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
 
 	/**
      * Implement this method with code to be executed when {@link #execute()} or {@link #queue()} are invoked.
-     * 
+     *
      * @return R response type
      * @throws Exception
      *             if command execution fails
      */
     protected abstract R run() throws Exception;
+
+    /**
+     * Optional warmup method that will be invoked before {@link #run()} if warmup is enabled.
+     * This allows commands to perform initialization, cache warming, or health checks before processing real requests.
+     * <p>
+     * DEFAULT BEHAVIOR: Does nothing (no-op).
+     *
+     * @throws Exception if warmup fails
+     */
+    protected void warmup() throws Exception {
+        // Default implementation does nothing
+    }
 
     /**
      * If {@link #execute()} or {@link #queue()} fails in any way then this method will be invoked to provide an opportunity to return a fallback response.

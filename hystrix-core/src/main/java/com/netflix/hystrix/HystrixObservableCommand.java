@@ -229,6 +229,18 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
     protected abstract Observable<R> construct();
 
     /**
+     * Optional warmup method that will be invoked before {@link #construct()} if warmup is enabled.
+     * This allows commands to perform initialization, cache warming, or health checks before processing real requests.
+     * <p>
+     * DEFAULT BEHAVIOR: Emits nothing (empty Observable).
+     *
+     * @return Observable that performs warmup, or empty Observable
+     */
+    protected Observable<Void> warmup() {
+        return Observable.empty();
+    }
+
+    /**
      * If {@link #observe()} or {@link #toObservable()} fails in any way then this method will be invoked to provide an opportunity to return a fallback response.
      * <p>
      * This should do work that does not require network transport to produce.

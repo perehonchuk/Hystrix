@@ -892,9 +892,61 @@ import java.util.concurrent.atomic.AtomicReference;
             userObservable = Observable.error(ex);
         }
 
+        // Apply warmup if enabled
+        if (properties.warmupEnabled().get()) {
+            final long warmupTimeout = properties.warmupTimeoutInMilliseconds().get();
+            userObservable = executeWarmup(_cmd, warmupTimeout)
+                    .flatMap(new Func1<Void, Observable<R>>() {
+                        @Override
+                        public Observable<R> call(Void aVoid) {
+                            return userObservable;
+                        }
+                    });
+        }
+
         return userObservable
                 .lift(new ExecutionHookApplication(_cmd))
                 .lift(new DeprecatedOnRunHookApplication(_cmd));
+    }
+
+    private Observable<Void> executeWarmup(final AbstractCommand<R> _cmd, long timeoutInMilliseconds) {
+        Observable<Void> warmupObservable;
+
+        try {
+            if (_cmd instanceof HystrixCommand) {
+                // For HystrixCommand, execute warmup method and convert to Observable
+                warmupObservable = Observable.defer(new Func0<Observable<Void>>() {
+                    @Override
+                    public Observable<Void> call() {
+                        try {
+                            ((HystrixCommand<R>) _cmd).warmup();
+                            return Observable.just(null);
+                        } catch (Throwable ex) {
+                            return Observable.error(ex);
+                        }
+                    }
+                });
+            } else if (_cmd instanceof HystrixObservableCommand) {
+                // For HystrixObservableCommand, use the warmup Observable directly
+                warmupObservable = ((HystrixObservableCommand<R>) _cmd).warmup();
+            } else {
+                // Fallback: no warmup
+                warmupObservable = Observable.just(null);
+            }
+        } catch (Throwable ex) {
+            warmupObservable = Observable.error(ex);
+        }
+
+        // Apply timeout to warmup
+        return warmupObservable.timeout(timeoutInMilliseconds, TimeUnit.MILLISECONDS)
+                .onErrorResumeNext(new Func1<Throwable, Observable<Void>>() {
+                    @Override
+                    public Observable<Void> call(Throwable throwable) {
+                        // Log warmup failure but continue with execution
+                        logger.warn("Warmup failed or timed out for command: " + _cmd.getCommandKey().name(), throwable);
+                        return Observable.just(null);
+                    }
+                });
     }
 
     private Observable<R> handleRequestCacheHitAndEmitValues(final HystrixCommandResponseFromCache<R> fromCache, final AbstractCommand<R> _cmd) {
