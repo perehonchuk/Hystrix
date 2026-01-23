@@ -140,12 +140,14 @@ public interface HystrixCircuitBreaker {
         private final HystrixCommandMetrics metrics;
 
         enum Status {
-            CLOSED, OPEN, HALF_OPEN;
+            CLOSED, OPEN, HALF_OPEN, RECOVERING;
         }
 
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
+        private final AtomicLong consecutiveSuccesses = new AtomicLong(0);
+        private final AtomicLong recoveringRequests = new AtomicLong(0);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
             this.properties = properties;
@@ -202,24 +204,54 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.CLOSED)) {
-                //This thread wins the race to close the circuit - it resets the stream to start it over from 0
-                metrics.resetStream();
-                Subscription previousSubscription = activeSubscription.get();
-                if (previousSubscription != null) {
-                    previousSubscription.unsubscribe();
+            Status currentStatus = status.get();
+
+            if (currentStatus == Status.HALF_OPEN) {
+                // Transition from HALF_OPEN to RECOVERING state
+                if (status.compareAndSet(Status.HALF_OPEN, Status.RECOVERING)) {
+                    consecutiveSuccesses.set(1);
                 }
-                Subscription newSubscription = subscribeToStream();
-                activeSubscription.set(newSubscription);
-                circuitOpened.set(-1L);
+            } else if (currentStatus == Status.RECOVERING) {
+                // Increment consecutive successes
+                long successes = consecutiveSuccesses.incrementAndGet();
+
+                // After 10 consecutive successes, fully close the circuit
+                if (successes >= 10) {
+                    if (status.compareAndSet(Status.RECOVERING, Status.CLOSED)) {
+                        //This thread wins the race to close the circuit - it resets the stream to start it over from 0
+                        metrics.resetStream();
+                        Subscription previousSubscription = activeSubscription.get();
+                        if (previousSubscription != null) {
+                            previousSubscription.unsubscribe();
+                        }
+                        Subscription newSubscription = subscribeToStream();
+                        activeSubscription.set(newSubscription);
+                        circuitOpened.set(-1L);
+                        consecutiveSuccesses.set(0);
+                        recoveringRequests.set(0);
+                    }
+                }
             }
         }
 
         @Override
         public void markNonSuccess() {
-            if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
-                //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
-                circuitOpened.set(System.currentTimeMillis());
+            Status currentStatus = status.get();
+
+            if (currentStatus == Status.HALF_OPEN) {
+                if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
+                    //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
+                    circuitOpened.set(System.currentTimeMillis());
+                    consecutiveSuccesses.set(0);
+                    recoveringRequests.set(0);
+                }
+            } else if (currentStatus == Status.RECOVERING) {
+                // Failure during recovery - reset back to OPEN
+                if (status.compareAndSet(Status.RECOVERING, Status.OPEN)) {
+                    circuitOpened.set(System.currentTimeMillis());
+                    consecutiveSuccesses.set(0);
+                    recoveringRequests.set(0);
+                }
             }
         }
 
@@ -245,8 +277,18 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (status.get().equals(Status.HALF_OPEN)) {
+                Status currentStatus = status.get();
+                if (currentStatus == Status.HALF_OPEN) {
                     return false;
+                } else if (currentStatus == Status.RECOVERING) {
+                    // Gradually increase allowed traffic during recovery
+                    // Allow a percentage based on consecutive successes (10% per success, up to 100%)
+                    long successes = consecutiveSuccesses.get();
+                    int allowedPercentage = (int) Math.min(10 + (successes * 10), 100);
+
+                    // Use request counter to determine if this request falls within allowed percentage
+                    long requestNum = recoveringRequests.incrementAndGet();
+                    return (requestNum % 100) < allowedPercentage;
                 } else {
                     return isAfterSleepWindow();
                 }
@@ -271,9 +313,14 @@ public interface HystrixCircuitBreaker {
             if (circuitOpened.get() == -1) {
                 return true;
             } else {
-                if (isAfterSleepWindow()) {
+                Status currentStatus = status.get();
+
+                if (currentStatus == Status.RECOVERING) {
+                    // During recovery, use the allowRequest logic to determine execution
+                    return allowRequest();
+                } else if (isAfterSleepWindow()) {
                     //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
+                    //if the executing command succeeds, the status will transition to RECOVERING
                     //if the executing command fails, the status will transition to OPEN
                     //if the executing command gets unsubscribed, the status will transition to OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
