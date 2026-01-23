@@ -646,8 +646,41 @@ import java.util.concurrent.atomic.AtomicReference;
                 .doOnEach(setRequestContext);
     }
 
+    /**
+     * Determines the effective isolation strategy to use for command execution.
+     * If the configured strategy is ADAPTIVE, examines recent latency metrics to decide
+     * between THREAD and SEMAPHORE isolation. Low-latency commands use SEMAPHORE for
+     * efficiency, while higher-latency commands use THREAD for timeout and bulkhead benefits.
+     */
+    private ExecutionIsolationStrategy determineEffectiveIsolationStrategy() {
+        ExecutionIsolationStrategy configuredStrategy = properties.executionIsolationStrategy().get();
+
+        if (configuredStrategy != ExecutionIsolationStrategy.ADAPTIVE) {
+            return configuredStrategy;
+        }
+
+        // For ADAPTIVE mode, examine recent latency patterns
+        int latencyThreshold = properties.executionIsolationAdaptiveLatencyThresholdInMilliseconds().get();
+
+        // Get the 99th percentile latency from metrics
+        int p99Latency = metrics.getExecutionTimePercentile(99);
+
+        // If we don't have enough data yet, default to THREAD for safety
+        if (p99Latency < 0) {
+            return ExecutionIsolationStrategy.THREAD;
+        }
+
+        // Use SEMAPHORE for low-latency commands (< threshold), THREAD for higher latency
+        if (p99Latency < latencyThreshold) {
+            return ExecutionIsolationStrategy.SEMAPHORE;
+        } else {
+            return ExecutionIsolationStrategy.THREAD;
+        }
+    }
+
     private Observable<R> executeCommandWithSpecifiedIsolation(final AbstractCommand<R> _cmd) {
-        if (properties.executionIsolationStrategy().get() == ExecutionIsolationStrategy.THREAD) {
+        ExecutionIsolationStrategy effectiveStrategy = determineEffectiveIsolationStrategy();
+        if (effectiveStrategy == ExecutionIsolationStrategy.THREAD) {
             // mark that we are executing in a thread (even if we end up being rejected we still were a THREAD execution and not SEMAPHORE)
             return Observable.defer(new Func0<Observable<R>>() {
                 @Override
@@ -1254,7 +1287,8 @@ import java.util.concurrent.atomic.AtomicReference;
      * @return TryableSemaphore
      */
     protected TryableSemaphore getExecutionSemaphore() {
-        if (properties.executionIsolationStrategy().get() == ExecutionIsolationStrategy.SEMAPHORE) {
+        ExecutionIsolationStrategy strategy = properties.executionIsolationStrategy().get();
+        if (strategy == ExecutionIsolationStrategy.SEMAPHORE || strategy == ExecutionIsolationStrategy.ADAPTIVE) {
             if (executionSemaphoreOverride == null) {
                 TryableSemaphore _s = executionSemaphorePerCircuit.get(commandKey.name());
                 if (_s == null) {
