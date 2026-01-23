@@ -58,6 +58,14 @@ public abstract class HystrixThreadPoolProperties {
     static int default_threadPoolRollingNumberStatisticalWindow = 10000; // milliseconds for rolling number
     static int default_threadPoolRollingNumberStatisticalWindowBuckets = 10; // number of buckets in rolling number (10 1-second buckets)
 
+    // Adaptive thread pool scaling defaults
+    static boolean default_adaptiveScalingEnabled = false; // disabled by default for backward compatibility
+    static int default_adaptiveScalingLatencyThresholdInMilliseconds = 200; // latency threshold that triggers scaling
+    static int default_adaptiveScalingEvaluationIntervalInMilliseconds = 30000; // evaluate every 30 seconds
+    static int default_adaptiveScalingMinSize = 5; // minimum pool size
+    static int default_adaptiveScalingMaxSize = 50; // maximum pool size
+    static double default_adaptiveScalingTargetUtilization = 0.75; // target 75% thread utilization
+
     private final HystrixProperty<Integer> corePoolSize;
     private final HystrixProperty<Integer> maximumPoolSize;
     private final HystrixProperty<Integer> keepAliveTime;
@@ -67,6 +75,13 @@ public abstract class HystrixThreadPoolProperties {
 
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowInMilliseconds;
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowBuckets;
+
+    private final HystrixProperty<Boolean> adaptiveScalingEnabled;
+    private final HystrixProperty<Integer> adaptiveScalingLatencyThreshold;
+    private final HystrixProperty<Integer> adaptiveScalingEvaluationInterval;
+    private final HystrixProperty<Integer> adaptiveScalingMinSize;
+    private final HystrixProperty<Integer> adaptiveScalingMaxSize;
+    private final HystrixProperty<Double> adaptiveScalingTargetUtilization;
 
     protected HystrixThreadPoolProperties(HystrixThreadPoolKey key) {
         this(key, new Setter(), "hystrix");
@@ -90,6 +105,13 @@ public abstract class HystrixThreadPoolProperties {
         this.queueSizeRejectionThreshold = getProperty(propertyPrefix, key, "queueSizeRejectionThreshold", builder.getQueueSizeRejectionThreshold(), default_queueSizeRejectionThreshold);
         this.threadPoolRollingNumberStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_threadPoolRollingNumberStatisticalWindow);
         this.threadPoolRollingNumberStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_threadPoolRollingNumberStatisticalWindowBuckets);
+
+        this.adaptiveScalingEnabled = getProperty(propertyPrefix, key, "adaptiveScaling.enabled", builder.getAdaptiveScalingEnabled(), default_adaptiveScalingEnabled);
+        this.adaptiveScalingLatencyThreshold = getProperty(propertyPrefix, key, "adaptiveScaling.latencyThresholdInMilliseconds", builder.getAdaptiveScalingLatencyThreshold(), default_adaptiveScalingLatencyThresholdInMilliseconds);
+        this.adaptiveScalingEvaluationInterval = getProperty(propertyPrefix, key, "adaptiveScaling.evaluationIntervalInMilliseconds", builder.getAdaptiveScalingEvaluationInterval(), default_adaptiveScalingEvaluationIntervalInMilliseconds);
+        this.adaptiveScalingMinSize = getProperty(propertyPrefix, key, "adaptiveScaling.minSize", builder.getAdaptiveScalingMinSize(), default_adaptiveScalingMinSize);
+        this.adaptiveScalingMaxSize = getProperty(propertyPrefix, key, "adaptiveScaling.maxSize", builder.getAdaptiveScalingMaxSize(), default_adaptiveScalingMaxSize);
+        this.adaptiveScalingTargetUtilization = getPropertyForDouble(propertyPrefix, key, "adaptiveScaling.targetUtilization", builder.getAdaptiveScalingTargetUtilization(), default_adaptiveScalingTargetUtilization);
     }
 
     private static HystrixProperty<Integer> getProperty(String propertyPrefix, HystrixThreadPoolKey key, String instanceProperty, Integer builderOverrideValue, Integer defaultValue) {
@@ -104,6 +126,18 @@ public abstract class HystrixThreadPoolProperties {
                 .add(propertyPrefix + ".threadpool." + key.name() + "." + instanceProperty, builderOverrideValue)
                 .add(propertyPrefix + ".threadpool.default." + instanceProperty, defaultValue)
                 .build();
+    }
+
+    private static HystrixProperty<Double> getPropertyForDouble(String propertyPrefix, HystrixThreadPoolKey key, String instanceProperty, Double builderOverrideValue, Double defaultValue) {
+        return new HystrixProperty<Double>() {
+            @Override
+            public Double get() {
+                if (builderOverrideValue != null) {
+                    return builderOverrideValue;
+                }
+                return defaultValue;
+            }
+        };
     }
 
     /**
@@ -197,11 +231,68 @@ public abstract class HystrixThreadPoolProperties {
 
     /**
      * Number of buckets the rolling statistical window is broken into. This is passed into {@link HystrixRollingNumber} inside each {@link HystrixThreadPoolMetrics} instance.
-     * 
+     *
      * @return {@code HystrixProperty<Integer>}
      */
     public HystrixProperty<Integer> metricsRollingStatisticalWindowBuckets() {
         return threadPoolRollingNumberStatisticalWindowBuckets;
+    }
+
+    /**
+     * Whether adaptive thread pool scaling is enabled.
+     * When enabled, the thread pool size automatically adjusts based on observed execution latency and utilization patterns.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> adaptiveScalingEnabled() {
+        return adaptiveScalingEnabled;
+    }
+
+    /**
+     * Latency threshold in milliseconds that triggers adaptive scaling evaluation.
+     * When average execution latency exceeds this threshold, the pool may scale up if utilization is high.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> adaptiveScalingLatencyThreshold() {
+        return adaptiveScalingLatencyThreshold;
+    }
+
+    /**
+     * Interval in milliseconds between adaptive scaling evaluations.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> adaptiveScalingEvaluationInterval() {
+        return adaptiveScalingEvaluationInterval;
+    }
+
+    /**
+     * Minimum allowed thread pool size for adaptive scaling.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> adaptiveScalingMinSize() {
+        return adaptiveScalingMinSize;
+    }
+
+    /**
+     * Maximum allowed thread pool size for adaptive scaling.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> adaptiveScalingMaxSize() {
+        return adaptiveScalingMaxSize;
+    }
+
+    /**
+     * Target thread utilization ratio (0.0 to 1.0) for adaptive scaling.
+     * Scaling decisions aim to maintain this utilization level.
+     *
+     * @return {@code HystrixProperty<Double>}
+     */
+    public HystrixProperty<Double> adaptiveScalingTargetUtilization() {
+        return adaptiveScalingTargetUtilization;
     }
 
     /**
@@ -246,6 +337,13 @@ public abstract class HystrixThreadPoolProperties {
         private Integer rollingStatisticalWindowInMilliseconds = null;
         private Integer rollingStatisticalWindowBuckets = null;
 
+        private Boolean adaptiveScalingEnabled = null;
+        private Integer adaptiveScalingLatencyThreshold = null;
+        private Integer adaptiveScalingEvaluationInterval = null;
+        private Integer adaptiveScalingMinSize = null;
+        private Integer adaptiveScalingMaxSize = null;
+        private Double adaptiveScalingTargetUtilization = null;
+
         private Setter() {
         }
 
@@ -279,6 +377,30 @@ public abstract class HystrixThreadPoolProperties {
 
         public Integer getMetricsRollingStatisticalWindowBuckets() {
             return rollingStatisticalWindowBuckets;
+        }
+
+        public Boolean getAdaptiveScalingEnabled() {
+            return adaptiveScalingEnabled;
+        }
+
+        public Integer getAdaptiveScalingLatencyThreshold() {
+            return adaptiveScalingLatencyThreshold;
+        }
+
+        public Integer getAdaptiveScalingEvaluationInterval() {
+            return adaptiveScalingEvaluationInterval;
+        }
+
+        public Integer getAdaptiveScalingMinSize() {
+            return adaptiveScalingMinSize;
+        }
+
+        public Integer getAdaptiveScalingMaxSize() {
+            return adaptiveScalingMaxSize;
+        }
+
+        public Double getAdaptiveScalingTargetUtilization() {
+            return adaptiveScalingTargetUtilization;
         }
 
         public Setter withCoreSize(int value) {
@@ -321,8 +443,34 @@ public abstract class HystrixThreadPoolProperties {
             return this;
         }
 
+        public Setter withAdaptiveScalingEnabled(boolean value) {
+            this.adaptiveScalingEnabled = value;
+            return this;
+        }
 
+        public Setter withAdaptiveScalingLatencyThreshold(int value) {
+            this.adaptiveScalingLatencyThreshold = value;
+            return this;
+        }
 
+        public Setter withAdaptiveScalingEvaluationInterval(int value) {
+            this.adaptiveScalingEvaluationInterval = value;
+            return this;
+        }
 
+        public Setter withAdaptiveScalingMinSize(int value) {
+            this.adaptiveScalingMinSize = value;
+            return this;
+        }
+
+        public Setter withAdaptiveScalingMaxSize(int value) {
+            this.adaptiveScalingMaxSize = value;
+            return this;
+        }
+
+        public Setter withAdaptiveScalingTargetUtilization(double value) {
+            this.adaptiveScalingTargetUtilization = value;
+            return this;
+        }
     }
 }

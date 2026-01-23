@@ -73,6 +73,12 @@ public interface HystrixThreadPool {
     public void markThreadRejection();
 
     /**
+     * Record execution time for adaptive scaling calculations
+     * @param executionTimeInMilliseconds execution time in milliseconds
+     */
+    public void recordExecutionTime(long executionTimeInMilliseconds);
+
+    /**
      * Whether the queue will allow adding an item to it.
      * <p>
      * This allows dynamic control of the max queueSize versus whatever the actual max queueSize is so that dynamic changes can be done via property changes rather than needing an app
@@ -167,6 +173,11 @@ public interface HystrixThreadPool {
         private final ThreadPoolExecutor threadPool;
         private final HystrixThreadPoolMetrics metrics;
         private final int queueSize;
+
+        // Adaptive scaling fields
+        private volatile long lastAdaptiveScalingEvaluation = 0;
+        private final java.util.concurrent.atomic.AtomicLong totalExecutionTime = new java.util.concurrent.atomic.AtomicLong(0);
+        private final java.util.concurrent.atomic.AtomicInteger executionCount = new java.util.concurrent.atomic.AtomicInteger(0);
 
         public HystrixThreadPoolDefault(HystrixThreadPoolKey threadPoolKey, HystrixThreadPoolProperties.Setter propertiesDefaults) {
             this.properties = HystrixPropertiesFactory.getThreadPoolProperties(threadPoolKey, propertiesDefaults);
@@ -267,6 +278,85 @@ public interface HystrixThreadPool {
                 return true;
             } else {
                 return threadPool.getQueue().size() < properties.queueSizeRejectionThreshold().get();
+            }
+        }
+
+        @Override
+        public void recordExecutionTime(long executionTimeInMilliseconds) {
+            totalExecutionTime.addAndGet(executionTimeInMilliseconds);
+            executionCount.incrementAndGet();
+
+            // Check if we should evaluate adaptive scaling
+            if (properties.adaptiveScalingEnabled().get()) {
+                evaluateAdaptiveScaling();
+            }
+        }
+
+        private void evaluateAdaptiveScaling() {
+            long now = System.currentTimeMillis();
+            long evaluationInterval = properties.adaptiveScalingEvaluationInterval().get();
+
+            // Only evaluate at the configured interval
+            if (now - lastAdaptiveScalingEvaluation < evaluationInterval) {
+                return;
+            }
+
+            // Atomic check-and-set to ensure only one thread evaluates
+            synchronized (this) {
+                if (now - lastAdaptiveScalingEvaluation < evaluationInterval) {
+                    return;
+                }
+                lastAdaptiveScalingEvaluation = now;
+            }
+
+            int execCount = executionCount.getAndSet(0);
+            long totalTime = totalExecutionTime.getAndSet(0);
+
+            if (execCount == 0) {
+                return; // No executions to analyze
+            }
+
+            // Calculate average execution time
+            long avgExecutionTime = totalTime / execCount;
+            int latencyThreshold = properties.adaptiveScalingLatencyThreshold().get();
+
+            // Get current pool state
+            int currentCoreSize = threadPool.getCorePoolSize();
+            int currentActiveThreads = threadPool.getActiveCount();
+            double currentUtilization = currentActiveThreads / (double) currentCoreSize;
+
+            int minSize = properties.adaptiveScalingMinSize().get();
+            int maxSize = properties.adaptiveScalingMaxSize().get();
+            double targetUtilization = properties.adaptiveScalingTargetUtilization().get();
+
+            int newSize = currentCoreSize;
+
+            // Scale up if latency is high and utilization is high
+            if (avgExecutionTime > latencyThreshold && currentUtilization > targetUtilization) {
+                newSize = Math.min(maxSize, (int) Math.ceil(currentCoreSize * 1.5));
+                logger.info("Adaptive scaling UP for thread pool " + metrics.getThreadPoolKey().name() +
+                           ": avgLatency=" + avgExecutionTime + "ms, utilization=" +
+                           String.format("%.2f", currentUtilization) +
+                           ", scaling from " + currentCoreSize + " to " + newSize);
+            }
+            // Scale down if latency is acceptable and utilization is low
+            else if (avgExecutionTime < (latencyThreshold * 0.5) && currentUtilization < (targetUtilization * 0.5)) {
+                newSize = Math.max(minSize, (int) Math.floor(currentCoreSize * 0.75));
+                logger.info("Adaptive scaling DOWN for thread pool " + metrics.getThreadPoolKey().name() +
+                           ": avgLatency=" + avgExecutionTime + "ms, utilization=" +
+                           String.format("%.2f", currentUtilization) +
+                           ", scaling from " + currentCoreSize + " to " + newSize);
+            }
+
+            // Apply new size if changed
+            if (newSize != currentCoreSize) {
+                threadPool.setCorePoolSize(newSize);
+                if (properties.getAllowMaximumSizeToDivergeFromCoreSize().get()) {
+                    int newMaximum = Math.max(newSize, properties.maximumSize().get());
+                    threadPool.setMaximumPoolSize(newMaximum);
+                } else {
+                    threadPool.setMaximumPoolSize(newSize);
+                }
             }
         }
 

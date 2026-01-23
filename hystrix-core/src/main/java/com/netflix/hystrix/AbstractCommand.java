@@ -582,6 +582,9 @@ import java.util.concurrent.atomic.AtomicReference;
                     executionResult = executionResult.addEvent((int) latency, HystrixEventType.SUCCESS);
                     eventNotifier.markCommandExecution(getCommandKey(), properties.executionIsolationStrategy().get(), (int) latency, executionResult.getOrderedList());
                     circuitBreaker.markSuccess();
+                    if (threadPool != null) {
+                        threadPool.recordExecutionTime(latency);
+                    }
                 }
             }
         };
@@ -595,6 +598,9 @@ import java.util.concurrent.atomic.AtomicReference;
                     executionResult = executionResult.addEvent((int) latency, HystrixEventType.SUCCESS);
                     eventNotifier.markCommandExecution(getCommandKey(), properties.executionIsolationStrategy().get(), (int) latency, executionResult.getOrderedList());
                     circuitBreaker.markSuccess();
+                    if (threadPool != null) {
+                        threadPool.recordExecutionTime(latency);
+                    }
                 }
             }
         };
