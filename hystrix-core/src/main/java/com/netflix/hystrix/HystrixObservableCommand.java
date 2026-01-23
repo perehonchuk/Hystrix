@@ -18,6 +18,7 @@ package com.netflix.hystrix;
 import rx.Observable;
 
 import com.netflix.hystrix.HystrixCommandProperties.ExecutionIsolationStrategy;
+import com.netflix.hystrix.exception.HystrixRuntimeException;
 import com.netflix.hystrix.strategy.executionhook.HystrixCommandExecutionHook;
 import com.netflix.hystrix.strategy.properties.HystrixPropertiesStrategy;
 import com.netflix.hystrix.strategy.eventnotifier.HystrixEventNotifier;
@@ -240,20 +241,97 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     * <p>
+     * NOTE: This method is invoked for all failure types unless a more specific fallback method is overridden (see {@link #resumeWithFallbackForTimeout()},
+     * {@link #resumeWithFallbackForShortCircuit()}, etc.). To handle specific failure types differently, override the corresponding failure-specific method.
+     *
      * @return R or UnsupportedOperationException if not implemented
      */
     protected Observable<R> resumeWithFallback() {
         return Observable.error(new UnsupportedOperationException("No fallback available."));
     }
 
+    /**
+     * Invoked when command execution times out. Override this method to provide a timeout-specific fallback Observable.
+     * <p>
+     * DEFAULT BEHAVIOR: Delegates to {@link #resumeWithFallback()}
+     *
+     * @return Observable<R> or throw UnsupportedOperationException to delegate to resumeWithFallback()
+     */
+    protected Observable<R> resumeWithFallbackForTimeout() {
+        return resumeWithFallback();
+    }
+
+    /**
+     * Invoked when the circuit breaker is open and prevents execution. Override this method to provide a short-circuit-specific fallback Observable.
+     * <p>
+     * DEFAULT BEHAVIOR: Delegates to {@link #resumeWithFallback()}
+     *
+     * @return Observable<R> or throw UnsupportedOperationException to delegate to resumeWithFallback()
+     */
+    protected Observable<R> resumeWithFallbackForShortCircuit() {
+        return resumeWithFallback();
+    }
+
+    /**
+     * Invoked when thread pool is full and rejects execution. Override this method to provide a thread-pool-rejection-specific fallback Observable.
+     * <p>
+     * DEFAULT BEHAVIOR: Delegates to {@link #resumeWithFallback()}
+     *
+     * @return Observable<R> or throw UnsupportedOperationException to delegate to resumeWithFallback()
+     */
+    protected Observable<R> resumeWithFallbackForThreadPoolRejection() {
+        return resumeWithFallback();
+    }
+
+    /**
+     * Invoked when semaphore is full and rejects execution. Override this method to provide a semaphore-rejection-specific fallback Observable.
+     * <p>
+     * DEFAULT BEHAVIOR: Delegates to {@link #resumeWithFallback()}
+     *
+     * @return Observable<R> or throw UnsupportedOperationException to delegate to resumeWithFallback()
+     */
+    protected Observable<R> resumeWithFallbackForSemaphoreRejection() {
+        return resumeWithFallback();
+    }
+
+    /**
+     * Invoked when command execution throws an exception. Override this method to provide an exception-specific fallback Observable.
+     * <p>
+     * DEFAULT BEHAVIOR: Delegates to {@link #resumeWithFallback()}
+     *
+     * @return Observable<R> or throw UnsupportedOperationException to delegate to resumeWithFallback()
+     */
+    protected Observable<R> resumeWithFallbackForCommandException() {
+        return resumeWithFallback();
+    }
+
     @Override
     final protected Observable<R> getExecutionObservable() {
         return construct();
     }
-    
+
     @Override
     final protected Observable<R> getFallbackObservable() {
         return resumeWithFallback();
+    }
+
+    @Override
+    final protected Observable<R> getFallbackObservableForFailureType(final HystrixRuntimeException.FailureType failureType) {
+        switch (failureType) {
+            case TIMEOUT:
+                return resumeWithFallbackForTimeout();
+            case SHORTCIRCUIT:
+                return resumeWithFallbackForShortCircuit();
+            case REJECTED_THREAD_EXECUTION:
+                return resumeWithFallbackForThreadPoolRejection();
+            case REJECTED_SEMAPHORE_EXECUTION:
+                return resumeWithFallbackForSemaphoreRejection();
+            case COMMAND_EXCEPTION:
+                return resumeWithFallbackForCommandException();
+            default:
+                // For any other failure type, use generic fallback
+                return resumeWithFallback();
+        }
     }
 }

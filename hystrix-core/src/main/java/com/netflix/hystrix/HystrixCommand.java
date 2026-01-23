@@ -286,11 +286,69 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     * <p>
+     * NOTE: This method is invoked for all failure types unless a more specific fallback method is overridden (see {@link #getFallbackForTimeout()},
+     * {@link #getFallbackForShortCircuit()}, etc.). To handle specific failure types differently, override the corresponding failure-specific method.
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * Invoked when command execution times out. Override this method to provide a timeout-specific fallback.
+     * <p>
+     * DEFAULT BEHAVIOR: Delegates to {@link #getFallback()}
+     *
+     * @return R response type or throw UnsupportedOperationException to delegate to getFallback()
+     */
+    protected R getFallbackForTimeout() {
+        return getFallback();
+    }
+
+    /**
+     * Invoked when the circuit breaker is open and prevents execution. Override this method to provide a short-circuit-specific fallback.
+     * <p>
+     * DEFAULT BEHAVIOR: Delegates to {@link #getFallback()}
+     *
+     * @return R response type or throw UnsupportedOperationException to delegate to getFallback()
+     */
+    protected R getFallbackForShortCircuit() {
+        return getFallback();
+    }
+
+    /**
+     * Invoked when thread pool is full and rejects execution. Override this method to provide a thread-pool-rejection-specific fallback.
+     * <p>
+     * DEFAULT BEHAVIOR: Delegates to {@link #getFallback()}
+     *
+     * @return R response type or throw UnsupportedOperationException to delegate to getFallback()
+     */
+    protected R getFallbackForThreadPoolRejection() {
+        return getFallback();
+    }
+
+    /**
+     * Invoked when semaphore is full and rejects execution. Override this method to provide a semaphore-rejection-specific fallback.
+     * <p>
+     * DEFAULT BEHAVIOR: Delegates to {@link #getFallback()}
+     *
+     * @return R response type or throw UnsupportedOperationException to delegate to getFallback()
+     */
+    protected R getFallbackForSemaphoreRejection() {
+        return getFallback();
+    }
+
+    /**
+     * Invoked when command execution throws an exception. Override this method to provide an exception-specific fallback.
+     * <p>
+     * DEFAULT BEHAVIOR: Delegates to {@link #getFallback()}
+     *
+     * @return R response type or throw UnsupportedOperationException to delegate to getFallback()
+     */
+    protected R getFallbackForCommandException() {
+        return getFallback();
     }
 
     @Override
@@ -320,6 +378,42 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
             public Observable<R> call() {
                 try {
                     return Observable.just(getFallback());
+                } catch (Throwable ex) {
+                    return Observable.error(ex);
+                }
+            }
+        });
+    }
+
+    @Override
+    final protected Observable<R> getFallbackObservableForFailureType(final FailureType failureType) {
+        return Observable.defer(new Func0<Observable<R>>() {
+            @Override
+            public Observable<R> call() {
+                try {
+                    R result;
+                    switch (failureType) {
+                        case TIMEOUT:
+                            result = getFallbackForTimeout();
+                            break;
+                        case SHORTCIRCUIT:
+                            result = getFallbackForShortCircuit();
+                            break;
+                        case REJECTED_THREAD_EXECUTION:
+                            result = getFallbackForThreadPoolRejection();
+                            break;
+                        case REJECTED_SEMAPHORE_EXECUTION:
+                            result = getFallbackForSemaphoreRejection();
+                            break;
+                        case COMMAND_EXCEPTION:
+                            result = getFallbackForCommandException();
+                            break;
+                        default:
+                            // For any other failure type, use generic fallback
+                            result = getFallback();
+                            break;
+                    }
+                    return Observable.just(result);
                 } catch (Throwable ex) {
                     return Observable.error(ex);
                 }

@@ -340,6 +340,12 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getFallbackObservable();
 
     /**
+     * @param failureType the type of failure that triggered the fallback
+     * @return {@link Observable} that emits the result of the failure-type-specific fallback
+     */
+    protected abstract Observable<R> getFallbackObservableForFailureType(FailureType failureType);
+
+    /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
      * <p>
      * This lazily starts execution of the command once the {@link Observable} is subscribed to.
@@ -853,10 +859,10 @@ import java.util.concurrent.atomic.AtomicReference;
                     try {
                         if (isFallbackUserDefined()) {
                             executionHook.onFallbackStart(this);
-                            fallbackExecutionChain = getFallbackObservable();
+                            fallbackExecutionChain = getFallbackObservableForFailureType(failureType);
                         } else {
                             //same logic as above without the hook invocation
-                            fallbackExecutionChain = getFallbackObservable();
+                            fallbackExecutionChain = getFallbackObservableForFailureType(failureType);
                         }
                     } catch (Throwable ex) {
                         //If hook or user-fallback throws, then use that as the result of the fallback lookup
