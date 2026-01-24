@@ -48,7 +48,9 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     private final HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType> commandCollapser;
     private final int maxBatchSize;
+    private final int eagerExecutionThreshold;
     private final AtomicBoolean batchStarted = new AtomicBoolean();
+    private final AtomicBoolean eagerExecutionTriggered = new AtomicBoolean();
 
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
             new ConcurrentHashMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>();
@@ -60,6 +62,9 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
         this.properties = properties;
         this.commandCollapser = commandCollapser;
         this.maxBatchSize = maxBatchSize;
+        // Calculate eager execution threshold based on percentage
+        int threshold = (int) Math.ceil((maxBatchSize * properties.eagerBatchExecutionPercentageThreshold().get()) / 100.0);
+        this.eagerExecutionThreshold = Math.max(1, Math.min(threshold, maxBatchSize));
     }
 
     /**
@@ -129,7 +134,19 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
     }
 
     /**
-     * Best-effort attempt to remove an argument from a batch.  This may get invoked when a cancellation occurs somewhere downstream.
+     * Checks if the batch has reached the eager execution threshold and should be executed early.
+     * This is called after adding requests to determine if the batch should be triggered before
+     * reaching maxBatchSize or the timer expiring.
+     *
+     * @return true if batch should be eagerly executed, false otherwise
+     */
+    /* package-private */ boolean shouldEagerlyExecute() {
+        int currentSize = argumentMap.size();
+        return currentSize >= eagerExecutionThreshold && !batchStarted.get() && !eagerExecutionTriggered.getAndSet(true);
+    }
+
+    /**
+     * Best-effort attempt to remove an argument from a batch.  This may get invoked when a cancellation occurs downstream.
      * This method finds the argument in the batch, and removes it.
      *
      * @param arg argument to remove from batch
