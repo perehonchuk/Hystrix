@@ -183,6 +183,11 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
                 return self.getCollapserKey();
             }
 
+            @Override
+            public HystrixCollapserMetrics getMetrics() {
+                return self.metrics;
+            }
+
         };
     }
 

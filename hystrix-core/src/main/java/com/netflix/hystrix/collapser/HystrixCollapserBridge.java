@@ -21,6 +21,7 @@ import rx.Observable;
 
 import com.netflix.hystrix.HystrixCollapser.CollapsedRequest;
 import com.netflix.hystrix.HystrixCollapserKey;
+import com.netflix.hystrix.HystrixCollapserMetrics;
 
 /**
  * Bridge between HystrixCollapser and RequestCollapser to expose 'protected' and 'private' functionality across packages.
@@ -40,5 +41,7 @@ public interface HystrixCollapserBridge<BatchReturnType, ResponseType, RequestAr
     HystrixCollapserKey getCollapserKey();
 
     int getRequestPriority();
+
+    HystrixCollapserMetrics getMetrics();
 
 }

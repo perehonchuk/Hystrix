@@ -203,6 +203,10 @@ public class HystrixCollapserMetrics extends HystrixMetrics {
         HystrixThreadEventStream.getInstance().collapserBatchExecuted(collapserKey, batchSize);
     }
 
+    public void markRequestDeduplicated(int deduplicatedCount) {
+        HystrixThreadEventStream.getInstance().collapserRequestDeduplicated(collapserKey, deduplicatedCount);
+    }
+
     public void markShards(int numShards) {
     }
 }

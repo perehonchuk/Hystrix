@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.slf4j.Logger;
@@ -53,6 +54,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
     private final ConcurrentMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>> argumentMap =
             new ConcurrentHashMap<RequestArgumentType, CollapsedRequest<ResponseType, RequestArgumentType>>();
     private final HystrixCollapserProperties properties;
+    private final AtomicInteger deduplicatedRequestCount = new AtomicInteger(0);
 
     private ReentrantReadWriteLock batchLock = new ReentrantReadWriteLock();
 
@@ -111,6 +113,8 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     if (existing != null) {
                         boolean requestCachingEnabled = properties.requestCacheEnabled().get();
                         if (requestCachingEnabled) {
+                            // Track that a request was deduplicated
+                            deduplicatedRequestCount.incrementAndGet();
                             return existing.toObservable();
                         } else {
                             return Observable.error(new IllegalArgumentException("Duplicate argument in collapser batch : [" + arg + "]  This is not supported.  Please turn request-caching on for HystrixCollapser:" + commandCollapser.getCollapserKey().name() + " or prevent duplicates from making it into the batch!"));
@@ -187,9 +191,15 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     }
                 });
 
+                // report deduplication metrics before sharding
+                int deduplicatedCount = deduplicatedRequestCount.get();
+                if (deduplicatedCount > 0) {
+                    commandCollapser.getMetrics().markRequestDeduplicated(deduplicatedCount);
+                }
+
                 // shard batches (now with priority-ordered requests)
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(sortedRequests);
-                // for each shard execute its requests 
+                // for each shard execute its requests
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
                         // create a new command to handle this batch of requests
@@ -309,5 +319,9 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     public int getSize() {
         return argumentMap.size();
+    }
+
+    public int getDeduplicatedRequestCount() {
+        return deduplicatedRequestCount.get();
     }
 }

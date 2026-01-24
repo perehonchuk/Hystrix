@@ -20,11 +20,12 @@ import com.netflix.hystrix.HystrixEventType;
 
 /**
  * Data class that comprises the event stream for Hystrix collapser executions.
- * This class represents the 3 things that can happen (found in {@link com.netflix.hystrix.HystrixEventType.Collapser} enum:
+ * This class represents the 4 things that can happen (found in {@link com.netflix.hystrix.HystrixEventType.Collapser} enum:
  * <p><ul>
  *     <li>ADDED_TO_BATCH</li>
  *     <li>BATCH_EXECUTED</li>
  *     <li>RESPONSE_FROM_CACHE</li>
+ *     <li>REQUEST_DEDUPLICATED</li>
  * </ul>
  *
  */

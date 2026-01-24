@@ -157,6 +157,13 @@ public class HystrixThreadEventStream {
         writeOnlyCollapserSubject.onNext(batchAdditions);
     }
 
+    public void collapserRequestDeduplicated(HystrixCollapserKey collapserKey, int deduplicatedCount) {
+        if (deduplicatedCount > 0) {
+            HystrixCollapserEvent deduplicationEvent = HystrixCollapserEvent.from(collapserKey, HystrixEventType.Collapser.REQUEST_DEDUPLICATED, deduplicatedCount);
+            writeOnlyCollapserSubject.onNext(deduplicationEvent);
+        }
+    }
+
     @Override
     public String toString() {
         return "HystrixThreadEventStream (" + threadId + " - " + threadName + ")";

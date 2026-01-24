@@ -130,13 +130,14 @@ public enum HystrixEventType {
     }
 
     public enum Collapser {
-        BATCH_EXECUTED, ADDED_TO_BATCH, RESPONSE_FROM_CACHE;
+        BATCH_EXECUTED, ADDED_TO_BATCH, RESPONSE_FROM_CACHE, REQUEST_DEDUPLICATED;
 
         public static Collapser from(HystrixRollingNumberEvent event) {
             switch (event) {
                 case COLLAPSER_BATCH: return BATCH_EXECUTED;
                 case COLLAPSER_REQUEST_BATCHED: return ADDED_TO_BATCH;
                 case RESPONSE_FROM_CACHE: return RESPONSE_FROM_CACHE;
+                case COLLAPSER_REQUEST_DEDUPLICATED: return REQUEST_DEDUPLICATED;
                 default:
                     throw new RuntimeException("Not an event that can be converted to HystrixEventType.Collapser : " + event);
             }
