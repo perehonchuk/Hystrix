@@ -286,11 +286,37 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or throw UnsupportedOperationException if not implemented
      */
     protected R getFallback() {
         throw new UnsupportedOperationException("No fallback available.");
+    }
+
+    /**
+     * Override this method to validate the result returned by {@link #run()} before considering the execution successful.
+     * <p>
+     * This allows commands to inspect the response and reject it if it doesn't meet certain criteria,
+     * triggering fallback execution even when {@link #run()} completes without throwing an exception.
+     * <p>
+     * Common use cases include:
+     * <ul>
+     * <li>Validating HTTP response status codes (e.g., treating 4xx/5xx as failures)</li>
+     * <li>Checking for partial or incomplete data in responses</li>
+     * <li>Enforcing business rules on the response content</li>
+     * <li>Detecting known error patterns in successful responses</li>
+     * </ul>
+     * <p>
+     * DEFAULT BEHAVIOR: Returns true (accepts all results).
+     * <p>
+     * IMPORTANT: This method should execute quickly and not perform any blocking operations.
+     * Keep validation logic lightweight to avoid impacting latency.
+     *
+     * @param result the result returned from {@link #run()}
+     * @return true if the result is valid and should be considered successful, false to reject it and trigger fallback
+     */
+    protected boolean isResultValid(R result) {
+        return true;
     }
 
     @Override
@@ -485,5 +511,13 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
     @Override
     protected boolean commandIsScalar() {
         return true;
+    }
+
+    /**
+     * Internal implementation of result validation that delegates to isResultValid().
+     */
+    @Override
+    final protected boolean isValidResult(R result) {
+        return isResultValid(result);
     }
 }

@@ -19,6 +19,7 @@ import com.netflix.hystrix.HystrixCircuitBreaker.NoOpCircuitBreaker;
 import com.netflix.hystrix.HystrixCommandProperties.ExecutionIsolationStrategy;
 import com.netflix.hystrix.exception.ExceptionNotWrappedByHystrix;
 import com.netflix.hystrix.exception.HystrixBadRequestException;
+import com.netflix.hystrix.exception.HystrixResultValidationException;
 import com.netflix.hystrix.exception.HystrixRuntimeException;
 import com.netflix.hystrix.exception.HystrixRuntimeException.FailureType;
 import com.netflix.hystrix.exception.HystrixTimeoutException;
@@ -562,6 +563,15 @@ import java.util.concurrent.atomic.AtomicReference;
     abstract protected boolean commandIsScalar();
 
     /**
+     * Validates the result before considering execution successful.
+     * Subclasses should override isValidResult(R) to provide validation logic.
+     *
+     * @param result the result to validate
+     * @return true if result is valid, false otherwise
+     */
+    abstract protected boolean isValidResult(R result);
+
+    /**
      * This decorates "Hystrix" functionality around the run() Observable.
      *
      * @return R
@@ -577,6 +587,10 @@ import java.util.concurrent.atomic.AtomicReference;
                     eventNotifier.markEvent(HystrixEventType.EMIT, commandKey);
                 }
                 if (commandIsScalar()) {
+                    // Validate the result before marking success
+                    if (!isValidResult(r)) {
+                        throw new HystrixResultValidationException("Result validation failed for command: " + commandKey.name());
+                    }
                     long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
                     eventNotifier.markEvent(HystrixEventType.SUCCESS, commandKey);
                     executionResult = executionResult.addEvent((int) latency, HystrixEventType.SUCCESS);
@@ -586,10 +600,28 @@ import java.util.concurrent.atomic.AtomicReference;
             }
         };
 
+        final AtomicBoolean observableResultValidationFailed = new AtomicBoolean(false);
+
+        final Action1<R> validateObservableEmits = new Action1<R>() {
+            @Override
+            public void call(R r) {
+                if (!commandIsScalar()) {
+                    // Validate each emission for Observable commands
+                    if (!isValidResult(r)) {
+                        observableResultValidationFailed.set(true);
+                    }
+                }
+            }
+        };
+
         final Action0 markOnCompleted = new Action0() {
             @Override
             public void call() {
                 if (!commandIsScalar()) {
+                    // Check if any emission failed validation
+                    if (observableResultValidationFailed.get()) {
+                        throw new HystrixResultValidationException("Result validation failed for observable command: " + commandKey.name());
+                    }
                     long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
                     eventNotifier.markEvent(HystrixEventType.SUCCESS, commandKey);
                     executionResult = executionResult.addEvent((int) latency, HystrixEventType.SUCCESS);
@@ -640,7 +672,8 @@ import java.util.concurrent.atomic.AtomicReference;
             execution = executeCommandWithSpecifiedIsolation(_cmd);
         }
 
-        return execution.doOnNext(markEmits)
+        return execution.doOnNext(validateObservableEmits)
+                .doOnNext(markEmits)
                 .doOnCompleted(markOnCompleted)
                 .onErrorResumeNext(handleFallback)
                 .doOnEach(setRequestContext);

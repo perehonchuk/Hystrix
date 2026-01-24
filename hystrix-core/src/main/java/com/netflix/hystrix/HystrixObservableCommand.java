@@ -240,11 +240,37 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
      * access and possibly has another level of fallback that does not involve network access.
      * <p>
      * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
-     * 
+     *
      * @return R or UnsupportedOperationException if not implemented
      */
     protected Observable<R> resumeWithFallback() {
         return Observable.error(new UnsupportedOperationException("No fallback available."));
+    }
+
+    /**
+     * Override this method to validate each result emitted by {@link #construct()} before considering it successful.
+     * <p>
+     * This allows commands to inspect emitted values and reject them if they don't meet certain criteria,
+     * triggering fallback execution even when {@link #construct()} emits without error.
+     * <p>
+     * Common use cases include:
+     * <ul>
+     * <li>Validating HTTP response status codes (e.g., treating 4xx/5xx as failures)</li>
+     * <li>Checking for partial or incomplete data in responses</li>
+     * <li>Enforcing business rules on the response content</li>
+     * <li>Detecting known error patterns in successful responses</li>
+     * </ul>
+     * <p>
+     * DEFAULT BEHAVIOR: Returns true (accepts all results).
+     * <p>
+     * IMPORTANT: This method should execute quickly and not perform any blocking operations.
+     * Keep validation logic lightweight to avoid impacting latency.
+     *
+     * @param result the result emitted from {@link #construct()}
+     * @return true if the result is valid and should be considered successful, false to reject it and trigger fallback
+     */
+    protected boolean isResultValid(R result) {
+        return true;
     }
 
     @Override
@@ -255,5 +281,13 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
     @Override
     final protected Observable<R> getFallbackObservable() {
         return resumeWithFallback();
+    }
+
+    /**
+     * Internal implementation of result validation that delegates to isResultValid().
+     */
+    @Override
+    final protected boolean isValidResult(R result) {
+        return isResultValid(result);
     }
 }
