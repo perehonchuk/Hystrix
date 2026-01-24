@@ -69,7 +69,7 @@ import java.util.concurrent.atomic.AtomicReference;
     }
 
     protected enum CommandState {
-        NOT_STARTED, OBSERVABLE_CHAIN_CREATED, USER_CODE_EXECUTED, UNSUBSCRIBED, TERMINAL
+        NOT_STARTED, QUEUED, OBSERVABLE_CHAIN_CREATED, USER_CODE_EXECUTED, UNSUBSCRIBED, TERMINAL
     }
 
     protected enum ThreadState {
