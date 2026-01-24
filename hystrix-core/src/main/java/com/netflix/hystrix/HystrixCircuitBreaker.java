@@ -58,6 +58,11 @@ public interface HystrixCircuitBreaker {
     void markNonSuccess();
 
     /**
+     * Invoked when a half-open request completes (either success or failure) to decrement the active request counter.
+     */
+    void onHalfOpenRequestComplete();
+
+    /**
      * Invoked at start of command execution to attempt an execution.  This is non-idempotent - it may modify internal
      * state.
      */
@@ -145,6 +150,7 @@ public interface HystrixCircuitBreaker {
 
         private final AtomicReference<Status> status = new AtomicReference<Status>(Status.CLOSED);
         private final AtomicLong circuitOpened = new AtomicLong(-1);
+        private final AtomicLong halfOpenRequestCount = new AtomicLong(0);
         private final AtomicReference<Subscription> activeSubscription = new AtomicReference<Subscription>(null);
 
         protected HystrixCircuitBreakerImpl(HystrixCommandKey key, HystrixCommandGroupKey commandGroup, final HystrixCommandProperties properties, HystrixCommandMetrics metrics) {
@@ -212,6 +218,7 @@ public interface HystrixCircuitBreaker {
                 Subscription newSubscription = subscribeToStream();
                 activeSubscription.set(newSubscription);
                 circuitOpened.set(-1L);
+                halfOpenRequestCount.set(0);
             }
         }
 
@@ -220,6 +227,14 @@ public interface HystrixCircuitBreaker {
             if (status.compareAndSet(Status.HALF_OPEN, Status.OPEN)) {
                 //This thread wins the race to re-open the circuit - it resets the start time for the sleep window
                 circuitOpened.set(System.currentTimeMillis());
+                halfOpenRequestCount.set(0);
+            }
+        }
+
+        @Override
+        public void onHalfOpenRequestComplete() {
+            if (status.get().equals(Status.HALF_OPEN)) {
+                halfOpenRequestCount.decrementAndGet();
             }
         }
 
@@ -272,12 +287,24 @@ public interface HystrixCircuitBreaker {
                 return true;
             } else {
                 if (isAfterSleepWindow()) {
-                    //only the first request after sleep window should execute
-                    //if the executing command succeeds, the status will transition to CLOSED
-                    //if the executing command fails, the status will transition to OPEN
-                    //if the executing command gets unsubscribed, the status will transition to OPEN
+                    //allow up to N concurrent requests in half-open state where N is configurable
+                    //the first request transitions the circuit to HALF_OPEN
+                    //subsequent requests are allowed up to the configured limit
+                    //if any executing command succeeds, the status will transition to CLOSED
+                    //if any executing command fails, the status will transition to OPEN
+                    //if any executing command gets unsubscribed, the status will transition to OPEN
                     if (status.compareAndSet(Status.OPEN, Status.HALF_OPEN)) {
+                        halfOpenRequestCount.set(1);
                         return true;
+                    } else if (status.get().equals(Status.HALF_OPEN)) {
+                        int maxConcurrent = properties.circuitBreakerHalfOpenMaxConcurrentRequests().get();
+                        long current = halfOpenRequestCount.incrementAndGet();
+                        if (current <= maxConcurrent) {
+                            return true;
+                        } else {
+                            halfOpenRequestCount.decrementAndGet();
+                            return false;
+                        }
                     } else {
                         return false;
                     }
@@ -312,6 +339,11 @@ public interface HystrixCircuitBreaker {
 
         @Override
         public void markNonSuccess() {
+
+        }
+
+        @Override
+        public void onHalfOpenRequestComplete() {
 
         }
 

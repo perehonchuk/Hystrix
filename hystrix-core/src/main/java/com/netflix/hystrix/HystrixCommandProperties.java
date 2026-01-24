@@ -62,10 +62,12 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Integer default_circuitBreakerHalfOpenMaxConcurrentRequests = 3; // default => halfOpenMaxConcurrentRequests: 3 = allow up to 3 concurrent requests in half-open state
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
     private final HystrixProperty<Integer> circuitBreakerSleepWindowInMilliseconds; // milliseconds after tripping circuit before allowing retry
+    private final HystrixProperty<Integer> circuitBreakerHalfOpenMaxConcurrentRequests; // maximum number of concurrent requests allowed through in half-open state
     private final HystrixProperty<Boolean> circuitBreakerEnabled; // Whether circuit breaker should be enabled.
     private final HystrixProperty<Integer> circuitBreakerErrorThresholdPercentage; // % of 'marks' that must be failed to trip the circuit
     private final HystrixProperty<Boolean> circuitBreakerForceOpen; // a property to allow forcing the circuit open (stopping all requests)
@@ -115,6 +117,7 @@ public abstract class HystrixCommandProperties {
         this.circuitBreakerEnabled = getProperty(propertyPrefix, key, "circuitBreaker.enabled", builder.getCircuitBreakerEnabled(), default_circuitBreakerEnabled);
         this.circuitBreakerRequestVolumeThreshold = getProperty(propertyPrefix, key, "circuitBreaker.requestVolumeThreshold", builder.getCircuitBreakerRequestVolumeThreshold(), default_circuitBreakerRequestVolumeThreshold);
         this.circuitBreakerSleepWindowInMilliseconds = getProperty(propertyPrefix, key, "circuitBreaker.sleepWindowInMilliseconds", builder.getCircuitBreakerSleepWindowInMilliseconds(), default_circuitBreakerSleepWindowInMilliseconds);
+        this.circuitBreakerHalfOpenMaxConcurrentRequests = getProperty(propertyPrefix, key, "circuitBreaker.halfOpenMaxConcurrentRequests", builder.getCircuitBreakerHalfOpenMaxConcurrentRequests(), default_circuitBreakerHalfOpenMaxConcurrentRequests);
         this.circuitBreakerErrorThresholdPercentage = getProperty(propertyPrefix, key, "circuitBreaker.errorThresholdPercentage", builder.getCircuitBreakerErrorThresholdPercentage(), default_circuitBreakerErrorThresholdPercentage);
         this.circuitBreakerForceOpen = getProperty(propertyPrefix, key, "circuitBreaker.forceOpen", builder.getCircuitBreakerForceOpen(), default_circuitBreakerForceOpen);
         this.circuitBreakerForceClosed = getProperty(propertyPrefix, key, "circuitBreaker.forceClosed", builder.getCircuitBreakerForceClosed(), default_circuitBreakerForceClosed);
@@ -206,6 +209,17 @@ public abstract class HystrixCommandProperties {
      */
     public HystrixProperty<Integer> circuitBreakerSleepWindowInMilliseconds() {
         return circuitBreakerSleepWindowInMilliseconds;
+    }
+
+    /**
+     * Number of concurrent requests allowed through the circuit breaker when in half-open state.
+     * <p>
+     * Default value: 3
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> circuitBreakerHalfOpenMaxConcurrentRequests() {
+        return circuitBreakerHalfOpenMaxConcurrentRequests;
     }
 
     /**
@@ -542,6 +556,7 @@ public abstract class HystrixCommandProperties {
         private Boolean circuitBreakerForceOpen = null;
         private Integer circuitBreakerRequestVolumeThreshold = null;
         private Integer circuitBreakerSleepWindowInMilliseconds = null;
+        private Integer circuitBreakerHalfOpenMaxConcurrentRequests = null;
         private Integer executionIsolationSemaphoreMaxConcurrentRequests = null;
         private ExecutionIsolationStrategy executionIsolationStrategy = null;
         private Boolean executionIsolationThreadInterruptOnTimeout = null;
@@ -586,6 +601,10 @@ public abstract class HystrixCommandProperties {
 
         public Integer getCircuitBreakerSleepWindowInMilliseconds() {
             return circuitBreakerSleepWindowInMilliseconds;
+        }
+
+        public Integer getCircuitBreakerHalfOpenMaxConcurrentRequests() {
+            return circuitBreakerHalfOpenMaxConcurrentRequests;
         }
 
         public Integer getExecutionIsolationSemaphoreMaxConcurrentRequests() {
@@ -691,6 +710,11 @@ public abstract class HystrixCommandProperties {
 
         public Setter withCircuitBreakerSleepWindowInMilliseconds(int value) {
             this.circuitBreakerSleepWindowInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withCircuitBreakerHalfOpenMaxConcurrentRequests(int value) {
+            this.circuitBreakerHalfOpenMaxConcurrentRequests = value;
             return this;
         }
 

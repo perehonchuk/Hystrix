@@ -383,6 +383,7 @@ import java.util.concurrent.atomic.AtomicReference;
             @Override
             public void call() {
                 circuitBreaker.markNonSuccess();
+                circuitBreaker.onHalfOpenRequestComplete();
                 if (_cmd.commandState.compareAndSet(CommandState.OBSERVABLE_CHAIN_CREATED, CommandState.UNSUBSCRIBED)) {
                     if (!_cmd.executionResult.containsTerminalEvent()) {
                         _cmd.eventNotifier.markEvent(HystrixEventType.CANCELLED, _cmd.commandKey);
@@ -582,6 +583,7 @@ import java.util.concurrent.atomic.AtomicReference;
                     executionResult = executionResult.addEvent((int) latency, HystrixEventType.SUCCESS);
                     eventNotifier.markCommandExecution(getCommandKey(), properties.executionIsolationStrategy().get(), (int) latency, executionResult.getOrderedList());
                     circuitBreaker.markSuccess();
+                    circuitBreaker.onHalfOpenRequestComplete();
                 }
             }
         };
@@ -595,6 +597,7 @@ import java.util.concurrent.atomic.AtomicReference;
                     executionResult = executionResult.addEvent((int) latency, HystrixEventType.SUCCESS);
                     eventNotifier.markCommandExecution(getCommandKey(), properties.executionIsolationStrategy().get(), (int) latency, executionResult.getOrderedList());
                     circuitBreaker.markSuccess();
+                    circuitBreaker.onHalfOpenRequestComplete();
                 }
             }
         };
@@ -603,6 +606,7 @@ import java.util.concurrent.atomic.AtomicReference;
             @Override
             public Observable<R> call(Throwable t) {
                 circuitBreaker.markNonSuccess();
+                circuitBreaker.onHalfOpenRequestComplete();
                 Exception e = getExceptionFromThrowable(t);
                 executionResult = executionResult.setExecutionException(e);
                 if (e instanceof RejectedExecutionException) {
