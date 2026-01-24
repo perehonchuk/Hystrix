@@ -45,6 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /* package */class CollapsedRequestSubject<T, R> implements CollapsedRequest<T, R> {
     private final R argument;
     private final int priority;
+    private final String batchGroup;
 
     private AtomicBoolean valueSet = new AtomicBoolean(false);
     private final ReplaySubject<T> subject = ReplaySubject.create();
@@ -53,16 +54,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
     private volatile int outstandingSubscriptions = 0;
 
     public CollapsedRequestSubject(final R arg, final RequestBatch<?, T, R> containingBatch) {
-        this(arg, containingBatch, 5); // default priority is 5 (normal)
+        this(arg, containingBatch, 5, null); // default priority is 5 (normal), default batch group is null
     }
 
     public CollapsedRequestSubject(final R arg, final RequestBatch<?, T, R> containingBatch, int priority) {
+        this(arg, containingBatch, priority, null); // default batch group is null
+    }
+
+    public CollapsedRequestSubject(final R arg, final RequestBatch<?, T, R> containingBatch, int priority, String batchGroup) {
         if (arg == RequestCollapser.NULL_SENTINEL) {
             this.argument = null;
         } else {
             this.argument = arg;
         }
         this.priority = priority;
+        this.batchGroup = batchGroup;
         this.subjectWithAccounting = subject
                 .doOnSubscribe(new Action0() {
                     @Override
@@ -82,13 +88,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
     }
 
     public CollapsedRequestSubject(final R arg) {
-        this(arg, 5);
+        this(arg, 5, null);
     }
 
     public CollapsedRequestSubject(final R arg, int priority) {
+        this(arg, priority, null);
+    }
+
+    public CollapsedRequestSubject(final R arg, int priority, String batchGroup) {
         this.subjectWithAccounting = subject;
         this.argument = arg;
         this.priority = priority;
+        this.batchGroup = batchGroup;
     }
 
     /**
@@ -109,6 +120,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
     @Override
     public int getPriority() {
         return priority;
+    }
+
+    /**
+     * The batch group identifier for this request.
+     *
+     * @return String batch group identifier (null means default group)
+     */
+    @Override
+    public String getBatchGroup() {
+        return batchGroup;
     }
 
     /**

@@ -41,4 +41,6 @@ public interface HystrixCollapserBridge<BatchReturnType, ResponseType, RequestAr
 
     int getRequestPriority();
 
+    String getBatchGroup();
+
 }

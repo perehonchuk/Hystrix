@@ -151,6 +151,11 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
             }
 
             @Override
+            public String getBatchGroup() {
+                return self.getBatchGroup();
+            }
+
+            @Override
             public Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = self.shardRequests(requests);
                 self.metrics.markShards(shards.size());
@@ -248,6 +253,29 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
      */
     protected int getRequestPriority() {
         return 5; // default normal priority
+    }
+
+    /**
+     * The batch group identifier for this request. Requests with the same batch group will be grouped
+     * together into separate batch command executions.
+     * <p>
+     * This allows collapsers to partition batches based on logical groupings such as:
+     * <ul>
+     * <li>Resource affinity (e.g., shard ID, datacenter, database partition)</li>
+     * <li>Urgency level (e.g., "urgent", "normal", "background")</li>
+     * <li>Request type (e.g., "read", "write", "analytics")</li>
+     * <li>Tenant/customer ID for multi-tenant systems</li>
+     * </ul>
+     * <p>
+     * Default is null, which means all requests go into the same batch group.
+     * <p>
+     * When batches are executed, requests are first grouped by this batch group identifier, then each
+     * group is passed to createCommand() separately, resulting in multiple command executions per batch window.
+     *
+     * @return String batch group identifier (default null, meaning single batch group)
+     */
+    protected String getBatchGroup() {
+        return null; // default: all requests in same batch group
     }
 
     /**
@@ -534,6 +562,14 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
          * @return int priority level
          */
         int getPriority();
+
+        /**
+         * Get the batch group identifier for this request. Requests with the same batch group are grouped
+         * together into separate batch command executions.
+         *
+         * @return String batch group identifier (null means default group)
+         */
+        String getBatchGroup();
 
         /**
          * This corresponds in a OnNext(Response); OnCompleted pair of emissions.  It represents a single-value usecase.

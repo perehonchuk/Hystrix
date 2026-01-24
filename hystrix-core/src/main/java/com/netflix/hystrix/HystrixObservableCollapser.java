@@ -149,6 +149,16 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
         collapserInstanceWrapper = new HystrixCollapserBridge<BatchReturnType, ResponseType, RequestArgumentType>() {
 
             @Override
+            public int getRequestPriority() {
+                return self.getRequestPriority();
+            }
+
+            @Override
+            public String getBatchGroup() {
+                return self.getBatchGroup();
+            }
+
+            @Override
             public Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardRequests(Collection<CollapsedRequest<ResponseType, RequestArgumentType>> requests) {
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = self.shardRequests(requests);
                 self.metrics.markShards(shards.size());
@@ -299,6 +309,42 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      * @return RequestArgumentType
      */
     public abstract RequestArgumentType getRequestArgument();
+
+    /**
+     * The priority of this request for batch ordering (0 = highest priority, higher numbers = lower priority).
+     * Default is 5 (normal priority).
+     * <p>
+     * When a batch is executed, requests are sorted by priority before being passed to createCommand(),
+     * allowing high-priority requests to be processed first within each batch.
+     *
+     * @return int priority level (default 5)
+     */
+    protected int getRequestPriority() {
+        return 5; // default normal priority
+    }
+
+    /**
+     * The batch group identifier for this request. Requests with the same batch group will be grouped
+     * together into separate batch command executions.
+     * <p>
+     * This allows collapsers to partition batches based on logical groupings such as:
+     * <ul>
+     * <li>Resource affinity (e.g., shard ID, datacenter, database partition)</li>
+     * <li>Urgency level (e.g., "urgent", "normal", "background")</li>
+     * <li>Request type (e.g., "read", "write", "analytics")</li>
+     * <li>Tenant/customer ID for multi-tenant systems</li>
+     * </ul>
+     * <p>
+     * Default is null, which means all requests go into the same batch group.
+     * <p>
+     * When batches are executed, requests are first grouped by this batch group identifier, then each
+     * group is passed to createCommand() separately, resulting in multiple command executions per batch window.
+     *
+     * @return String batch group identifier (default null, meaning single batch group)
+     */
+    protected String getBatchGroup() {
+        return null; // default: all requests in same batch group
+    }
 
     /**
      * Factory method to create a new {@link HystrixObservableCommand}{@code <BatchReturnType>} command object each time a batch needs to be executed.

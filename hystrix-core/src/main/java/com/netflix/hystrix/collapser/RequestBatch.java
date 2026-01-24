@@ -66,7 +66,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
      * @return Observable if offer accepted, null if batch is full, already started or completed
      */
     public Observable<ResponseType> offer(RequestArgumentType arg) {
-        return offer(arg, 5); // default priority
+        return offer(arg, 5, null); // default priority and batch group
     }
 
     /**
@@ -75,6 +75,16 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
      * @return Observable if offer accepted, null if batch is full, already started or completed
      */
     public Observable<ResponseType> offer(RequestArgumentType arg, int priority) {
+        return offer(arg, priority, null); // default batch group
+    }
+
+    /**
+     * @param arg request argument
+     * @param priority priority level (0 = highest, higher = lower priority)
+     * @param batchGroup batch group identifier for grouping requests
+     * @return Observable if offer accepted, null if batch is full, already started or completed
+     */
+    public Observable<ResponseType> offer(RequestArgumentType arg, int priority, String batchGroup) {
         /* short-cut - if the batch is started we reject the offer */
         if (batchStarted.get()) {
             return null;
@@ -94,7 +104,7 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     return null;
                 } else {
                     CollapsedRequestSubject<ResponseType, RequestArgumentType> collapsedRequest =
-                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this, priority);
+                            new CollapsedRequestSubject<ResponseType, RequestArgumentType>(arg, this, priority, batchGroup);
                     final CollapsedRequestSubject<ResponseType, RequestArgumentType> existing = (CollapsedRequestSubject<ResponseType, RequestArgumentType>) argumentMap.putIfAbsent(arg, collapsedRequest);
                     /**
                      * If the argument already exists in the batch, then there are 2 options:
@@ -187,8 +197,31 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     }
                 });
 
-                // shard batches (now with priority-ordered requests)
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(sortedRequests);
+                // group requests by batch group before sharding
+                java.util.Map<String, List<CollapsedRequest<ResponseType, RequestArgumentType>>> groupedRequests =
+                    new java.util.LinkedHashMap<String, List<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+                for (CollapsedRequest<ResponseType, RequestArgumentType> request : sortedRequests) {
+                    String batchGroup = request.getBatchGroup();
+                    if (batchGroup == null) {
+                        batchGroup = "__DEFAULT__";
+                    }
+                    if (!groupedRequests.containsKey(batchGroup)) {
+                        groupedRequests.put(batchGroup, new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>());
+                    }
+                    groupedRequests.get(batchGroup).add(request);
+                }
+
+                // process each batch group separately
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> allShards =
+                    new ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+                for (List<CollapsedRequest<ResponseType, RequestArgumentType>> groupRequests : groupedRequests.values()) {
+                    // shard each batch group separately (now with priority-ordered requests within each group)
+                    Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> groupShards =
+                        commandCollapser.shardRequests(groupRequests);
+                    allShards.addAll(groupShards);
+                }
+
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = allShards;
                 // for each shard execute its requests 
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
