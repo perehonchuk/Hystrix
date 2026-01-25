@@ -853,10 +853,10 @@ import java.util.concurrent.atomic.AtomicReference;
                     try {
                         if (isFallbackUserDefined()) {
                             executionHook.onFallbackStart(this);
-                            fallbackExecutionChain = getFallbackObservable();
+                            fallbackExecutionChain = getFallbackObservableWithRetry();
                         } else {
                             //same logic as above without the hook invocation
-                            fallbackExecutionChain = getFallbackObservable();
+                            fallbackExecutionChain = getFallbackObservableWithRetry();
                         }
                     } catch (Throwable ex) {
                         //If hook or user-fallback throws, then use that as the result of the fallback lookup
@@ -1033,6 +1033,42 @@ import java.util.concurrent.atomic.AtomicReference;
         // record the exception
         executionResult = executionResult.setException(underlying);
         return getFallbackOrThrowException(this, HystrixEventType.FAILURE, FailureType.COMMAND_EXCEPTION, "failed", underlying);
+    }
+
+    /**
+     * Wraps fallback execution with retry logic based on fallbackMaxRetryAttempts property.
+     * If the fallback fails, it will be retried up to the configured number of times.
+     *
+     * @return Observable with retry logic applied to fallback execution
+     */
+    private Observable<R> getFallbackObservableWithRetry() {
+        final int maxRetries = properties.fallbackMaxRetryAttempts().get();
+        final AtomicInteger attemptCount = new AtomicInteger(0);
+
+        return Observable.defer(new Func0<Observable<R>>() {
+            @Override
+            public Observable<R> call() {
+                attemptCount.incrementAndGet();
+                return getFallbackObservable();
+            }
+        }).retryWhen(new Func1<Observable<? extends Throwable>, Observable<?>>() {
+            @Override
+            public Observable<?> call(Observable<? extends Throwable> errors) {
+                return errors.flatMap(new Func1<Throwable, Observable<?>>() {
+                    @Override
+                    public Observable<?> call(Throwable error) {
+                        int currentAttempt = attemptCount.get();
+                        if (currentAttempt <= maxRetries) {
+                            logger.debug("Fallback attempt {} failed, retrying (max retries: {})", currentAttempt, maxRetries);
+                            return Observable.just(null);  // Signal to retry
+                        } else {
+                            logger.debug("Fallback attempt {} failed, max retries ({}) exceeded", currentAttempt, maxRetries);
+                            return Observable.error(error);  // Propagate error after max retries
+                        }
+                    }
+                });
+            }
+        });
     }
 
     private Observable<R> handleFallbackRejectionByEmittingError() {
