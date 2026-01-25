@@ -187,8 +187,15 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     }
                 });
 
-                // shard batches (now with priority-ordered requests)
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(sortedRequests);
+                // Apply priority-based sharding if enabled
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards;
+                if (properties.priorityBasedShardingEnabled().get()) {
+                    // Group requests by priority level into separate shards
+                    shards = shardByPriority(sortedRequests);
+                } else {
+                    // Use default sharding behavior (all requests in one collection)
+                    shards = commandCollapser.shardRequests(sortedRequests);
+                }
                 // for each shard execute its requests 
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
@@ -270,6 +277,49 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                 batchLock.writeLock().unlock();
             }
         }
+    }
+
+    /**
+     * Shards requests by priority level. Requests with the same priority are grouped together
+     * into separate shards, allowing different priority levels to be executed in separate batches.
+     * This enables high-priority requests to complete independently of low-priority ones.
+     *
+     * @param sortedRequests A list of requests already sorted by priority
+     * @return A collection of shards, where each shard contains requests of the same priority level
+     */
+    private Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardByPriority(
+            List<CollapsedRequest<ResponseType, RequestArgumentType>> sortedRequests) {
+
+        Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> priorityShards =
+            new ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+
+        if (sortedRequests.isEmpty()) {
+            return priorityShards;
+        }
+
+        List<CollapsedRequest<ResponseType, RequestArgumentType>> currentShard =
+            new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+        int currentPriority = sortedRequests.get(0).getPriority();
+
+        for (CollapsedRequest<ResponseType, RequestArgumentType> request : sortedRequests) {
+            if (request.getPriority() != currentPriority) {
+                // Priority changed, finalize current shard and start a new one
+                if (!currentShard.isEmpty()) {
+                    // Apply user-defined sharding to this priority group
+                    priorityShards.addAll(commandCollapser.shardRequests(currentShard));
+                }
+                currentShard = new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+                currentPriority = request.getPriority();
+            }
+            currentShard.add(request);
+        }
+
+        // Don't forget the last shard
+        if (!currentShard.isEmpty()) {
+            priorityShards.addAll(commandCollapser.shardRequests(currentShard));
+        }
+
+        return priorityShards;
     }
 
     public void shutdown() {
