@@ -863,7 +863,7 @@ import java.util.concurrent.atomic.AtomicReference;
                         fallbackExecutionChain = Observable.error(ex);
                     }
 
-                    return fallbackExecutionChain
+                    Observable<R> fallbackWithHooks = fallbackExecutionChain
                             .doOnEach(setRequestContext)
                             .lift(new FallbackHookApplication(_cmd))
                             .lift(new DeprecatedOnFallbackHookApplication(_cmd))
@@ -872,6 +872,25 @@ import java.util.concurrent.atomic.AtomicReference;
                             .onErrorResumeNext(handleFallbackError)
                             .doOnTerminate(singleSemaphoreRelease)
                             .doOnUnsubscribe(singleSemaphoreRelease);
+
+                    // Cache fallback responses if enabled
+                    if (properties.fallbackCacheEnabled().get() && isRequestCachingEnabled()) {
+                        final String cacheKey = getCacheKey();
+                        if (cacheKey != null) {
+                            HystrixCachedObservable<R> toCache = HystrixCachedObservable.from(fallbackWithHooks, _cmd);
+                            toCache.markFromFallback();
+                            HystrixCommandResponseFromCache<R> fromCache = (HystrixCommandResponseFromCache<R>) requestCache.putIfAbsent(cacheKey, toCache);
+                            if (fromCache != null) {
+                                // another thread's fallback beat us, use that cached value
+                                toCache.unsubscribe();
+                                return handleRequestCacheHitAndEmitValues(fromCache, _cmd);
+                            } else {
+                                return toCache.toObservable();
+                            }
+                        }
+                    }
+
+                    return fallbackWithHooks;
                 } else {
                    return handleFallbackRejectionByEmittingError();
                 }

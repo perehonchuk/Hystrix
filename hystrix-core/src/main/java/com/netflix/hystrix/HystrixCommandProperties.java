@@ -53,6 +53,7 @@ public abstract class HystrixCommandProperties {
     private static final Boolean default_executionIsolationThreadInterruptOnFutureCancel = false;
     private static final Boolean default_metricsRollingPercentileEnabled = true;
     private static final Boolean default_requestCacheEnabled = true;
+    private static final Boolean default_fallbackCacheEnabled = true;
     private static final Integer default_fallbackIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_fallbackEnabled = true;
     private static final Integer default_executionIsolationSemaphoreMaxConcurrentRequests = 10;
@@ -88,6 +89,7 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> fallbackCacheEnabled; // Whether fallback response caching is enabled.
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -135,6 +137,7 @@ public abstract class HystrixCommandProperties {
         this.metricsRollingPercentileBucketSize = getProperty(propertyPrefix, key, "metrics.rollingPercentile.bucketSize", builder.getMetricsRollingPercentileBucketSize(), default_metricsRollingPercentileBucketSize);
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
+        this.fallbackCacheEnabled = getProperty(propertyPrefix, key, "fallbackCache.enabled", builder.getFallbackCacheEnabled(), default_fallbackCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
 
         // threadpool doesn't have a global override, only instance level makes sense
@@ -410,11 +413,23 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand#getCacheKey()} should be used with {@link HystrixRequestCache} to provide de-duplication functionality via request-scoped caching.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestCacheEnabled() {
         return requestCacheEnabled;
+    }
+
+    /**
+     * Whether fallback responses should be cached in the {@link HystrixRequestCache}.
+     * When enabled, if a command execution fails and falls back, the fallback response will be cached
+     * so subsequent requests with the same cache key within the request scope will receive the cached fallback value
+     * instead of re-executing the fallback logic.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> fallbackCacheEnabled() {
+        return fallbackCacheEnabled;
     }
 
     /**
@@ -559,6 +574,7 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowInMilliseconds = null;
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
+        private Boolean fallbackCacheEnabled = null;
         private Boolean requestLogEnabled = null;
 
         /* package */ Setter() {
@@ -658,6 +674,10 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestCacheEnabled() {
             return requestCacheEnabled;
+        }
+
+        public Boolean getFallbackCacheEnabled() {
+            return fallbackCacheEnabled;
         }
 
         public Boolean getRequestLogEnabled() {
@@ -780,6 +800,11 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestCacheEnabled(boolean value) {
             this.requestCacheEnabled = value;
+            return this;
+        }
+
+        public Setter withFallbackCacheEnabled(boolean value) {
+            this.fallbackCacheEnabled = value;
             return this;
         }
 

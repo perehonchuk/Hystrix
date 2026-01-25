@@ -9,6 +9,7 @@ public class HystrixCachedObservable<R> {
     protected final Subscription originalSubscription;
     protected final Observable<R> cachedObservable;
     private volatile int outstandingSubscriptions = 0;
+    private volatile boolean fromFallback = false;
 
     protected HystrixCachedObservable(final Observable<R> originalObservable) {
         ReplaySubject<R> replaySubject = ReplaySubject.create();
@@ -47,5 +48,13 @@ public class HystrixCachedObservable<R> {
 
     public void unsubscribe() {
         originalSubscription.unsubscribe();
+    }
+
+    public void markFromFallback() {
+        this.fromFallback = true;
+    }
+
+    public boolean isFromFallback() {
+        return fromFallback;
     }
 }
