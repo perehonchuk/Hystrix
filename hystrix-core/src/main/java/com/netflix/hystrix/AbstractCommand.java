@@ -640,6 +640,11 @@ import java.util.concurrent.atomic.AtomicReference;
             execution = executeCommandWithSpecifiedIsolation(_cmd);
         }
 
+        // Apply retry logic if enabled
+        if (properties.retryEnabled().get() && properties.retryStrategy().get().shouldRetry()) {
+            execution = applyRetryLogic(execution, _cmd);
+        }
+
         return execution.doOnNext(markEmits)
                 .doOnCompleted(markOnCompleted)
                 .onErrorResumeNext(handleFallback)
@@ -895,6 +900,81 @@ import java.util.concurrent.atomic.AtomicReference;
         return userObservable
                 .lift(new ExecutionHookApplication(_cmd))
                 .lift(new DeprecatedOnRunHookApplication(_cmd));
+    }
+
+    /**
+     * Apply retry logic to wrap command execution.
+     * Retries the command execution based on the configured retry strategy and max attempts.
+     */
+    private Observable<R> applyRetryLogic(final Observable<R> originalExecution, final AbstractCommand<R> _cmd) {
+        final HystrixRetryStrategy strategy = properties.retryStrategy().get();
+        final int maxAttempts = properties.retryMaxAttempts().get();
+        final AtomicInteger attemptCounter = new AtomicInteger(0);
+
+        return originalExecution.onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+            @Override
+            public Observable<R> call(final Throwable error) {
+                int currentAttempt = attemptCounter.getAndIncrement();
+
+                // Check if we should retry (not a bad request and haven't exhausted attempts)
+                boolean shouldRetry = currentAttempt < maxAttempts
+                    && !(error instanceof HystrixBadRequestException);
+
+                if (shouldRetry) {
+                    // Mark retry attempt event
+                    eventNotifier.markEvent(HystrixEventType.RETRY_ATTEMPT, commandKey);
+                    executionResult = executionResult.addEvent(HystrixEventType.RETRY_ATTEMPT);
+
+                    long delayMillis = strategy.getDelayMillis(currentAttempt);
+
+                    if (delayMillis > 0) {
+                        // Delay before retry
+                        return Observable.timer(delayMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
+                            .flatMap(new Func1<Long, Observable<R>>() {
+                                @Override
+                                public Observable<R> call(Long aLong) {
+                                    // Recursively retry
+                                    Observable<R> retryExecution;
+                                    if (properties.executionTimeoutEnabled().get()) {
+                                        retryExecution = executeCommandWithSpecifiedIsolation(_cmd)
+                                                .lift(new HystrixObservableTimeoutOperator<R>(_cmd));
+                                    } else {
+                                        retryExecution = executeCommandWithSpecifiedIsolation(_cmd);
+                                    }
+                                    return applyRetryLogic(retryExecution, _cmd);
+                                }
+                            });
+                    } else {
+                        // Immediate retry (no delay)
+                        Observable<R> retryExecution;
+                        if (properties.executionTimeoutEnabled().get()) {
+                            retryExecution = executeCommandWithSpecifiedIsolation(_cmd)
+                                    .lift(new HystrixObservableTimeoutOperator<R>(_cmd));
+                        } else {
+                            retryExecution = executeCommandWithSpecifiedIsolation(_cmd);
+                        }
+                        return applyRetryLogic(retryExecution, _cmd);
+                    }
+                } else {
+                    // Exhausted retries or bad request - propagate error
+                    if (currentAttempt >= maxAttempts && !(error instanceof HystrixBadRequestException)) {
+                        eventNotifier.markEvent(HystrixEventType.RETRY_EXHAUSTED, commandKey);
+                        executionResult = executionResult.addEvent(HystrixEventType.RETRY_EXHAUSTED);
+                    }
+                    return Observable.error(error);
+                }
+            }
+        }).doOnNext(new Action1<R>() {
+            @Override
+            public void call(R r) {
+                // If we succeeded after retries, mark it
+                int attempts = attemptCounter.get();
+                if (attempts > 0) {
+                    eventNotifier.markEvent(HystrixEventType.RETRY_SUCCESS, commandKey);
+                    executionResult = executionResult.addEvent(HystrixEventType.RETRY_SUCCESS);
+                }
+            }
+        });
     }
 
     private Observable<R> handleRequestCacheHitAndEmitValues(final HystrixCommandResponseFromCache<R> fromCache, final AbstractCommand<R> _cmd) {

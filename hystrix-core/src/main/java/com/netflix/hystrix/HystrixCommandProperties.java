@@ -62,6 +62,9 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final HystrixRetryStrategy default_retryStrategy = HystrixRetryStrategy.NONE; // default to no retries for backward compatibility
+    private static final Integer default_retryMaxAttempts = 2; // default to 2 retry attempts (3 total executions including original)
+    private static final Boolean default_retryEnabled = false; // default to disabled for backward compatibility
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -88,6 +91,9 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<HystrixRetryStrategy> retryStrategy; // Strategy for retrying failed commands
+    private final HystrixProperty<Integer> retryMaxAttempts; // Maximum number of retry attempts
+    private final HystrixProperty<Boolean> retryEnabled; // Whether retry is enabled
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -136,6 +142,9 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.retryEnabled = getProperty(propertyPrefix, key, "retry.enabled", builder.getRetryEnabled(), default_retryEnabled);
+        this.retryStrategy = getProperty(propertyPrefix, key, "retry.strategy", builder.getRetryStrategy(), default_retryStrategy);
+        this.retryMaxAttempts = getProperty(propertyPrefix, key, "retry.maxAttempts", builder.getRetryMaxAttempts(), default_retryMaxAttempts);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -419,11 +428,43 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
         return requestLogEnabled;
+    }
+
+    /**
+     * Whether retry mechanism is enabled for this command.
+     * When enabled, failed command executions will be retried according to the configured strategy
+     * before falling back or throwing an exception.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> retryEnabled() {
+        return retryEnabled;
+    }
+
+    /**
+     * The retry strategy to use when retrying failed command executions.
+     * Different strategies provide different backoff patterns between retry attempts.
+     *
+     * @return {@code HystrixProperty<HystrixRetryStrategy>}
+     */
+    public HystrixProperty<HystrixRetryStrategy> retryStrategy() {
+        return retryStrategy;
+    }
+
+    /**
+     * Maximum number of retry attempts for this command.
+     * For example, if set to 2, the command will be executed up to 3 times total
+     * (1 original attempt + 2 retries) before falling back or failing.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> retryMaxAttempts() {
+        return retryMaxAttempts;
     }
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
@@ -451,6 +492,10 @@ public abstract class HystrixCommandProperties {
     private static HystrixProperty<ExecutionIsolationStrategy> getProperty(final String propertyPrefix, final HystrixCommandKey key, final String instanceProperty, final ExecutionIsolationStrategy builderOverrideValue, final ExecutionIsolationStrategy defaultValue) {
         return new ExecutionIsolationStrategyHystrixProperty(builderOverrideValue, key, propertyPrefix, defaultValue, instanceProperty);
 
+    }
+
+    private static HystrixProperty<HystrixRetryStrategy> getProperty(final String propertyPrefix, final HystrixCommandKey key, final String instanceProperty, final HystrixRetryStrategy builderOverrideValue, final HystrixRetryStrategy defaultValue) {
+        return new RetryStrategyHystrixProperty(builderOverrideValue, key, propertyPrefix, defaultValue, instanceProperty);
     }
 
     /**
@@ -497,6 +542,56 @@ public abstract class HystrixCommandProperties {
                 value = ExecutionIsolationStrategy.valueOf(property.get());
             } catch (Exception e) {
                 logger.error("Unable to derive ExecutionIsolationStrategy from property value: " + property.get(), e);
+                // use the default value
+                value = defaultValue;
+            }
+        }
+    }
+
+    /**
+     * HystrixProperty that converts a String to HystrixRetryStrategy so we remain TypeSafe.
+     */
+    private static final class RetryStrategyHystrixProperty implements HystrixProperty<HystrixRetryStrategy> {
+        private final HystrixDynamicProperty<String> property;
+        private volatile HystrixRetryStrategy value;
+        private final HystrixRetryStrategy defaultValue;
+
+        private RetryStrategyHystrixProperty(HystrixRetryStrategy builderOverrideValue, HystrixCommandKey key, String propertyPrefix, HystrixRetryStrategy defaultValue, String instanceProperty) {
+            this.defaultValue = defaultValue;
+            String overrideValue = null;
+            if (builderOverrideValue != null) {
+                overrideValue = builderOverrideValue.name();
+            }
+            property = forString()
+                    .add(propertyPrefix + ".command." + key.name() + "." + instanceProperty, overrideValue)
+                    .add(propertyPrefix + ".command.default." + instanceProperty, defaultValue.name())
+                    .build();
+
+            // initialize the enum value from the property
+            parseProperty();
+
+            // use a callback to handle changes so we only handle the parse cost on updates rather than every fetch
+            property.addCallback(new Runnable() {
+
+                @Override
+                public void run() {
+                    // when the property value changes we'll update the value
+                    parseProperty();
+                }
+
+            });
+        }
+
+        @Override
+        public HystrixRetryStrategy get() {
+            return value;
+        }
+
+        private void parseProperty() {
+            try {
+                value = HystrixRetryStrategy.valueOf(property.get());
+            } catch (Exception e) {
+                logger.error("Unable to derive HystrixRetryStrategy from property value: " + property.get(), e);
                 // use the default value
                 value = defaultValue;
             }
@@ -560,6 +655,9 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Boolean retryEnabled = null;
+        private HystrixRetryStrategy retryStrategy = null;
+        private Integer retryMaxAttempts = null;
 
         /* package */ Setter() {
         }
@@ -662,6 +760,18 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Boolean getRetryEnabled() {
+            return retryEnabled;
+        }
+
+        public HystrixRetryStrategy getRetryStrategy() {
+            return retryStrategy;
+        }
+
+        public Integer getRetryMaxAttempts() {
+            return retryMaxAttempts;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -785,6 +895,21 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withRetryEnabled(boolean value) {
+            this.retryEnabled = value;
+            return this;
+        }
+
+        public Setter withRetryStrategy(HystrixRetryStrategy value) {
+            this.retryStrategy = value;
+            return this;
+        }
+
+        public Setter withRetryMaxAttempts(int value) {
+            this.retryMaxAttempts = value;
             return this;
         }
     }
