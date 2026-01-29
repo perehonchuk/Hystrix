@@ -1727,6 +1727,53 @@ import java.util.concurrent.atomic.AtomicReference;
         return properties.requestCacheEnabled().get() && getCacheKey() != null;
     }
 
+    /**
+     * Clear the request cache for this command's cache key.
+     * <p>
+     * This will invalidate any cached response for the current cache key
+     * and notify all registered invalidation listeners.
+     */
+    public void clearCache() {
+        if (getCacheKey() != null) {
+            requestCache.clear(getCacheKey());
+        }
+    }
+
+    /**
+     * Clear the request cache for a specific cache key.
+     * <p>
+     * This will invalidate any cached response for the specified cache key
+     * and notify all registered invalidation listeners.
+     *
+     * @param cacheKey the cache key to invalidate
+     */
+    public static void clearCache(HystrixCommandKey commandKey, String cacheKey, HystrixConcurrencyStrategy concurrencyStrategy) {
+        HystrixRequestCache.getInstance(commandKey, concurrencyStrategy).clear(cacheKey);
+    }
+
+    /**
+     * Clear all cache entries matching a pattern.
+     * <p>
+     * This allows wildcard-based cache invalidation using regular expressions.
+     *
+     * @param commandKey the command key
+     * @param pattern regular expression pattern to match cache keys
+     * @param concurrencyStrategy the concurrency strategy
+     * @return number of cache entries cleared
+     */
+    public static int clearCacheByPattern(HystrixCommandKey commandKey, String pattern, HystrixConcurrencyStrategy concurrencyStrategy) {
+        return HystrixRequestCache.getInstance(commandKey, concurrencyStrategy).clearByPattern(pattern);
+    }
+
+    /**
+     * Register a cache invalidation listener for this command.
+     *
+     * @param listener the listener to register
+     */
+    public void registerCacheInvalidationListener(HystrixCacheInvalidationListener listener) {
+        requestCache.registerInvalidationListener(listener);
+    }
+
     protected String getLogMessagePrefix() {
         return getCommandKey().name();
     }

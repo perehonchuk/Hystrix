@@ -24,7 +24,12 @@ import org.slf4j.LoggerFactory;
 import rx.Observable;
 import rx.internal.operators.CachedObservable;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.regex.Pattern;
 
 /**
  * Cache that is scoped to the current request as managed by {@link HystrixRequestVariableDefault}.
@@ -37,6 +42,9 @@ public class HystrixRequestCache {
 
     // the String key must be: HystrixRequestCache.prefix + concurrencyStrategy + cacheKey
     private final static ConcurrentHashMap<RequestCacheKey, HystrixRequestCache> caches = new ConcurrentHashMap<RequestCacheKey, HystrixRequestCache>();
+
+    // Global registry of cache invalidation listeners
+    private final static ConcurrentHashMap<RequestCacheKey, CopyOnWriteArrayList<HystrixCacheInvalidationListener>> invalidationListeners = new ConcurrentHashMap<RequestCacheKey, CopyOnWriteArrayList<HystrixCacheInvalidationListener>>();
 
     private final RequestCacheKey rcKey;
     private final HystrixConcurrencyStrategy concurrencyStrategy;
@@ -143,11 +151,25 @@ public class HystrixRequestCache {
 
     /**
      * Clear the cache for a given cacheKey.
-     * 
+     *
      * @param cacheKey
      *            key as defined by {@link HystrixCommand#getCacheKey()}
      */
     public void clear(String cacheKey) {
+        clear(cacheKey, "explicit");
+    }
+
+    /**
+     * Clear the cache for a given cacheKey with a specified reason.
+     * <p>
+     * This method will notify all registered invalidation listeners after removing the cache entry.
+     *
+     * @param cacheKey
+     *            key as defined by {@link HystrixCommand#getCacheKey()}
+     * @param reason
+     *            the reason for cache invalidation (e.g., "explicit", "timeout", "pattern")
+     */
+    public void clear(String cacheKey, String reason) {
         ValueCacheKey key = getRequestCacheKey(cacheKey);
         if (key != null) {
             ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
@@ -156,7 +178,102 @@ public class HystrixRequestCache {
             }
 
             /* remove this cache key */
-            cacheInstance.remove(key);
+            HystrixCachedObservable<?> removed = cacheInstance.remove(key);
+
+            /* notify listeners if entry was actually removed */
+            if (removed != null) {
+                notifyInvalidationListeners(cacheKey, reason);
+            }
+        }
+    }
+
+    /**
+     * Clear all cache entries matching a pattern.
+     * <p>
+     * This allows wildcard-based cache invalidation using regular expressions.
+     * For example, "user:.*" would invalidate all cache keys starting with "user:".
+     *
+     * @param pattern
+     *            regular expression pattern to match cache keys
+     * @return number of cache entries cleared
+     */
+    public int clearByPattern(String pattern) {
+        Pattern regex = Pattern.compile(pattern);
+        int clearedCount = 0;
+
+        ConcurrentHashMap<ValueCacheKey, HystrixCachedObservable<?>> cacheInstance = requestVariableForCache.get(concurrencyStrategy);
+        if (cacheInstance == null) {
+            throw new IllegalStateException("Request caching is not available. Maybe you need to initialize the HystrixRequestContext?");
+        }
+
+        List<String> keysToRemove = new ArrayList<String>();
+        for (Map.Entry<ValueCacheKey, HystrixCachedObservable<?>> entry : cacheInstance.entrySet()) {
+            String valueCacheKey = entry.getKey().valueCacheKey;
+            if (regex.matcher(valueCacheKey).matches()) {
+                keysToRemove.add(valueCacheKey);
+            }
+        }
+
+        for (String keyToRemove : keysToRemove) {
+            clear(keyToRemove, "pattern:" + pattern);
+            clearedCount++;
+        }
+
+        return clearedCount;
+    }
+
+    /**
+     * Register a cache invalidation listener for this cache.
+     * <p>
+     * Listeners will be notified whenever a cache entry is cleared.
+     *
+     * @param listener
+     *            the listener to register
+     */
+    public void registerInvalidationListener(HystrixCacheInvalidationListener listener) {
+        CopyOnWriteArrayList<HystrixCacheInvalidationListener> listeners = invalidationListeners.get(rcKey);
+        if (listeners == null) {
+            CopyOnWriteArrayList<HystrixCacheInvalidationListener> newListeners = new CopyOnWriteArrayList<HystrixCacheInvalidationListener>();
+            CopyOnWriteArrayList<HystrixCacheInvalidationListener> existing = invalidationListeners.putIfAbsent(rcKey, newListeners);
+            listeners = (existing != null) ? existing : newListeners;
+        }
+        listeners.add(listener);
+    }
+
+    /**
+     * Unregister a cache invalidation listener.
+     *
+     * @param listener
+     *            the listener to unregister
+     * @return true if the listener was registered and has been removed
+     */
+    public boolean unregisterInvalidationListener(HystrixCacheInvalidationListener listener) {
+        CopyOnWriteArrayList<HystrixCacheInvalidationListener> listeners = invalidationListeners.get(rcKey);
+        if (listeners != null) {
+            return listeners.remove(listener);
+        }
+        return false;
+    }
+
+    /**
+     * Notify all registered listeners that a cache entry has been invalidated.
+     */
+    private void notifyInvalidationListeners(String cacheKey, String reason) {
+        CopyOnWriteArrayList<HystrixCacheInvalidationListener> listeners = invalidationListeners.get(rcKey);
+        if (listeners != null && !listeners.isEmpty()) {
+            for (HystrixCacheInvalidationListener listener : listeners) {
+                try {
+                    if (rcKey.type == 1) {
+                        // Command key
+                        listener.onCacheInvalidated(HystrixCommandKey.Factory.asKey(rcKey.key), cacheKey, reason);
+                    } else if (rcKey.type == 2) {
+                        // Collapser key
+                        listener.onCacheInvalidated(HystrixCollapserKey.Factory.asKey(rcKey.key), cacheKey, reason);
+                    }
+                } catch (Exception e) {
+                    logger.error("Error notifying cache invalidation listener", e);
+                }
+            }
         }
     }
 

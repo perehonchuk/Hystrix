@@ -493,6 +493,53 @@ public abstract class HystrixCollapser<BatchReturnType, ResponseType, RequestArg
     }
 
     /**
+     * Clear the request cache for this collapser's cache key.
+     * <p>
+     * This will invalidate any cached response for the current cache key
+     * and notify all registered invalidation listeners.
+     */
+    public void clearCache() {
+        if (getCacheKey() != null) {
+            requestCache.clear(getCacheKey());
+        }
+    }
+
+    /**
+     * Clear the request cache for a specific cache key.
+     * <p>
+     * This will invalidate any cached response for the specified cache key
+     * and notify all registered invalidation listeners.
+     *
+     * @param cacheKey the cache key to invalidate
+     */
+    public static void clearCache(HystrixCollapserKey collapserKey, String cacheKey, com.netflix.hystrix.strategy.concurrency.HystrixConcurrencyStrategy concurrencyStrategy) {
+        HystrixRequestCache.getInstance(collapserKey, concurrencyStrategy).clear(cacheKey);
+    }
+
+    /**
+     * Clear all cache entries matching a pattern.
+     * <p>
+     * This allows wildcard-based cache invalidation using regular expressions.
+     *
+     * @param collapserKey the collapser key
+     * @param pattern regular expression pattern to match cache keys
+     * @param concurrencyStrategy the concurrency strategy
+     * @return number of cache entries cleared
+     */
+    public static int clearCacheByPattern(HystrixCollapserKey collapserKey, String pattern, com.netflix.hystrix.strategy.concurrency.HystrixConcurrencyStrategy concurrencyStrategy) {
+        return HystrixRequestCache.getInstance(collapserKey, concurrencyStrategy).clearByPattern(pattern);
+    }
+
+    /**
+     * Register a cache invalidation listener for this collapser.
+     *
+     * @param listener the listener to register
+     */
+    public void registerCacheInvalidationListener(HystrixCacheInvalidationListener listener) {
+        requestCache.registerInvalidationListener(listener);
+    }
+
+    /**
      * Clears all state. If new requests come in instances will be recreated and metrics started from scratch.
      */
     /* package */static void reset() {
