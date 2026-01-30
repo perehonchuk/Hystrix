@@ -58,6 +58,14 @@ public abstract class HystrixThreadPoolProperties {
     static int default_threadPoolRollingNumberStatisticalWindow = 10000; // milliseconds for rolling number
     static int default_threadPoolRollingNumberStatisticalWindowBuckets = 10; // number of buckets in rolling number (10 1-second buckets)
 
+    // Dynamic scaling defaults
+    static boolean default_dynamicScalingEnabled = false; // whether to enable dynamic thread pool scaling based on queue depth
+    static int default_scaleUpQueueThreshold = 3; // queue size threshold that triggers scale-up
+    static int default_scaleDownQueueThreshold = 1; // queue size threshold that triggers scale-down
+    static int default_scaleUpIncrement = 2; // number of threads to add when scaling up
+    static int default_scaleDownIncrement = 1; // number of threads to remove when scaling down
+    static int default_scalingIntervalInMilliseconds = 1000; // how often to check queue depth and adjust pool size
+
     private final HystrixProperty<Integer> corePoolSize;
     private final HystrixProperty<Integer> maximumPoolSize;
     private final HystrixProperty<Integer> keepAliveTime;
@@ -67,6 +75,14 @@ public abstract class HystrixThreadPoolProperties {
 
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowInMilliseconds;
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowBuckets;
+
+    // Dynamic scaling properties
+    private final HystrixProperty<Boolean> dynamicScalingEnabled;
+    private final HystrixProperty<Integer> scaleUpQueueThreshold;
+    private final HystrixProperty<Integer> scaleDownQueueThreshold;
+    private final HystrixProperty<Integer> scaleUpIncrement;
+    private final HystrixProperty<Integer> scaleDownIncrement;
+    private final HystrixProperty<Integer> scalingIntervalInMilliseconds;
 
     protected HystrixThreadPoolProperties(HystrixThreadPoolKey key) {
         this(key, new Setter(), "hystrix");
@@ -90,6 +106,14 @@ public abstract class HystrixThreadPoolProperties {
         this.queueSizeRejectionThreshold = getProperty(propertyPrefix, key, "queueSizeRejectionThreshold", builder.getQueueSizeRejectionThreshold(), default_queueSizeRejectionThreshold);
         this.threadPoolRollingNumberStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_threadPoolRollingNumberStatisticalWindow);
         this.threadPoolRollingNumberStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_threadPoolRollingNumberStatisticalWindowBuckets);
+
+        // Dynamic scaling properties
+        this.dynamicScalingEnabled = getProperty(propertyPrefix, key, "dynamicScaling.enabled", builder.getDynamicScalingEnabled(), default_dynamicScalingEnabled);
+        this.scaleUpQueueThreshold = getProperty(propertyPrefix, key, "dynamicScaling.scaleUpQueueThreshold", builder.getScaleUpQueueThreshold(), default_scaleUpQueueThreshold);
+        this.scaleDownQueueThreshold = getProperty(propertyPrefix, key, "dynamicScaling.scaleDownQueueThreshold", builder.getScaleDownQueueThreshold(), default_scaleDownQueueThreshold);
+        this.scaleUpIncrement = getProperty(propertyPrefix, key, "dynamicScaling.scaleUpIncrement", builder.getScaleUpIncrement(), default_scaleUpIncrement);
+        this.scaleDownIncrement = getProperty(propertyPrefix, key, "dynamicScaling.scaleDownIncrement", builder.getScaleDownIncrement(), default_scaleDownIncrement);
+        this.scalingIntervalInMilliseconds = getProperty(propertyPrefix, key, "dynamicScaling.intervalInMilliseconds", builder.getScalingIntervalInMilliseconds(), default_scalingIntervalInMilliseconds);
     }
 
     private static HystrixProperty<Integer> getProperty(String propertyPrefix, HystrixThreadPoolKey key, String instanceProperty, Integer builderOverrideValue, Integer defaultValue) {
@@ -205,6 +229,60 @@ public abstract class HystrixThreadPoolProperties {
     }
 
     /**
+     * Whether dynamic scaling is enabled for this thread pool.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> dynamicScalingEnabled() {
+        return dynamicScalingEnabled;
+    }
+
+    /**
+     * Queue size threshold that triggers scaling up the thread pool.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> scaleUpQueueThreshold() {
+        return scaleUpQueueThreshold;
+    }
+
+    /**
+     * Queue size threshold that triggers scaling down the thread pool.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> scaleDownQueueThreshold() {
+        return scaleDownQueueThreshold;
+    }
+
+    /**
+     * Number of threads to add when scaling up.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> scaleUpIncrement() {
+        return scaleUpIncrement;
+    }
+
+    /**
+     * Number of threads to remove when scaling down.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> scaleDownIncrement() {
+        return scaleDownIncrement;
+    }
+
+    /**
+     * Interval in milliseconds between scaling checks.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> scalingIntervalInMilliseconds() {
+        return scalingIntervalInMilliseconds;
+    }
+
+    /**
      * Factory method to retrieve the default Setter.
      */
     public static Setter Setter() {
@@ -245,6 +323,14 @@ public abstract class HystrixThreadPoolProperties {
         private Boolean allowMaximumSizeToDivergeFromCoreSize = null;
         private Integer rollingStatisticalWindowInMilliseconds = null;
         private Integer rollingStatisticalWindowBuckets = null;
+
+        // Dynamic scaling setters
+        private Boolean dynamicScalingEnabled = null;
+        private Integer scaleUpQueueThreshold = null;
+        private Integer scaleDownQueueThreshold = null;
+        private Integer scaleUpIncrement = null;
+        private Integer scaleDownIncrement = null;
+        private Integer scalingIntervalInMilliseconds = null;
 
         private Setter() {
         }
@@ -321,6 +407,59 @@ public abstract class HystrixThreadPoolProperties {
             return this;
         }
 
+        public Boolean getDynamicScalingEnabled() {
+            return dynamicScalingEnabled;
+        }
+
+        public Integer getScaleUpQueueThreshold() {
+            return scaleUpQueueThreshold;
+        }
+
+        public Integer getScaleDownQueueThreshold() {
+            return scaleDownQueueThreshold;
+        }
+
+        public Integer getScaleUpIncrement() {
+            return scaleUpIncrement;
+        }
+
+        public Integer getScaleDownIncrement() {
+            return scaleDownIncrement;
+        }
+
+        public Integer getScalingIntervalInMilliseconds() {
+            return scalingIntervalInMilliseconds;
+        }
+
+        public Setter withDynamicScalingEnabled(boolean value) {
+            this.dynamicScalingEnabled = value;
+            return this;
+        }
+
+        public Setter withScaleUpQueueThreshold(int value) {
+            this.scaleUpQueueThreshold = value;
+            return this;
+        }
+
+        public Setter withScaleDownQueueThreshold(int value) {
+            this.scaleDownQueueThreshold = value;
+            return this;
+        }
+
+        public Setter withScaleUpIncrement(int value) {
+            this.scaleUpIncrement = value;
+            return this;
+        }
+
+        public Setter withScaleDownIncrement(int value) {
+            this.scaleDownIncrement = value;
+            return this;
+        }
+
+        public Setter withScalingIntervalInMilliseconds(int value) {
+            this.scalingIntervalInMilliseconds = value;
+            return this;
+        }
 
 
 

@@ -28,6 +28,9 @@ import rx.functions.Func0;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -168,6 +171,11 @@ public interface HystrixThreadPool {
         private final HystrixThreadPoolMetrics metrics;
         private final int queueSize;
 
+        // Dynamic scaling components
+        private static final ScheduledExecutorService scalingScheduler = Executors.newScheduledThreadPool(1);
+        private ScheduledFuture<?> scalingTask;
+        private volatile int lastScaledCoreSize;
+
         public HystrixThreadPoolDefault(HystrixThreadPoolKey threadPoolKey, HystrixThreadPoolProperties.Setter propertiesDefaults) {
             this.properties = HystrixPropertiesFactory.getThreadPoolProperties(threadPoolKey, propertiesDefaults);
             HystrixConcurrencyStrategy concurrencyStrategy = HystrixPlugins.getInstance().getConcurrencyStrategy();
@@ -178,9 +186,15 @@ public interface HystrixThreadPool {
                     properties);
             this.threadPool = this.metrics.getThreadPool();
             this.queue = this.threadPool.getQueue();
+            this.lastScaledCoreSize = this.threadPool.getCorePoolSize();
 
             /* strategy: HystrixMetricsPublisherThreadPool */
             HystrixMetricsPublisherFactory.createOrRetrievePublisherForThreadPool(threadPoolKey, this.metrics, this.properties);
+
+            // Start dynamic scaling if enabled
+            if (properties.dynamicScalingEnabled().get()) {
+                startDynamicScaling();
+            }
         }
 
         @Override
@@ -267,6 +281,84 @@ public interface HystrixThreadPool {
                 return true;
             } else {
                 return threadPool.getQueue().size() < properties.queueSizeRejectionThreshold().get();
+            }
+        }
+
+        /**
+         * Start the dynamic scaling background task
+         */
+        private void startDynamicScaling() {
+            final long interval = properties.scalingIntervalInMilliseconds().get();
+            this.scalingTask = scalingScheduler.scheduleAtFixedRate(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        performDynamicScaling();
+                    } catch (Exception e) {
+                        logger.error("Error during dynamic thread pool scaling", e);
+                    }
+                }
+            }, interval, interval, TimeUnit.MILLISECONDS);
+            logger.info("Dynamic thread pool scaling enabled for pool: " + metrics.getThreadPoolKey().name());
+        }
+
+        /**
+         * Stop the dynamic scaling background task
+         */
+        private void stopDynamicScaling() {
+            if (scalingTask != null) {
+                scalingTask.cancel(false);
+                scalingTask = null;
+            }
+        }
+
+        /**
+         * Check queue depth and adjust thread pool size accordingly
+         */
+        private void performDynamicScaling() {
+            if (!properties.dynamicScalingEnabled().get()) {
+                // Scaling was disabled, stop the task
+                stopDynamicScaling();
+                return;
+            }
+
+            int currentQueueSize = queue.size();
+            int currentCoreSize = threadPool.getCorePoolSize();
+            int configuredCoreSize = properties.coreSize().get();
+            int configuredMaxSize = properties.actualMaximumSize();
+
+            int scaleUpThreshold = properties.scaleUpQueueThreshold().get();
+            int scaleDownThreshold = properties.scaleDownQueueThreshold().get();
+            int scaleUpIncrement = properties.scaleUpIncrement().get();
+            int scaleDownIncrement = properties.scaleDownIncrement().get();
+
+            // Scale up if queue depth exceeds threshold and we haven't reached max
+            if (currentQueueSize >= scaleUpThreshold && currentCoreSize < configuredMaxSize) {
+                int newCoreSize = Math.min(currentCoreSize + scaleUpIncrement, configuredMaxSize);
+                if (newCoreSize != currentCoreSize) {
+                    threadPool.setCorePoolSize(newCoreSize);
+                    threadPool.setMaximumPoolSize(Math.max(newCoreSize, threadPool.getMaximumPoolSize()));
+                    lastScaledCoreSize = newCoreSize;
+                    metrics.markThreadPoolScaleUp();
+                    logger.info("Scaled UP thread pool {} from {} to {} threads (queue depth: {})",
+                        metrics.getThreadPoolKey().name(), currentCoreSize, newCoreSize, currentQueueSize);
+                }
+            }
+            // Scale down if queue depth is below threshold and we're above configured minimum
+            else if (currentQueueSize <= scaleDownThreshold && currentCoreSize > configuredCoreSize) {
+                int newCoreSize = Math.max(currentCoreSize - scaleDownIncrement, configuredCoreSize);
+                if (newCoreSize != currentCoreSize) {
+                    threadPool.setCorePoolSize(newCoreSize);
+                    if (properties.getAllowMaximumSizeToDivergeFromCoreSize().get()) {
+                        threadPool.setMaximumPoolSize(Math.max(newCoreSize, properties.maximumSize().get()));
+                    } else {
+                        threadPool.setMaximumPoolSize(newCoreSize);
+                    }
+                    lastScaledCoreSize = newCoreSize;
+                    metrics.markThreadPoolScaleDown();
+                    logger.info("Scaled DOWN thread pool {} from {} to {} threads (queue depth: {})",
+                        metrics.getThreadPoolKey().name(), currentCoreSize, newCoreSize, currentQueueSize);
+                }
             }
         }
 

@@ -112,12 +112,14 @@ public enum HystrixEventType {
     }
 
     public enum ThreadPool {
-        EXECUTED, REJECTED;
+        EXECUTED, REJECTED, SCALED_UP, SCALED_DOWN;
 
         public static ThreadPool from(HystrixRollingNumberEvent event) {
             switch (event) {
                 case THREAD_EXECUTION: return EXECUTED;
                 case THREAD_POOL_REJECTED: return REJECTED;
+                case THREAD_POOL_SCALED_UP: return SCALED_UP;
+                case THREAD_POOL_SCALED_DOWN: return SCALED_DOWN;
                 default:
                     throw new RuntimeException("Not an event that can be converted to HystrixEventType.ThreadPool : " + event);
             }

@@ -353,6 +353,42 @@ public class HystrixThreadPoolMetrics extends HystrixMetrics {
         concurrentExecutionCount.decrementAndGet();
     }
 
+    /**
+     * Invoked each time the thread pool scales up
+     */
+    public void markThreadPoolScaleUp() {
+        // Scaling events are tracked but don't affect concurrent execution count
+    }
+
+    /**
+     * Invoked each time the thread pool scales down
+     */
+    public void markThreadPoolScaleDown() {
+        // Scaling events are tracked but don't affect concurrent execution count
+    }
+
+    /**
+     * Rolling count of number of thread pool scale-up events during rolling statistical window.
+     * <p>
+     * The rolling window is defined by {@link HystrixThreadPoolProperties#metricsRollingStatisticalWindowInMilliseconds()}.
+     *
+     * @return rolling count of scale-up events
+     */
+    public long getRollingCountThreadPoolScaledUp() {
+        return rollingCounterStream.getLatestCount(HystrixEventType.ThreadPool.SCALED_UP);
+    }
+
+    /**
+     * Rolling count of number of thread pool scale-down events during rolling statistical window.
+     * <p>
+     * The rolling window is defined by {@link HystrixThreadPoolProperties#metricsRollingStatisticalWindowInMilliseconds()}.
+     *
+     * @return rolling count of scale-down events
+     */
+    public long getRollingCountThreadPoolScaledDown() {
+        return rollingCounterStream.getLatestCount(HystrixEventType.ThreadPool.SCALED_DOWN);
+    }
+
     public static Func0<Integer> getCurrentConcurrencyThunk(final HystrixThreadPoolKey threadPoolKey) {
         return new Func0<Integer>() {
             @Override
