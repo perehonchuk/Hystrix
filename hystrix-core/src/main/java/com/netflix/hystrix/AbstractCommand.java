@@ -875,6 +875,11 @@ import java.util.concurrent.atomic.AtomicReference;
                         fallbackExecutionChain = Observable.error(ex);
                     }
 
+                    // Wrap fallback with retry logic if enabled
+                    if (properties.fallbackRetryEnabled().get()) {
+                        fallbackExecutionChain = wrapFallbackWithRetry(fallbackExecutionChain, _cmd);
+                    }
+
                     return fallbackExecutionChain
                             .doOnEach(setRequestContext)
                             .lift(new FallbackHookApplication(_cmd))
@@ -1049,6 +1054,67 @@ import java.util.concurrent.atomic.AtomicReference;
             }
             return Observable.error(toEmit);
         }
+    }
+
+    /**
+     * Wraps the fallback observable with retry logic using exponential backoff.
+     * Retries the fallback execution up to maxAttempts times with exponentially increasing delays.
+     */
+    private Observable<R> wrapFallbackWithRetry(final Observable<R> fallbackObservable, final AbstractCommand<R> _cmd) {
+        final int maxAttempts = properties.fallbackRetryMaxAttempts().get();
+        final int initialDelayMs = properties.fallbackRetryInitialDelayMs().get();
+        final int maxDelayMs = properties.fallbackRetryMaxDelayMs().get();
+
+        return Observable.defer(new Func0<Observable<R>>() {
+            private int attemptCount = 0;
+
+            @Override
+            public Observable<R> call() {
+                return fallbackObservable
+                        .onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                            @Override
+                            public Observable<R> call(Throwable throwable) {
+                                attemptCount++;
+
+                                // Track retry attempt
+                                executionResult = executionResult.addEvent(HystrixEventType.FALLBACK_RETRY_ATTEMPT);
+                                eventNotifier.markEvent(HystrixEventType.FALLBACK_RETRY_ATTEMPT, commandKey);
+
+                                if (attemptCount >= maxAttempts) {
+                                    // Max retries exhausted, emit error
+                                    logger.debug("Fallback retry attempts exhausted after {} attempts", attemptCount);
+                                    executionResult = executionResult.addEvent(HystrixEventType.FALLBACK_RETRY_EXHAUSTED);
+                                    eventNotifier.markEvent(HystrixEventType.FALLBACK_RETRY_EXHAUSTED, commandKey);
+                                    return Observable.error(throwable);
+                                }
+
+                                // Calculate delay with exponential backoff: initialDelay * 2^(attempt-1)
+                                long delay = Math.min(initialDelayMs * (1L << (attemptCount - 1)), maxDelayMs);
+
+                                logger.debug("Fallback attempt {} failed, retrying after {}ms", attemptCount, delay);
+
+                                // Retry after delay
+                                return Observable.timer(delay, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                        .flatMap(new Func1<Long, Observable<R>>() {
+                                            @Override
+                                            public Observable<R> call(Long aLong) {
+                                                try {
+                                                    return getFallbackObservable();
+                                                } catch (Throwable ex) {
+                                                    return Observable.error(ex);
+                                                }
+                                            }
+                                        })
+                                        .onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                                            @Override
+                                            public Observable<R> call(Throwable t) {
+                                                return call(t);  // Recursively retry
+                                            }
+                                        });
+                            }
+                        });
+            }
+        });
     }
 
     private Observable<R> handleRequestCacheHitAndEmitValues(final HystrixCommandResponseFromCache<R> fromCache, final AbstractCommand<R> _cmd) {

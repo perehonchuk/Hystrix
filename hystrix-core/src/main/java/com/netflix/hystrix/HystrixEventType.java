@@ -46,6 +46,8 @@ public enum HystrixEventType {
     FALLBACK_TERTIARY_EMIT(false),
     FALLBACK_TERTIARY_SUCCESS(true),
     FALLBACK_TERTIARY_FAILURE(true),
+    FALLBACK_RETRY_ATTEMPT(false),
+    FALLBACK_RETRY_EXHAUSTED(true),
     EXCEPTION_THROWN(false),
     RESPONSE_FROM_CACHE(true),
     CANCELLED(true),

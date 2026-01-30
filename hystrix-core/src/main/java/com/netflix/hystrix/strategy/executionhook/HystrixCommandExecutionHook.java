@@ -206,6 +206,25 @@ public abstract class HystrixCommandExecutionHook {
     }
 
     /**
+     * Invoked when a fallback retry attempt is about to be executed.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     * @param attemptNumber The retry attempt number (1-based).
+     */
+    public <T> void onFallbackRetryAttempt(HystrixInvokable<T> commandInstance, int attemptNumber) {
+        //do nothing by default
+    }
+
+    /**
+     * Invoked when all fallback retry attempts have been exhausted.
+     *
+     * @param commandInstance The executing HystrixInvokable instance.
+     */
+    public <T> void onFallbackRetryExhausted(HystrixInvokable<T> commandInstance) {
+        //do nothing by default
+    }
+
+    /**
      * Invoked when the command response is found in the {@link com.netflix.hystrix.HystrixRequestCache}.
      *
      * @param commandInstance The executing HystrixCommand
