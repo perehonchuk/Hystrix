@@ -247,13 +247,47 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
         return Observable.error(new UnsupportedOperationException("No fallback available."));
     }
 
+    /**
+     * Secondary fallback Observable that is invoked if the primary resumeWithFallback() fails.
+     * This enables fallback chaining where multiple levels of degradation can be specified.
+     * <p>
+     * DEFAULT BEHAVIOR: It returns an error Observable with UnsupportedOperationException.
+     *
+     * @return Observable<R> or error Observable if not implemented
+     */
+    protected Observable<R> resumeWithSecondaryFallback() {
+        return Observable.error(new UnsupportedOperationException("No secondary fallback available."));
+    }
+
+    /**
+     * Tertiary fallback Observable that is invoked if both primary and secondary fallbacks fail.
+     * This enables three-level fallback chaining for maximum resilience.
+     * <p>
+     * DEFAULT BEHAVIOR: It returns an error Observable with UnsupportedOperationException.
+     *
+     * @return Observable<R> or error Observable if not implemented
+     */
+    protected Observable<R> resumeWithTertiaryFallback() {
+        return Observable.error(new UnsupportedOperationException("No tertiary fallback available."));
+    }
+
     @Override
     final protected Observable<R> getExecutionObservable() {
         return construct();
     }
-    
+
     @Override
     final protected Observable<R> getFallbackObservable() {
         return resumeWithFallback();
+    }
+
+    @Override
+    final protected Observable<R> getSecondaryFallbackObservable() {
+        return resumeWithSecondaryFallback();
+    }
+
+    @Override
+    final protected Observable<R> getTertiaryFallbackObservable() {
+        return resumeWithTertiaryFallback();
     }
 }

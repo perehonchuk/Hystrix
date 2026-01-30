@@ -293,6 +293,30 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
         throw new UnsupportedOperationException("No fallback available.");
     }
 
+    /**
+     * Secondary fallback method that is invoked if the primary getFallback() fails.
+     * This enables fallback chaining where multiple levels of degradation can be specified.
+     * <p>
+     * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
+     *
+     * @return R or throw UnsupportedOperationException if not implemented
+     */
+    protected R getSecondaryFallback() {
+        throw new UnsupportedOperationException("No secondary fallback available.");
+    }
+
+    /**
+     * Tertiary fallback method that is invoked if both primary and secondary fallbacks fail.
+     * This enables three-level fallback chaining for maximum resilience.
+     * <p>
+     * DEFAULT BEHAVIOR: It throws UnsupportedOperationException.
+     *
+     * @return R or throw UnsupportedOperationException if not implemented
+     */
+    protected R getTertiaryFallback() {
+        throw new UnsupportedOperationException("No tertiary fallback available.");
+    }
+
     @Override
     final protected Observable<R> getExecutionObservable() {
         return Observable.defer(new Func0<Observable<R>>() {
@@ -320,6 +344,34 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
             public Observable<R> call() {
                 try {
                     return Observable.just(getFallback());
+                } catch (Throwable ex) {
+                    return Observable.error(ex);
+                }
+            }
+        });
+    }
+
+    @Override
+    final protected Observable<R> getSecondaryFallbackObservable() {
+        return Observable.defer(new Func0<Observable<R>>() {
+            @Override
+            public Observable<R> call() {
+                try {
+                    return Observable.just(getSecondaryFallback());
+                } catch (Throwable ex) {
+                    return Observable.error(ex);
+                }
+            }
+        });
+    }
+
+    @Override
+    final protected Observable<R> getTertiaryFallbackObservable() {
+        return Observable.defer(new Func0<Observable<R>>() {
+            @Override
+            public Observable<R> call() {
+                try {
+                    return Observable.just(getTertiaryFallback());
                 } catch (Throwable ex) {
                     return Observable.error(ex);
                 }

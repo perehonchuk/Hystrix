@@ -340,6 +340,26 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getFallbackObservable();
 
     /**
+     * Returns the secondary fallback Observable for fallback chaining support.
+     * By default returns an error Observable indicating no secondary fallback is available.
+     *
+     * @return Observable that emits secondary fallback value
+     */
+    protected Observable<R> getSecondaryFallbackObservable() {
+        return Observable.error(new UnsupportedOperationException("No secondary fallback available."));
+    }
+
+    /**
+     * Returns the tertiary fallback Observable for fallback chaining support.
+     * By default returns an error Observable indicating no tertiary fallback is available.
+     *
+     * @return Observable that emits tertiary fallback value
+     */
+    protected Observable<R> getTertiaryFallbackObservable() {
+        return Observable.error(new UnsupportedOperationException("No tertiary fallback available."));
+    }
+
+    /**
      * Used for asynchronous execution of command with a callback by subscribing to the {@link Observable}.
      * <p>
      * This lazily starts execution of the command once the {@link Observable} is subscribed to.
@@ -810,28 +830,20 @@ import java.util.concurrent.atomic.AtomicReference;
                         Exception fe = getExceptionFromThrowable(t);
 
                         long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
-                        Exception toEmit;
 
-                        if (fe instanceof UnsupportedOperationException) {
-                            logger.debug("No fallback for HystrixCommand. ", fe); // debug only since we're throwing the exception and someone higher will do something with it
-                            eventNotifier.markEvent(HystrixEventType.FALLBACK_MISSING, commandKey);
-                            executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_MISSING);
-
-                            toEmit = new HystrixRuntimeException(failureType, _cmd.getClass(), getLogMessagePrefix() + " " + message + " and no fallback available.", e, fe);
-                        } else {
-                            logger.debug("HystrixCommand execution " + failureType.name() + " and fallback failed.", fe);
+                        // Try secondary fallback if primary fails
+                        if (!(fe instanceof UnsupportedOperationException)) {
+                            logger.debug("Primary fallback failed, attempting secondary fallback", fe);
                             eventNotifier.markEvent(HystrixEventType.FALLBACK_FAILURE, commandKey);
                             executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_FAILURE);
-
-                            toEmit = new HystrixRuntimeException(failureType, _cmd.getClass(), getLogMessagePrefix() + " " + message + " and fallback failed.", e, fe);
+                            return trySecondaryFallback(failureType, e, fe, message);
                         }
 
-                        // NOTE: we're suppressing fallback exception here
-                        if (shouldNotBeWrapped(originalException)) {
-                            return Observable.error(e);
-                        }
-
-                        return Observable.error(toEmit);
+                        // No primary fallback available, try secondary
+                        logger.debug("No primary fallback available, attempting secondary fallback");
+                        eventNotifier.markEvent(HystrixEventType.FALLBACK_MISSING, commandKey);
+                        executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_MISSING);
+                        return trySecondaryFallback(failureType, e, fe, message);
                     }
                 };
 
@@ -895,6 +907,148 @@ import java.util.concurrent.atomic.AtomicReference;
         return userObservable
                 .lift(new ExecutionHookApplication(_cmd))
                 .lift(new DeprecatedOnRunHookApplication(_cmd));
+    }
+
+    /**
+     * Attempts to execute secondary fallback when primary fallback fails.
+     * If secondary fallback also fails, attempts tertiary fallback.
+     */
+    private Observable<R> trySecondaryFallback(final FailureType failureType, final Exception primaryException,
+                                               final Exception primaryFallbackException, final String message) {
+        // Check if fallback chaining is enabled and depth allows secondary fallback
+        if (!properties.fallbackChainingEnabled().get() || properties.fallbackMaxChainDepth().get() < 2) {
+            logger.debug("Fallback chaining disabled or max depth < 2, not attempting secondary fallback");
+            Exception e = wrapWithOnErrorHook(failureType, primaryException);
+            HystrixRuntimeException toEmit = new HystrixRuntimeException(failureType, this.getClass(),
+                    getLogMessagePrefix() + " " + message + " and fallback failed.", e, primaryFallbackException);
+            if (shouldNotBeWrapped(primaryException)) {
+                return Observable.error(e);
+            }
+            return Observable.error(toEmit);
+        }
+
+        try {
+            Observable<R> secondaryFallback = getSecondaryFallbackObservable();
+
+            return secondaryFallback
+                    .doOnNext(new Action1<R>() {
+                        @Override
+                        public void call(R r) {
+                            if (shouldOutputOnNextEvents()) {
+                                executionResult = executionResult.addEvent(HystrixEventType.FALLBACK_SECONDARY_EMIT);
+                                eventNotifier.markEvent(HystrixEventType.FALLBACK_SECONDARY_EMIT, commandKey);
+                            }
+                        }
+                    })
+                    .doOnCompleted(new Action0() {
+                        @Override
+                        public void call() {
+                            long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+                            eventNotifier.markEvent(HystrixEventType.FALLBACK_SECONDARY_SUCCESS, commandKey);
+                            executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_SECONDARY_SUCCESS);
+                        }
+                    })
+                    .onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                        @Override
+                        public Observable<R> call(Throwable t) {
+                            Exception sfe = getExceptionFromThrowable(t);
+                            long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+
+                            if (!(sfe instanceof UnsupportedOperationException)) {
+                                logger.debug("Secondary fallback failed, attempting tertiary fallback", sfe);
+                                eventNotifier.markEvent(HystrixEventType.FALLBACK_SECONDARY_FAILURE, commandKey);
+                                executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_SECONDARY_FAILURE);
+                            }
+
+                            return tryTertiaryFallback(failureType, primaryException, primaryFallbackException, sfe, message);
+                        }
+                    });
+        } catch (Throwable ex) {
+            return tryTertiaryFallback(failureType, primaryException, primaryFallbackException, getExceptionFromThrowable(ex), message);
+        }
+    }
+
+    /**
+     * Attempts to execute tertiary fallback when both primary and secondary fallbacks fail.
+     * This is the final fallback level - if this fails, an error is emitted.
+     */
+    private Observable<R> tryTertiaryFallback(final FailureType failureType, final Exception primaryException,
+                                              final Exception primaryFallbackException, final Exception secondaryFallbackException,
+                                              final String message) {
+        // Check if fallback chaining depth allows tertiary fallback
+        if (!properties.fallbackChainingEnabled().get() || properties.fallbackMaxChainDepth().get() < 3) {
+            logger.debug("Fallback chaining disabled or max depth < 3, not attempting tertiary fallback");
+            Exception e = wrapWithOnErrorHook(failureType, primaryException);
+            HystrixRuntimeException toEmit = new HystrixRuntimeException(failureType, this.getClass(),
+                    getLogMessagePrefix() + " " + message + " and all available fallback levels failed.",
+                    e, secondaryFallbackException);
+            if (shouldNotBeWrapped(primaryException)) {
+                return Observable.error(e);
+            }
+            return Observable.error(toEmit);
+        }
+
+        try {
+            Observable<R> tertiaryFallback = getTertiaryFallbackObservable();
+
+            return tertiaryFallback
+                    .doOnNext(new Action1<R>() {
+                        @Override
+                        public void call(R r) {
+                            if (shouldOutputOnNextEvents()) {
+                                executionResult = executionResult.addEvent(HystrixEventType.FALLBACK_TERTIARY_EMIT);
+                                eventNotifier.markEvent(HystrixEventType.FALLBACK_TERTIARY_EMIT, commandKey);
+                            }
+                        }
+                    })
+                    .doOnCompleted(new Action0() {
+                        @Override
+                        public void call() {
+                            long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+                            eventNotifier.markEvent(HystrixEventType.FALLBACK_TERTIARY_SUCCESS, commandKey);
+                            executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_TERTIARY_SUCCESS);
+                        }
+                    })
+                    .onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                        @Override
+                        public Observable<R> call(Throwable t) {
+                            Exception tfe = getExceptionFromThrowable(t);
+                            long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+
+                            // All fallback levels exhausted
+                            logger.debug("All fallback levels exhausted", tfe);
+                            eventNotifier.markEvent(HystrixEventType.FALLBACK_TERTIARY_FAILURE, commandKey);
+                            executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_TERTIARY_FAILURE);
+
+                            Exception e = wrapWithOnErrorHook(failureType, primaryException);
+                            HystrixRuntimeException toEmit = new HystrixRuntimeException(
+                                    failureType, AbstractCommand.this.getClass(),
+                                    getLogMessagePrefix() + " " + message + " and all fallback levels failed.",
+                                    e, tfe);
+
+                            if (shouldNotBeWrapped(primaryException)) {
+                                return Observable.error(e);
+                            }
+                            return Observable.error(toEmit);
+                        }
+                    });
+        } catch (Throwable ex) {
+            Exception tfe = getExceptionFromThrowable(ex);
+            long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
+            eventNotifier.markEvent(HystrixEventType.FALLBACK_TERTIARY_FAILURE, commandKey);
+            executionResult = executionResult.addEvent((int) latency, HystrixEventType.FALLBACK_TERTIARY_FAILURE);
+
+            Exception e = wrapWithOnErrorHook(failureType, primaryException);
+            HystrixRuntimeException toEmit = new HystrixRuntimeException(
+                    failureType, this.getClass(),
+                    getLogMessagePrefix() + " " + message + " and all fallback levels failed.",
+                    e, tfe);
+
+            if (shouldNotBeWrapped(primaryException)) {
+                return Observable.error(e);
+            }
+            return Observable.error(toEmit);
+        }
     }
 
     private Observable<R> handleRequestCacheHitAndEmitValues(final HystrixCommandResponseFromCache<R> fromCache, final AbstractCommand<R> _cmd) {
