@@ -189,6 +189,11 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
                 // shard batches (now with priority-ordered requests)
                 Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(sortedRequests);
+
+                // apply automatic batch partitioning if enabled
+                if (properties.batchPartitioningEnabled().get()) {
+                    shards = applyBatchPartitioning(shards, properties.maxBatchPartitionSize().get());
+                }
                 // for each shard execute its requests 
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
@@ -309,5 +314,42 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     public int getSize() {
         return argumentMap.size();
+    }
+
+    /**
+     * Partitions shards into smaller sub-shards based on the maximum partition size.
+     * This method takes each shard and splits it into multiple smaller shards if it exceeds
+     * the maximum partition size, preserving request order within each partition.
+     *
+     * @param shards the original collection of shards
+     * @param maxPartitionSize the maximum number of requests allowed in each partition
+     * @return a new collection of shards with automatic partitioning applied
+     */
+    private Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> applyBatchPartitioning(
+            Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards,
+            int maxPartitionSize) {
+
+        Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> partitionedShards =
+            new ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+
+        for (Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shard : shards) {
+            if (shard.size() <= maxPartitionSize) {
+                // shard is small enough, no partitioning needed
+                partitionedShards.add(shard);
+            } else {
+                // shard exceeds max partition size, split it into multiple partitions
+                List<CollapsedRequest<ResponseType, RequestArgumentType>> shardList =
+                    new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>(shard);
+
+                for (int i = 0; i < shardList.size(); i += maxPartitionSize) {
+                    int endIndex = Math.min(i + maxPartitionSize, shardList.size());
+                    List<CollapsedRequest<ResponseType, RequestArgumentType>> partition =
+                        shardList.subList(i, endIndex);
+                    partitionedShards.add(new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>(partition));
+                }
+            }
+        }
+
+        return partitionedShards;
     }
 }
