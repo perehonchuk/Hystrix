@@ -660,6 +660,38 @@ import java.util.concurrent.atomic.AtomicReference;
             execution = executeCommandWithSpecifiedIsolation(_cmd);
         }
 
+        // Wrap with retry logic if enabled
+        if (properties.retryEnabled().get() && properties.retryMaxAttempts().get() > 0) {
+            execution = execution.retryWhen(new Func1<Observable<? extends Throwable>, Observable<?>>() {
+                private int retryCount = 0;
+
+                @Override
+                public Observable<?> call(Observable<? extends Throwable> attempts) {
+                    return attempts.flatMap(new Func1<Throwable, Observable<?>>() {
+                        @Override
+                        public Observable<?> call(Throwable throwable) {
+                            // Don't retry on HystrixBadRequestException or HystrixTimeoutException
+                            if (throwable instanceof HystrixBadRequestException || throwable instanceof HystrixTimeoutException) {
+                                return Observable.error(throwable);
+                            }
+
+                            if (retryCount >= properties.retryMaxAttempts().get()) {
+                                return Observable.error(throwable);
+                            }
+
+                            retryCount++;
+                            eventNotifier.markEvent(HystrixEventType.RETRY, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.RETRY);
+
+                            // Delay before retry
+                            return Observable.timer(properties.retryDelayInMilliseconds().get(),
+                                    java.util.concurrent.TimeUnit.MILLISECONDS);
+                        }
+                    });
+                }
+            });
+        }
+
         return execution.doOnNext(markEmits)
                 .doOnCompleted(markOnCompleted)
                 .onErrorResumeNext(handleFallback)
