@@ -53,6 +53,8 @@ public abstract class HystrixThreadPoolProperties {
                                                  // -1 turns it off and makes us use SynchronousQueue
     static boolean default_allow_maximum_size_to_diverge_from_core_size = false; //should the maximumSize config value get read and used in configuring the threadPool
                                                                                  //turning this on should be a conscious decision by the user, so we default it to false
+    static boolean default_priorityExecutionEnabled = false; // whether to use priority-based execution ordering
+                                                              // when enabled, commands with higher priority execute first
 
     static int default_queueSizeRejectionThreshold = 5; // number of items in queue
     static int default_threadPoolRollingNumberStatisticalWindow = 10000; // milliseconds for rolling number
@@ -64,6 +66,7 @@ public abstract class HystrixThreadPoolProperties {
     private final HystrixProperty<Integer> maxQueueSize;
     private final HystrixProperty<Integer> queueSizeRejectionThreshold;
     private final HystrixProperty<Boolean> allowMaximumSizeToDivergeFromCoreSize;
+    private final HystrixProperty<Boolean> priorityExecutionEnabled;
 
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowInMilliseconds;
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowBuckets;
@@ -79,6 +82,8 @@ public abstract class HystrixThreadPoolProperties {
     protected HystrixThreadPoolProperties(HystrixThreadPoolKey key, Setter builder, String propertyPrefix) {
         this.allowMaximumSizeToDivergeFromCoreSize = getProperty(propertyPrefix, key, "allowMaximumSizeToDivergeFromCoreSize",
                 builder.getAllowMaximumSizeToDivergeFromCoreSize(), default_allow_maximum_size_to_diverge_from_core_size);
+        this.priorityExecutionEnabled = getProperty(propertyPrefix, key, "priorityExecutionEnabled",
+                builder.getPriorityExecutionEnabled(), default_priorityExecutionEnabled);
 
         this.corePoolSize = getProperty(propertyPrefix, key, "coreSize", builder.getCoreSize(), default_coreSize);
         //this object always contains a reference to the configuration value for the maximumSize of the threadpool
@@ -187,6 +192,16 @@ public abstract class HystrixThreadPoolProperties {
     }
 
     /**
+     * Whether to enable priority-based execution ordering for commands submitted to the thread pool.
+     * When enabled, commands with higher priority values will be executed before lower priority commands.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> getPriorityExecutionEnabled() {
+        return priorityExecutionEnabled;
+    }
+
+    /**
      * Duration of statistical rolling window in milliseconds. This is passed into {@link HystrixRollingNumber} inside each {@link HystrixThreadPoolMetrics} instance.
      * 
      * @return {@code HystrixProperty<Integer>}
@@ -243,6 +258,7 @@ public abstract class HystrixThreadPoolProperties {
         private Integer maxQueueSize = null;
         private Integer queueSizeRejectionThreshold = null;
         private Boolean allowMaximumSizeToDivergeFromCoreSize = null;
+        private Boolean priorityExecutionEnabled = null;
         private Integer rollingStatisticalWindowInMilliseconds = null;
         private Integer rollingStatisticalWindowBuckets = null;
 
@@ -271,6 +287,10 @@ public abstract class HystrixThreadPoolProperties {
 
         public Boolean getAllowMaximumSizeToDivergeFromCoreSize() {
             return allowMaximumSizeToDivergeFromCoreSize;
+        }
+
+        public Boolean getPriorityExecutionEnabled() {
+            return priorityExecutionEnabled;
         }
 
         public Integer getMetricsRollingStatisticalWindowInMilliseconds() {
@@ -308,6 +328,11 @@ public abstract class HystrixThreadPoolProperties {
 
         public Setter withAllowMaximumSizeToDivergeFromCoreSize(boolean value) {
             this.allowMaximumSizeToDivergeFromCoreSize = value;
+            return this;
+        }
+
+        public Setter withPriorityExecutionEnabled(boolean value) {
+            this.priorityExecutionEnabled = value;
             return this;
         }
 
