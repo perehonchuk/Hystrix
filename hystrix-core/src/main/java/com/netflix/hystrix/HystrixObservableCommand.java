@@ -229,6 +229,34 @@ public abstract class HystrixObservableCommand<R> extends AbstractCommand<R> imp
     protected abstract Observable<R> construct();
 
     /**
+     * Validates each response value emitted from {@link #construct()}.
+     * <p>
+     * This method is called for each value emitted by the Observable returned from {@link #construct()}
+     * when response validation is enabled via {@link HystrixCommandProperties#responseValidationEnabled()}.
+     * <p>
+     * Override this method to implement custom validation logic. Return true if the response is valid,
+     * false if it should be treated as a failure. Invalid responses will trigger fallback logic
+     * (if {@link HystrixCommandProperties#responseValidationTreatInvalidAsFallback()} is true)
+     * or throw {@link com.netflix.hystrix.exception.HystrixResponseValidationException}.
+     * <p>
+     * DEFAULT BEHAVIOR: Returns true (all emitted values are valid).
+     * <p>
+     * Example implementation:
+     * <pre>{@code
+     * @Override
+     * protected boolean validateResponse(MyResponse response) {
+     *     return response != null && response.isValid();
+     * }
+     * }</pre>
+     *
+     * @param response a value emitted from {@link #construct()}
+     * @return true if response is valid, false if it should be treated as a failure
+     */
+    protected boolean validateResponse(R response) {
+        return true; // by default, all responses are considered valid
+    }
+
+    /**
      * If {@link #observe()} or {@link #toObservable()} fails in any way then this method will be invoked to provide an opportunity to return a fallback response.
      * <p>
      * This should do work that does not require network transport to produce.

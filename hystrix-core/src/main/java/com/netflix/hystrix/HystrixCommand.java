@@ -276,6 +276,41 @@ public abstract class HystrixCommand<R> extends AbstractCommand<R> implements Hy
     protected abstract R run() throws Exception;
 
     /**
+     * Validates the response value returned from {@link #run()}.
+     * <p>
+     * This method is called after successful execution of {@link #run()} when response validation is enabled
+     * via {@link HystrixCommandProperties#responseValidationEnabled()}.
+     * <p>
+     * Override this method to implement custom validation logic. Return true if the response is valid,
+     * false if it should be treated as a failure. Invalid responses will trigger fallback logic
+     * (if {@link HystrixCommandProperties#responseValidationTreatInvalidAsFallback()} is true)
+     * or throw {@link com.netflix.hystrix.exception.HystrixResponseValidationException}.
+     * <p>
+     * Common use cases:
+     * <ul>
+     * <li>Null checking: reject null responses from external services</li>
+     * <li>Business validation: check response codes, error flags, or data completeness</li>
+     * <li>Data quality: validate minimum data requirements (non-empty collections, required fields)</li>
+     * </ul>
+     * <p>
+     * DEFAULT BEHAVIOR: Returns true (all responses are valid).
+     * <p>
+     * Example implementation:
+     * <pre>{@code
+     * @Override
+     * protected boolean validateResponse(MyResponse response) {
+     *     return response != null && response.getStatusCode() == 200 && response.getData() != null;
+     * }
+     * }</pre>
+     *
+     * @param response the response value returned from {@link #run()}
+     * @return true if response is valid, false if it should be treated as a failure
+     */
+    protected boolean validateResponse(R response) {
+        return true; // by default, all responses are considered valid
+    }
+
+    /**
      * If {@link #execute()} or {@link #queue()} fails in any way then this method will be invoked to provide an opportunity to return a fallback response.
      * <p>
      * This should do work that does not require network transport to produce.

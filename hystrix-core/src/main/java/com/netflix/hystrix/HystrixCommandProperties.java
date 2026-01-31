@@ -64,6 +64,8 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Boolean default_responseValidationEnabled = false; // default => response validation is opt-in
+    private static final Boolean default_responseValidationTreatInvalidAsFallback = true; // default => invalid responses trigger fallback instead of throwing exception
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -92,6 +94,8 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> responseValidationEnabled; // Whether response validation is enabled.
+    private final HystrixProperty<Boolean> responseValidationTreatInvalidAsFallback; // Whether invalid responses trigger fallback (true) or throw exception (false).
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -142,6 +146,8 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.responseValidationEnabled = getProperty(propertyPrefix, key, "responseValidation.enabled", builder.getResponseValidationEnabled(), default_responseValidationEnabled);
+        this.responseValidationTreatInvalidAsFallback = getProperty(propertyPrefix, key, "responseValidation.treatInvalidAsFallback", builder.getResponseValidationTreatInvalidAsFallback(), default_responseValidationTreatInvalidAsFallback);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -445,11 +451,35 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
         return requestLogEnabled;
+    }
+
+    /**
+     * Whether response validation is enabled for this command.
+     * <p>
+     * When enabled, the command's {@link HystrixCommand#validateResponse(Object)} or
+     * {@link HystrixObservableCommand#validateResponse(Object)} method will be called to validate
+     * each response value before it is emitted. If validation fails, the response is treated as a failure.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> responseValidationEnabled() {
+        return responseValidationEnabled;
+    }
+
+    /**
+     * Whether invalid responses should trigger fallback (true) or throw HystrixResponseValidationException (false).
+     * <p>
+     * Only applicable when {@link #responseValidationEnabled()} == true.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> responseValidationTreatInvalidAsFallback() {
+        return responseValidationTreatInvalidAsFallback;
     }
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
@@ -588,6 +618,8 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Boolean responseValidationEnabled = null;
+        private Boolean responseValidationTreatInvalidAsFallback = null;
 
         /* package */ Setter() {
         }
@@ -698,6 +730,14 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Boolean getResponseValidationEnabled() {
+            return responseValidationEnabled;
+        }
+
+        public Boolean getResponseValidationTreatInvalidAsFallback() {
+            return responseValidationTreatInvalidAsFallback;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -831,6 +871,16 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withResponseValidationEnabled(boolean value) {
+            this.responseValidationEnabled = value;
+            return this;
+        }
+
+        public Setter withResponseValidationTreatInvalidAsFallback(boolean value) {
+            this.responseValidationTreatInvalidAsFallback = value;
             return this;
         }
     }

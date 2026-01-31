@@ -340,6 +340,15 @@ import java.util.concurrent.atomic.AtomicReference;
     protected abstract Observable<R> getFallbackObservable();
 
     /**
+     * Validates a response value before it is emitted.
+     * Implemented by HystrixCommand and HystrixObservableCommand.
+     *
+     * @param response the response value to validate
+     * @return true if valid, false otherwise
+     */
+    protected abstract boolean validateResponse(R response);
+
+    /**
      * Returns the secondary fallback Observable for fallback chaining support.
      * By default returns an error Observable indicating no secondary fallback is available.
      *
@@ -1678,7 +1687,43 @@ import java.util.concurrent.atomic.AtomicReference;
 
     private R wrapWithOnExecutionEmitHook(R r) {
         try {
-            return executionHook.onExecutionEmit(this, r);
+            R hookedValue = executionHook.onExecutionEmit(this, r);
+
+            // Perform response validation if enabled
+            if (properties.responseValidationEnabled().get()) {
+                boolean isValid = validateResponse(hookedValue);
+                if (!isValid) {
+                    // Mark the validation failure event
+                    eventNotifier.markEvent(HystrixEventType.RESPONSE_VALIDATION_FAILED, commandKey);
+
+                    // Create validation exception
+                    com.netflix.hystrix.exception.HystrixResponseValidationException validationException =
+                        new com.netflix.hystrix.exception.HystrixResponseValidationException(
+                            "Response validation failed for command: " + commandKey.name(), hookedValue);
+
+                    // Either trigger fallback or throw exception based on configuration
+                    if (properties.responseValidationTreatInvalidAsFallback().get()) {
+                        // Throw to trigger fallback flow
+                        throw validationException;
+                    } else {
+                        // Throw wrapped in runtime exception
+                        throw new HystrixRuntimeException(
+                            FailureType.RESPONSE_VALIDATION_FAILURE,
+                            this.getClass(),
+                            "Response validation failed",
+                            validationException,
+                            null);
+                    }
+                }
+            }
+
+            return hookedValue;
+        } catch (com.netflix.hystrix.exception.HystrixResponseValidationException validationEx) {
+            // Re-throw validation exceptions to trigger fallback
+            throw validationEx;
+        } catch (HystrixRuntimeException runtimeEx) {
+            // Re-throw Hystrix runtime exceptions
+            throw runtimeEx;
         } catch (Throwable hookEx) {
             logger.warn("Error calling HystrixCommandExecutionHook.onExecutionEmit", hookEx);
             return r;
