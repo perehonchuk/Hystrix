@@ -600,6 +600,16 @@ import java.util.concurrent.atomic.AtomicReference;
                     long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
                     eventNotifier.markEvent(HystrixEventType.SUCCESS, commandKey);
                     executionResult = executionResult.addEvent((int) latency, HystrixEventType.SUCCESS);
+
+                    // Check for slow call detection
+                    if (properties.slowCallDetectionEnabled().get()) {
+                        int slowCallThreshold = properties.slowCallDurationThresholdInMilliseconds().get();
+                        if (latency > slowCallThreshold) {
+                            eventNotifier.markEvent(HystrixEventType.SLOW_CALL, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.SLOW_CALL);
+                        }
+                    }
+
                     eventNotifier.markCommandExecution(getCommandKey(), properties.executionIsolationStrategy().get(), (int) latency, executionResult.getOrderedList());
                     circuitBreaker.markSuccess();
                 }
@@ -613,6 +623,16 @@ import java.util.concurrent.atomic.AtomicReference;
                     long latency = System.currentTimeMillis() - executionResult.getStartTimestamp();
                     eventNotifier.markEvent(HystrixEventType.SUCCESS, commandKey);
                     executionResult = executionResult.addEvent((int) latency, HystrixEventType.SUCCESS);
+
+                    // Check for slow call detection
+                    if (properties.slowCallDetectionEnabled().get()) {
+                        int slowCallThreshold = properties.slowCallDurationThresholdInMilliseconds().get();
+                        if (latency > slowCallThreshold) {
+                            eventNotifier.markEvent(HystrixEventType.SLOW_CALL, commandKey);
+                            executionResult = executionResult.addEvent(HystrixEventType.SLOW_CALL);
+                        }
+                    }
+
                     eventNotifier.markCommandExecution(getCommandKey(), properties.executionIsolationStrategy().get(), (int) latency, executionResult.getOrderedList());
                     circuitBreaker.markSuccess();
                 }
