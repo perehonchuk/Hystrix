@@ -904,9 +904,85 @@ import java.util.concurrent.atomic.AtomicReference;
             userObservable = Observable.error(ex);
         }
 
+        // Wrap with retry logic if enabled
+        if (properties.executionRetryEnabled().get() && properties.executionRetryMaxAttempts().get() > 0) {
+            userObservable = wrapWithRetryLogic(userObservable, _cmd);
+        }
+
         return userObservable
                 .lift(new ExecutionHookApplication(_cmd))
                 .lift(new DeprecatedOnRunHookApplication(_cmd));
+    }
+
+    /**
+     * Wraps the execution observable with retry logic using exponential backoff.
+     * Retries are attempted when the execution fails before falling back.
+     */
+    private Observable<R> wrapWithRetryLogic(final Observable<R> execution, final AbstractCommand<R> _cmd) {
+        final int maxAttempts = properties.executionRetryMaxAttempts().get();
+        final int initialBackoff = properties.executionRetryInitialBackoffInMilliseconds().get();
+        final int maxBackoff = properties.executionRetryMaxBackoffInMilliseconds().get();
+        final AtomicInteger attemptCount = new AtomicInteger(0);
+
+        return execution.onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+            @Override
+            public Observable<R> call(Throwable throwable) {
+                int currentAttempt = attemptCount.incrementAndGet();
+
+                // If we've exhausted retries, propagate the error
+                if (currentAttempt > maxAttempts) {
+                    return Observable.error(throwable);
+                }
+
+                // Calculate exponential backoff: initialBackoff * 2^(attempt-1)
+                long backoffDelay = Math.min(
+                    initialBackoff * (long) Math.pow(2, currentAttempt - 1),
+                    maxBackoff
+                );
+
+                // Mark retry event
+                executionResult = executionResult.addEvent(HystrixEventType.RETRY_ATTEMPTED);
+                eventNotifier.markEvent(HystrixEventType.RETRY_ATTEMPTED, commandKey);
+                metrics.markEvent(HystrixRollingNumberEvent.RETRY_ATTEMPTED);
+
+                // Retry after backoff delay
+                return Observable.timer(backoffDelay, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    .flatMap(new Func1<Long, Observable<R>>() {
+                        @Override
+                        public Observable<R> call(Long tick) {
+                            try {
+                                Observable<R> retryObservable = getExecutionObservable();
+                                return retryObservable.onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+                                    @Override
+                                    public Observable<R> call(Throwable retryError) {
+                                        int nextAttempt = attemptCount.get();
+                                        if (nextAttempt >= maxAttempts) {
+                                            // This was the last retry and it failed
+                                            executionResult = executionResult.addEvent(HystrixEventType.RETRY_FAILURE);
+                                            eventNotifier.markEvent(HystrixEventType.RETRY_FAILURE, commandKey);
+                                            metrics.markEvent(HystrixRollingNumberEvent.RETRY_FAILURE);
+                                            return Observable.error(retryError);
+                                        } else {
+                                            // More retries available, recurse
+                                            return call(retryError);
+                                        }
+                                    }
+                                }).doOnNext(new Action1<R>() {
+                                    @Override
+                                    public void call(R result) {
+                                        // Retry succeeded
+                                        executionResult = executionResult.addEvent(HystrixEventType.RETRY_SUCCESS);
+                                        eventNotifier.markEvent(HystrixEventType.RETRY_SUCCESS, commandKey);
+                                        metrics.markEvent(HystrixRollingNumberEvent.RETRY_SUCCESS);
+                                    }
+                                });
+                            } catch (Throwable ex) {
+                                return Observable.error(ex);
+                            }
+                        }
+                    });
+            }
+        });
     }
 
     /**

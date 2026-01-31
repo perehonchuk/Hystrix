@@ -46,6 +46,9 @@ public enum HystrixEventType {
     FALLBACK_TERTIARY_EMIT(false),
     FALLBACK_TERTIARY_SUCCESS(true),
     FALLBACK_TERTIARY_FAILURE(true),
+    RETRY_ATTEMPTED(false),
+    RETRY_SUCCESS(false),
+    RETRY_FAILURE(false),
     EXCEPTION_THROWN(false),
     RESPONSE_FROM_CACHE(true),
     CANCELLED(true),
@@ -82,6 +85,9 @@ public enum HystrixEventType {
             case COLLAPSED: return COLLAPSED;
             case BAD_REQUEST: return BAD_REQUEST;
             case COMMAND_MAX_ACTIVE: return COMMAND_MAX_ACTIVE;
+            case RETRY_ATTEMPTED: return RETRY_ATTEMPTED;
+            case RETRY_SUCCESS: return RETRY_SUCCESS;
+            case RETRY_FAILURE: return RETRY_FAILURE;
             default:
                 throw new RuntimeException("Not an event that can be converted to HystrixEventType : " + event);
         }
@@ -130,6 +136,9 @@ public enum HystrixEventType {
                 case TIMEOUT: return EXECUTED;
                 case BAD_REQUEST: return EXECUTED;
                 case THREAD_POOL_REJECTED: return REJECTED;
+                case RETRY_ATTEMPTED: return EXECUTED;
+                case RETRY_SUCCESS: return EXECUTED;
+                case RETRY_FAILURE: return EXECUTED;
                 default: return null;
             }
         }

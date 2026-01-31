@@ -64,6 +64,10 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Boolean default_executionRetryEnabled = true; // default => retryEnabled = true (commands will retry on failure before falling back)
+    private static final Integer default_executionRetryMaxAttempts = 2; // default => retryMaxAttempts = 2 (total of 3 attempts: 1 initial + 2 retries)
+    private static final Integer default_executionRetryInitialBackoffInMilliseconds = 100; // default => initial backoff of 100ms between retries
+    private static final Integer default_executionRetryMaxBackoffInMilliseconds = 1000; // default => max backoff of 1000ms between retries
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -92,6 +96,10 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> executionRetryEnabled; // Whether execution should be retried on failure before fallback
+    private final HystrixProperty<Integer> executionRetryMaxAttempts; // Maximum number of retry attempts (not including initial attempt)
+    private final HystrixProperty<Integer> executionRetryInitialBackoffInMilliseconds; // Initial backoff delay between retries
+    private final HystrixProperty<Integer> executionRetryMaxBackoffInMilliseconds; // Maximum backoff delay between retries (uses exponential backoff)
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -142,6 +150,10 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.executionRetryEnabled = getProperty(propertyPrefix, key, "execution.retry.enabled", builder.getExecutionRetryEnabled(), default_executionRetryEnabled);
+        this.executionRetryMaxAttempts = getProperty(propertyPrefix, key, "execution.retry.maxAttempts", builder.getExecutionRetryMaxAttempts(), default_executionRetryMaxAttempts);
+        this.executionRetryInitialBackoffInMilliseconds = getProperty(propertyPrefix, key, "execution.retry.initialBackoffInMilliseconds", builder.getExecutionRetryInitialBackoffInMilliseconds(), default_executionRetryInitialBackoffInMilliseconds);
+        this.executionRetryMaxBackoffInMilliseconds = getProperty(propertyPrefix, key, "execution.retry.maxBackoffInMilliseconds", builder.getExecutionRetryMaxBackoffInMilliseconds(), default_executionRetryMaxBackoffInMilliseconds);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -445,11 +457,51 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
         return requestLogEnabled;
+    }
+
+    /**
+     * Whether {@link HystrixCommand} execution should be retried on failure before falling back.
+     * When enabled, failed executions will be retried with exponential backoff before invoking fallback logic.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> executionRetryEnabled() {
+        return executionRetryEnabled;
+    }
+
+    /**
+     * Maximum number of retry attempts for {@link HystrixCommand} execution (not including the initial attempt).
+     * For example, a value of 2 means the command will be attempted up to 3 times total (1 initial + 2 retries).
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> executionRetryMaxAttempts() {
+        return executionRetryMaxAttempts;
+    }
+
+    /**
+     * Initial backoff delay in milliseconds between retry attempts.
+     * The delay increases exponentially with each retry attempt (backoff = initial * 2^attempt) up to the max backoff value.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> executionRetryInitialBackoffInMilliseconds() {
+        return executionRetryInitialBackoffInMilliseconds;
+    }
+
+    /**
+     * Maximum backoff delay in milliseconds between retry attempts.
+     * The exponential backoff delay will not exceed this value.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> executionRetryMaxBackoffInMilliseconds() {
+        return executionRetryMaxBackoffInMilliseconds;
     }
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
@@ -588,6 +640,10 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Boolean executionRetryEnabled = null;
+        private Integer executionRetryMaxAttempts = null;
+        private Integer executionRetryInitialBackoffInMilliseconds = null;
+        private Integer executionRetryMaxBackoffInMilliseconds = null;
 
         /* package */ Setter() {
         }
@@ -698,6 +754,22 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Boolean getExecutionRetryEnabled() {
+            return executionRetryEnabled;
+        }
+
+        public Integer getExecutionRetryMaxAttempts() {
+            return executionRetryMaxAttempts;
+        }
+
+        public Integer getExecutionRetryInitialBackoffInMilliseconds() {
+            return executionRetryInitialBackoffInMilliseconds;
+        }
+
+        public Integer getExecutionRetryMaxBackoffInMilliseconds() {
+            return executionRetryMaxBackoffInMilliseconds;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -831,6 +903,26 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withExecutionRetryEnabled(boolean value) {
+            this.executionRetryEnabled = value;
+            return this;
+        }
+
+        public Setter withExecutionRetryMaxAttempts(int value) {
+            this.executionRetryMaxAttempts = value;
+            return this;
+        }
+
+        public Setter withExecutionRetryInitialBackoffInMilliseconds(int value) {
+            this.executionRetryInitialBackoffInMilliseconds = value;
+            return this;
+        }
+
+        public Setter withExecutionRetryMaxBackoffInMilliseconds(int value) {
+            this.executionRetryMaxBackoffInMilliseconds = value;
             return this;
         }
     }
