@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -98,7 +99,8 @@ public abstract class HystrixConcurrencyStrategy {
         final int dynamicCoreSize = threadPoolProperties.coreSize().get();
         final int keepAliveTime = threadPoolProperties.keepAliveTimeMinutes().get();
         final int maxQueueSize = threadPoolProperties.maxQueueSize().get();
-        final BlockingQueue<Runnable> workQueue = getBlockingQueue(maxQueueSize);
+        final boolean queuePriorityEnabled = threadPoolProperties.getQueuePriorityEnabled().get();
+        final BlockingQueue<Runnable> workQueue = getBlockingQueue(maxQueueSize, queuePriorityEnabled);
 
         if (allowMaximumSizeToDivergeFromCoreSize) {
             final int dynamicMaximumSize = threadPoolProperties.maximumSize().get();
@@ -142,12 +144,32 @@ public abstract class HystrixConcurrencyStrategy {
      * <b>Default Implementation</b>
      * <p>
      * Implementation returns {@link SynchronousQueue} when maxQueueSize <= 0 or {@link LinkedBlockingQueue} when maxQueueSize > 0.
-     * 
+     *
      * @param maxQueueSize
      *            The max size of the queue requested via properties (or system default if no properties set).
      * @return instance of {@code BlockingQueue<Runnable>}
      */
     public BlockingQueue<Runnable> getBlockingQueue(int maxQueueSize) {
+        return getBlockingQueue(maxQueueSize, false);
+    }
+
+    /**
+     * Factory method to provide instance of {@code BlockingQueue<Runnable>} used for each {@link ThreadPoolExecutor} as constructed in {@link #getThreadPool}.
+     * <p>
+     * When priority is enabled, a {@link PriorityBlockingQueue} is used which orders tasks based on their priority level.
+     * <p>
+     * <b>Default Implementation</b>
+     * <p>
+     * Implementation returns {@link SynchronousQueue} when maxQueueSize <= 0, {@link PriorityBlockingQueue} when priorityEnabled is true and maxQueueSize > 0,
+     * or {@link LinkedBlockingQueue} when maxQueueSize > 0 and priorityEnabled is false.
+     *
+     * @param maxQueueSize
+     *            The max size of the queue requested via properties (or system default if no properties set).
+     * @param priorityEnabled
+     *            Whether to use priority-based queue ordering.
+     * @return instance of {@code BlockingQueue<Runnable>}
+     */
+    public BlockingQueue<Runnable> getBlockingQueue(int maxQueueSize, boolean priorityEnabled) {
         /*
          * We are using SynchronousQueue if maxQueueSize <= 0 (meaning a queue is not wanted).
          * <p>
@@ -158,6 +180,8 @@ public abstract class HystrixConcurrencyStrategy {
          */
         if (maxQueueSize <= 0) {
             return new SynchronousQueue<Runnable>();
+        } else if (priorityEnabled) {
+            return new PriorityBlockingQueue<Runnable>(maxQueueSize);
         } else {
             return new LinkedBlockingQueue<Runnable>(maxQueueSize);
         }

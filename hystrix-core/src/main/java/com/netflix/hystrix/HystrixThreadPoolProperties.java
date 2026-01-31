@@ -57,6 +57,7 @@ public abstract class HystrixThreadPoolProperties {
     static int default_queueSizeRejectionThreshold = 5; // number of items in queue
     static int default_threadPoolRollingNumberStatisticalWindow = 10000; // milliseconds for rolling number
     static int default_threadPoolRollingNumberStatisticalWindowBuckets = 10; // number of buckets in rolling number (10 1-second buckets)
+    static boolean default_queuePriorityEnabled = false; // whether to use priority-based queue ordering
 
     private final HystrixProperty<Integer> corePoolSize;
     private final HystrixProperty<Integer> maximumPoolSize;
@@ -64,6 +65,7 @@ public abstract class HystrixThreadPoolProperties {
     private final HystrixProperty<Integer> maxQueueSize;
     private final HystrixProperty<Integer> queueSizeRejectionThreshold;
     private final HystrixProperty<Boolean> allowMaximumSizeToDivergeFromCoreSize;
+    private final HystrixProperty<Boolean> queuePriorityEnabled;
 
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowInMilliseconds;
     private final HystrixProperty<Integer> threadPoolRollingNumberStatisticalWindowBuckets;
@@ -88,6 +90,7 @@ public abstract class HystrixThreadPoolProperties {
         this.keepAliveTime = getProperty(propertyPrefix, key, "keepAliveTimeMinutes", builder.getKeepAliveTimeMinutes(), default_keepAliveTimeMinutes);
         this.maxQueueSize = getProperty(propertyPrefix, key, "maxQueueSize", builder.getMaxQueueSize(), default_maxQueueSize);
         this.queueSizeRejectionThreshold = getProperty(propertyPrefix, key, "queueSizeRejectionThreshold", builder.getQueueSizeRejectionThreshold(), default_queueSizeRejectionThreshold);
+        this.queuePriorityEnabled = getProperty(propertyPrefix, key, "queuePriorityEnabled", builder.getQueuePriorityEnabled(), default_queuePriorityEnabled);
         this.threadPoolRollingNumberStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_threadPoolRollingNumberStatisticalWindow);
         this.threadPoolRollingNumberStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_threadPoolRollingNumberStatisticalWindowBuckets);
     }
@@ -187,6 +190,16 @@ public abstract class HystrixThreadPoolProperties {
     }
 
     /**
+     * Whether priority-based queue ordering is enabled for the thread pool.
+     * When enabled, commands are dequeued based on their priority level instead of FIFO order.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> getQueuePriorityEnabled() {
+        return queuePriorityEnabled;
+    }
+
+    /**
      * Duration of statistical rolling window in milliseconds. This is passed into {@link HystrixRollingNumber} inside each {@link HystrixThreadPoolMetrics} instance.
      * 
      * @return {@code HystrixProperty<Integer>}
@@ -243,6 +256,7 @@ public abstract class HystrixThreadPoolProperties {
         private Integer maxQueueSize = null;
         private Integer queueSizeRejectionThreshold = null;
         private Boolean allowMaximumSizeToDivergeFromCoreSize = null;
+        private Boolean queuePriorityEnabled = null;
         private Integer rollingStatisticalWindowInMilliseconds = null;
         private Integer rollingStatisticalWindowBuckets = null;
 
@@ -271,6 +285,10 @@ public abstract class HystrixThreadPoolProperties {
 
         public Boolean getAllowMaximumSizeToDivergeFromCoreSize() {
             return allowMaximumSizeToDivergeFromCoreSize;
+        }
+
+        public Boolean getQueuePriorityEnabled() {
+            return queuePriorityEnabled;
         }
 
         public Integer getMetricsRollingStatisticalWindowInMilliseconds() {
@@ -308,6 +326,11 @@ public abstract class HystrixThreadPoolProperties {
 
         public Setter withAllowMaximumSizeToDivergeFromCoreSize(boolean value) {
             this.allowMaximumSizeToDivergeFromCoreSize = value;
+            return this;
+        }
+
+        public Setter withQueuePriorityEnabled(boolean value) {
+            this.queuePriorityEnabled = value;
             return this;
         }
 
