@@ -187,8 +187,16 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
                     }
                 });
 
-                // shard batches (now with priority-ordered requests)
-                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards = commandCollapser.shardRequests(sortedRequests);
+                // auto-shard by priority tiers: group consecutive requests with same priority
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> priorityShards =
+                    shardByPriority(sortedRequests);
+
+                // apply user-defined sharding within each priority tier
+                Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shards =
+                    new ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+                for (Collection<CollapsedRequest<ResponseType, RequestArgumentType>> priorityTier : priorityShards) {
+                    shards.addAll(commandCollapser.shardRequests(priorityTier));
+                }
                 // for each shard execute its requests 
                 for (final Collection<CollapsedRequest<ResponseType, RequestArgumentType>> shardRequests : shards) {
                     try {
@@ -309,5 +317,46 @@ public class RequestBatch<BatchReturnType, ResponseType, RequestArgumentType> {
 
     public int getSize() {
         return argumentMap.size();
+    }
+
+    /**
+     * Shards requests into separate batches based on priority tiers.
+     * Requests with the same priority are grouped together into the same shard.
+     * This ensures that high-priority requests are executed in separate batches
+     * from lower-priority requests, preventing priority inversion.
+     *
+     * @param sortedRequests requests already sorted by priority (ascending)
+     * @return collection of shards, each containing requests of the same priority
+     */
+    private Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> shardByPriority(
+            List<CollapsedRequest<ResponseType, RequestArgumentType>> sortedRequests) {
+
+        Collection<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>> priorityShards =
+            new ArrayList<Collection<CollapsedRequest<ResponseType, RequestArgumentType>>>();
+
+        if (sortedRequests.isEmpty()) {
+            return priorityShards;
+        }
+
+        List<CollapsedRequest<ResponseType, RequestArgumentType>> currentTier =
+            new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+        int currentPriority = sortedRequests.get(0).getPriority();
+
+        for (CollapsedRequest<ResponseType, RequestArgumentType> request : sortedRequests) {
+            if (request.getPriority() != currentPriority) {
+                // priority changed - create new tier
+                priorityShards.add(currentTier);
+                currentTier = new ArrayList<CollapsedRequest<ResponseType, RequestArgumentType>>();
+                currentPriority = request.getPriority();
+            }
+            currentTier.add(request);
+        }
+
+        // add the last tier
+        if (!currentTier.isEmpty()) {
+            priorityShards.add(currentTier);
+        }
+
+        return priorityShards;
     }
 }

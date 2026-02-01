@@ -326,10 +326,16 @@ public abstract class HystrixObservableCollapser<K, BatchReturnType, ResponseTyp
      * For example, a batch of 100 requests could be split into 4 different batches sharded on name (ie. a-g, h-n, o-t, u-z) that each result in a separate {@link HystrixCommand} being created and
      * executed for them.
      * <p>
+     * IMPORTANT: As of Hystrix 1.6.0, requests are automatically pre-sharded by priority before this method is called.
+     * Requests with different priority levels will be automatically separated into different batches to prevent
+     * priority inversion. This method receives requests that have already been grouped by priority tier,
+     * so all requests in the input collection will have the same priority level.
+     * <p>
      * By default this method does nothing to the Collection and is a pass-thru.
-     * 
+     *
      * @param requests
      *            {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} containing {@link CollapsedRequest} objects containing the arguments of each request collapsed in this batch.
+     *            All requests will have the same priority level due to automatic priority-based pre-sharding.
      * @return Collection of {@code Collection<CollapsedRequest<ResponseType, RequestArgumentType>>} objects sharded according to business rules.
      *         <p>The CollapsedRequest instances should not be modified or wrapped as the CollapsedRequest instance object contains state information needed to complete the execution.
      */
