@@ -189,6 +189,9 @@ public abstract class HystrixPropertiesChainedProperty {
     }
     public static ChainBuilder<Long> forLong() {
         return forType(Long.class);
+    }
+    public static ChainBuilder<Double> forDouble() {
+        return forType(Double.class);
     }    
     
     private static class ChainHystrixProperty<T> implements HystrixDynamicProperty<T> {

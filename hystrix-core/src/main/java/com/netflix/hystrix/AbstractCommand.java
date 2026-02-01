@@ -698,7 +698,7 @@ import java.util.concurrent.atomic.AtomicReference;
                             executionHook.onThreadStart(_cmd);
                             executionHook.onRunStart(_cmd);
                             executionHook.onExecutionStart(_cmd);
-                            return getUserExecutionObservable(_cmd);
+                            return getUserExecutionObservableWithRetry(_cmd);
                         } catch (Throwable ex) {
                             return Observable.error(ex);
                         }
@@ -751,7 +751,7 @@ import java.util.concurrent.atomic.AtomicReference;
                     try {
                         executionHook.onRunStart(_cmd);
                         executionHook.onExecutionStart(_cmd);
-                        return getUserExecutionObservable(_cmd);  //the getUserExecutionObservable method already wraps sync exceptions, so this shouldn't throw
+                        return getUserExecutionObservableWithRetry(_cmd);  //the getUserExecutionObservable method already wraps sync exceptions, so this shouldn't throw
                     } catch (Throwable ex) {
                         //If the above hooks throw, then use that as the result of the run method
                         return Observable.error(ex);
@@ -907,6 +907,60 @@ import java.util.concurrent.atomic.AtomicReference;
         return userObservable
                 .lift(new ExecutionHookApplication(_cmd))
                 .lift(new DeprecatedOnRunHookApplication(_cmd));
+    }
+
+    /**
+     * Wraps getUserExecutionObservable with retry logic when retry is enabled.
+     * Implements exponential backoff retry strategy with configurable parameters.
+     */
+    private Observable<R> getUserExecutionObservableWithRetry(final AbstractCommand<R> _cmd) {
+        if (!properties.retryEnabled().get()) {
+            // Retry is disabled, use regular execution
+            return getUserExecutionObservable(_cmd);
+        }
+
+        final int maxAttempts = properties.retryMaxAttempts().get();
+        final long initialDelay = properties.retryInitialDelayMilliseconds().get();
+        final long maxDelay = properties.retryMaxDelayMilliseconds().get();
+        final double backoffMultiplier = properties.retryBackoffMultiplier().get();
+        final AtomicInteger attemptCount = new AtomicInteger(0);
+
+        return getUserExecutionObservable(_cmd).onErrorResumeNext(new Func1<Throwable, Observable<R>>() {
+            @Override
+            public Observable<R> call(final Throwable firstError) {
+                // Check if error is retryable (not BadRequest, not short-circuit, not rejection)
+                if (firstError instanceof HystrixBadRequestException) {
+                    return Observable.error(firstError);
+                }
+
+                int attempt = attemptCount.incrementAndGet();
+
+                if (attempt > maxAttempts) {
+                    // Max retries exhausted
+                    executionResult = executionResult.addEvent(HystrixEventType.RETRY_EXHAUSTED);
+                    eventNotifier.markEvent(HystrixEventType.RETRY_EXHAUSTED, commandKey);
+                    return Observable.error(firstError);
+                }
+
+                // Calculate delay with exponential backoff
+                long delay = Math.min((long)(initialDelay * Math.pow(backoffMultiplier, attempt - 1)), maxDelay);
+
+                // Mark retry attempt
+                executionResult = executionResult.addEvent(HystrixEventType.RETRY_ATTEMPTED);
+                eventNotifier.markEvent(HystrixEventType.RETRY_ATTEMPTED, commandKey);
+
+                logger.debug("Retrying command execution (attempt {} of {}) after {}ms", attempt, maxAttempts, delay);
+
+                // Retry with delay using timer
+                return Observable.timer(delay, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        .flatMap(new Func1<Long, Observable<R>>() {
+                            @Override
+                            public Observable<R> call(Long aLong) {
+                                return getUserExecutionObservableWithRetry(_cmd);
+                            }
+                        });
+            }
+        });
     }
 
     /**

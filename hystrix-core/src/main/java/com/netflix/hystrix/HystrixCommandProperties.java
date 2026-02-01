@@ -18,6 +18,7 @@ package com.netflix.hystrix;
 import static com.netflix.hystrix.strategy.properties.HystrixPropertiesChainedProperty.forBoolean;
 import static com.netflix.hystrix.strategy.properties.HystrixPropertiesChainedProperty.forInteger;
 import static com.netflix.hystrix.strategy.properties.HystrixPropertiesChainedProperty.forString;
+import static com.netflix.hystrix.strategy.properties.HystrixPropertiesChainedProperty.forDouble;
 
 import java.util.concurrent.Future;
 
@@ -64,6 +65,11 @@ public abstract class HystrixCommandProperties {
     private static final Integer default_metricsRollingPercentileWindowBuckets = 6; // default to 6 buckets (10 seconds each in 60 second window)
     private static final Integer default_metricsRollingPercentileBucketSize = 100; // default to 100 values max per bucket
     private static final Integer default_metricsHealthSnapshotIntervalInMilliseconds = 500; // default to 500ms as max frequency between allowing snapshots of health (error percentage etc)
+    private static final Boolean default_retryEnabled = false; // default => retryEnabled = false (disabled by default)
+    private static final Integer default_retryMaxAttempts = 2; // default => retryMaxAttempts: 2 = retry up to 2 times (3 total attempts including the original)
+    private static final Integer default_retryInitialDelayMilliseconds = 100; // default => retryInitialDelayMilliseconds: 100ms initial delay before first retry
+    private static final Integer default_retryMaxDelayMilliseconds = 2000; // default => retryMaxDelayMilliseconds: 2000ms maximum delay between retries
+    private static final Double default_retryBackoffMultiplier = 2.0; // default => retryBackoffMultiplier: 2.0 = exponential backoff (100ms, 200ms, 400ms, etc)
 
     @SuppressWarnings("unused") private final HystrixCommandKey key;
     private final HystrixProperty<Integer> circuitBreakerRequestVolumeThreshold; // number of requests that must be made within a statisticalWindow before open/close decisions are made using stats
@@ -92,6 +98,11 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Integer> metricsHealthSnapshotIntervalInMilliseconds; // time between health snapshots
     private final HystrixProperty<Boolean> requestLogEnabled; // whether command request logging is enabled.
     private final HystrixProperty<Boolean> requestCacheEnabled; // Whether request caching is enabled.
+    private final HystrixProperty<Boolean> retryEnabled; // Whether automatic retry is enabled on transient failures
+    private final HystrixProperty<Integer> retryMaxAttempts; // Maximum number of retry attempts
+    private final HystrixProperty<Integer> retryInitialDelayMilliseconds; // Initial delay in milliseconds before first retry
+    private final HystrixProperty<Integer> retryMaxDelayMilliseconds; // Maximum delay in milliseconds between retries
+    private final HystrixProperty<Double> retryBackoffMultiplier; // Exponential backoff multiplier for retry delays
 
     /**
      * Isolation strategy to use when executing a {@link HystrixCommand}.
@@ -142,6 +153,11 @@ public abstract class HystrixCommandProperties {
         this.metricsHealthSnapshotIntervalInMilliseconds = getProperty(propertyPrefix, key, "metrics.healthSnapshot.intervalInMilliseconds", builder.getMetricsHealthSnapshotIntervalInMilliseconds(), default_metricsHealthSnapshotIntervalInMilliseconds);
         this.requestCacheEnabled = getProperty(propertyPrefix, key, "requestCache.enabled", builder.getRequestCacheEnabled(), default_requestCacheEnabled);
         this.requestLogEnabled = getProperty(propertyPrefix, key, "requestLog.enabled", builder.getRequestLogEnabled(), default_requestLogEnabled);
+        this.retryEnabled = getProperty(propertyPrefix, key, "retry.enabled", builder.getRetryEnabled(), default_retryEnabled);
+        this.retryMaxAttempts = getProperty(propertyPrefix, key, "retry.maxAttempts", builder.getRetryMaxAttempts(), default_retryMaxAttempts);
+        this.retryInitialDelayMilliseconds = getProperty(propertyPrefix, key, "retry.initialDelayMilliseconds", builder.getRetryInitialDelayMilliseconds(), default_retryInitialDelayMilliseconds);
+        this.retryMaxDelayMilliseconds = getProperty(propertyPrefix, key, "retry.maxDelayMilliseconds", builder.getRetryMaxDelayMilliseconds(), default_retryMaxDelayMilliseconds);
+        this.retryBackoffMultiplier = getProperty(propertyPrefix, key, "retry.backoffMultiplier", builder.getRetryBackoffMultiplier(), default_retryBackoffMultiplier);
 
         // threadpool doesn't have a global override, only instance level makes sense
         this.executionIsolationThreadPoolKeyOverride = forString().add(propertyPrefix + ".command." + key.name() + ".threadPoolKeyOverride", null).build();
@@ -445,11 +461,62 @@ public abstract class HystrixCommandProperties {
 
     /**
      * Whether {@link HystrixCommand} execution and events should be logged to {@link HystrixRequestLog}.
-     * 
+     *
      * @return {@code HystrixProperty<Boolean>}
      */
     public HystrixProperty<Boolean> requestLogEnabled() {
         return requestLogEnabled;
+    }
+
+    /**
+     * Whether automatic retry should be attempted on transient failures.
+     * When enabled, commands will be retried up to retryMaxAttempts times with exponential backoff.
+     *
+     * @return {@code HystrixProperty<Boolean>}
+     */
+    public HystrixProperty<Boolean> retryEnabled() {
+        return retryEnabled;
+    }
+
+    /**
+     * Maximum number of retry attempts. This does not include the original execution.
+     * For example, retryMaxAttempts=2 means up to 3 total attempts (1 original + 2 retries).
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> retryMaxAttempts() {
+        return retryMaxAttempts;
+    }
+
+    /**
+     * Initial delay in milliseconds before the first retry attempt.
+     * Subsequent delays are calculated using exponential backoff based on retryBackoffMultiplier.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> retryInitialDelayMilliseconds() {
+        return retryInitialDelayMilliseconds;
+    }
+
+    /**
+     * Maximum delay in milliseconds between retry attempts.
+     * This caps the exponential backoff to prevent excessively long delays.
+     *
+     * @return {@code HystrixProperty<Integer>}
+     */
+    public HystrixProperty<Integer> retryMaxDelayMilliseconds() {
+        return retryMaxDelayMilliseconds;
+    }
+
+    /**
+     * Exponential backoff multiplier for calculating retry delays.
+     * Each retry delay = min(previous_delay * multiplier, retryMaxDelayMilliseconds).
+     * Default is 2.0 (delays: 100ms, 200ms, 400ms, 800ms, etc).
+     *
+     * @return {@code HystrixProperty<Double>}
+     */
+    public HystrixProperty<Double> retryBackoffMultiplier() {
+        return retryBackoffMultiplier;
     }
 
     private static HystrixProperty<Boolean> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Boolean builderOverrideValue, Boolean defaultValue) {
@@ -469,6 +536,13 @@ public abstract class HystrixCommandProperties {
     @SuppressWarnings("unused")
     private static HystrixProperty<String> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, String builderOverrideValue, String defaultValue) {
         return forString()
+                .add(propertyPrefix + ".command." + key.name() + "." + instanceProperty, builderOverrideValue)
+                .add(propertyPrefix + ".command.default." + instanceProperty, defaultValue)
+                .build();
+    }
+
+    private static HystrixProperty<Double> getProperty(String propertyPrefix, HystrixCommandKey key, String instanceProperty, Double builderOverrideValue, Double defaultValue) {
+        return forDouble()
                 .add(propertyPrefix + ".command." + key.name() + "." + instanceProperty, builderOverrideValue)
                 .add(propertyPrefix + ".command.default." + instanceProperty, defaultValue)
                 .build();
@@ -588,6 +662,11 @@ public abstract class HystrixCommandProperties {
         private Integer metricsRollingStatisticalWindowBuckets = null;
         private Boolean requestCacheEnabled = null;
         private Boolean requestLogEnabled = null;
+        private Boolean retryEnabled = null;
+        private Integer retryMaxAttempts = null;
+        private Integer retryInitialDelayMilliseconds = null;
+        private Integer retryMaxDelayMilliseconds = null;
+        private Double retryBackoffMultiplier = null;
 
         /* package */ Setter() {
         }
@@ -698,6 +777,26 @@ public abstract class HystrixCommandProperties {
 
         public Boolean getRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public Boolean getRetryEnabled() {
+            return retryEnabled;
+        }
+
+        public Integer getRetryMaxAttempts() {
+            return retryMaxAttempts;
+        }
+
+        public Integer getRetryInitialDelayMilliseconds() {
+            return retryInitialDelayMilliseconds;
+        }
+
+        public Integer getRetryMaxDelayMilliseconds() {
+            return retryMaxDelayMilliseconds;
+        }
+
+        public Double getRetryBackoffMultiplier() {
+            return retryBackoffMultiplier;
         }
 
         public Setter withCircuitBreakerEnabled(boolean value) {
@@ -831,6 +930,31 @@ public abstract class HystrixCommandProperties {
 
         public Setter withRequestLogEnabled(boolean value) {
             this.requestLogEnabled = value;
+            return this;
+        }
+
+        public Setter withRetryEnabled(boolean value) {
+            this.retryEnabled = value;
+            return this;
+        }
+
+        public Setter withRetryMaxAttempts(int value) {
+            this.retryMaxAttempts = value;
+            return this;
+        }
+
+        public Setter withRetryInitialDelayMilliseconds(int value) {
+            this.retryInitialDelayMilliseconds = value;
+            return this;
+        }
+
+        public Setter withRetryMaxDelayMilliseconds(int value) {
+            this.retryMaxDelayMilliseconds = value;
+            return this;
+        }
+
+        public Setter withRetryBackoffMultiplier(double value) {
+            this.retryBackoffMultiplier = value;
             return this;
         }
     }

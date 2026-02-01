@@ -54,7 +54,12 @@ public class HystrixCommandConfiguration {
                 commandProperties.fallbackEnabled().get(),
                 commandProperties.fallbackIsolationSemaphoreMaxConcurrentRequests().get(),
                 commandProperties.requestCacheEnabled().get(),
-                commandProperties.requestLogEnabled().get()
+                commandProperties.requestLogEnabled().get(),
+                commandProperties.retryEnabled().get(),
+                commandProperties.retryMaxAttempts().get(),
+                commandProperties.retryInitialDelayMilliseconds().get(),
+                commandProperties.retryMaxDelayMilliseconds().get(),
+                commandProperties.retryBackoffMultiplier().get()
         );
 
         HystrixCommandCircuitBreakerConfig circuitBreakerConfig = new HystrixCommandCircuitBreakerConfig(
@@ -153,11 +158,18 @@ public class HystrixCommandConfiguration {
         private final int fallbackMaxConcurrentRequest;
         private final boolean requestCacheEnabled;
         private final boolean requestLogEnabled;
+        private final boolean retryEnabled;
+        private final int retryMaxAttempts;
+        private final int retryInitialDelayMilliseconds;
+        private final int retryMaxDelayMilliseconds;
+        private final double retryBackoffMultiplier;
 
         public HystrixCommandExecutionConfig(int semaphoreMaxConcurrentRequests, HystrixCommandProperties.ExecutionIsolationStrategy isolationStrategy,
                                              boolean threadInterruptOnTimeout, String threadPoolKeyOverride, boolean timeoutEnabled,
                                              int timeoutInMilliseconds, boolean fallbackEnabled, int fallbackMaxConcurrentRequests,
-                                             boolean requestCacheEnabled, boolean requestLogEnabled) {
+                                             boolean requestCacheEnabled, boolean requestLogEnabled, boolean retryEnabled,
+                                             int retryMaxAttempts, int retryInitialDelayMilliseconds, int retryMaxDelayMilliseconds,
+                                             double retryBackoffMultiplier) {
             this.semaphoreMaxConcurrentRequests = semaphoreMaxConcurrentRequests;
             this.isolationStrategy = isolationStrategy;
             this.threadInterruptOnTimeout = threadInterruptOnTimeout;
@@ -168,6 +180,11 @@ public class HystrixCommandConfiguration {
             this.fallbackMaxConcurrentRequest = fallbackMaxConcurrentRequests;
             this.requestCacheEnabled = requestCacheEnabled;
             this.requestLogEnabled = requestLogEnabled;
+            this.retryEnabled = retryEnabled;
+            this.retryMaxAttempts = retryMaxAttempts;
+            this.retryInitialDelayMilliseconds = retryInitialDelayMilliseconds;
+            this.retryMaxDelayMilliseconds = retryMaxDelayMilliseconds;
+            this.retryBackoffMultiplier = retryBackoffMultiplier;
 
         }
 
@@ -209,6 +226,26 @@ public class HystrixCommandConfiguration {
 
         public boolean isRequestLogEnabled() {
             return requestLogEnabled;
+        }
+
+        public boolean isRetryEnabled() {
+            return retryEnabled;
+        }
+
+        public int getRetryMaxAttempts() {
+            return retryMaxAttempts;
+        }
+
+        public int getRetryInitialDelayMilliseconds() {
+            return retryInitialDelayMilliseconds;
+        }
+
+        public int getRetryMaxDelayMilliseconds() {
+            return retryMaxDelayMilliseconds;
+        }
+
+        public double getRetryBackoffMultiplier() {
+            return retryBackoffMultiplier;
         }
     }
 
