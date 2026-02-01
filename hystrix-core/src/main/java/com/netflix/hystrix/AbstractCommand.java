@@ -875,6 +875,17 @@ import java.util.concurrent.atomic.AtomicReference;
                         fallbackExecutionChain = Observable.error(ex);
                     }
 
+                    // Apply async execution if configured
+                    if (properties.fallbackExecutionMode().get() == HystrixCommandProperties.FallbackExecutionMode.ASYNC_SCHEDULED) {
+                        fallbackExecutionChain = fallbackExecutionChain
+                                .subscribeOn(threadPool.getScheduler(new Func0<Boolean>() {
+                                    @Override
+                                    public Boolean call() {
+                                        return false;
+                                    }
+                                }));
+                    }
+
                     return fallbackExecutionChain
                             .doOnEach(setRequestContext)
                             .lift(new FallbackHookApplication(_cmd))
@@ -929,6 +940,17 @@ import java.util.concurrent.atomic.AtomicReference;
 
         try {
             Observable<R> secondaryFallback = getSecondaryFallbackObservable();
+
+            // Apply async execution if configured
+            if (properties.fallbackExecutionMode().get() == HystrixCommandProperties.FallbackExecutionMode.ASYNC_SCHEDULED) {
+                secondaryFallback = secondaryFallback
+                        .subscribeOn(threadPool.getScheduler(new Func0<Boolean>() {
+                            @Override
+                            public Boolean call() {
+                                return false;
+                            }
+                        }));
+            }
 
             return secondaryFallback
                     .doOnNext(new Action1<R>() {
@@ -990,6 +1012,17 @@ import java.util.concurrent.atomic.AtomicReference;
 
         try {
             Observable<R> tertiaryFallback = getTertiaryFallbackObservable();
+
+            // Apply async execution if configured
+            if (properties.fallbackExecutionMode().get() == HystrixCommandProperties.FallbackExecutionMode.ASYNC_SCHEDULED) {
+                tertiaryFallback = tertiaryFallback
+                        .subscribeOn(threadPool.getScheduler(new Func0<Boolean>() {
+                            @Override
+                            public Boolean call() {
+                                return false;
+                            }
+                        }));
+            }
 
             return tertiaryFallback
                     .doOnNext(new Action1<R>() {

@@ -57,6 +57,7 @@ public abstract class HystrixCommandProperties {
     private static final Boolean default_fallbackEnabled = true;
     private static final Boolean default_fallbackChainingEnabled = true;
     private static final Integer default_fallbackMaxChainDepth = 3;
+    private static final FallbackExecutionMode default_fallbackExecutionMode = FallbackExecutionMode.ASYNC_SCHEDULED;
     private static final Integer default_executionIsolationSemaphoreMaxConcurrentRequests = 10;
     private static final Boolean default_requestLogEnabled = true;
     private static final Boolean default_circuitBreakerEnabled = true;
@@ -81,6 +82,7 @@ public abstract class HystrixCommandProperties {
     private final HystrixProperty<Boolean> fallbackEnabled; // Whether fallback should be attempted.
     private final HystrixProperty<Boolean> fallbackChainingEnabled; // Whether fallback chaining (secondary/tertiary fallbacks) should be attempted.
     private final HystrixProperty<Integer> fallbackMaxChainDepth; // Maximum depth of fallback chain (1=primary only, 2=primary+secondary, 3=all three levels)
+    private final HystrixProperty<FallbackExecutionMode> fallbackExecutionMode; // How fallback should be executed (synchronously or async)
     private final HystrixProperty<Boolean> executionIsolationThreadInterruptOnTimeout; // Whether an underlying Future/Thread (when runInSeparateThread == true) should be interrupted after a timeout
     private final HystrixProperty<Boolean> executionIsolationThreadInterruptOnFutureCancel; // Whether canceling an underlying Future/Thread (when runInSeparateThread == true) should interrupt the execution thread
     private final HystrixProperty<Integer> metricsRollingStatisticalWindowInMilliseconds; // milliseconds back that will be tracked
@@ -103,6 +105,18 @@ public abstract class HystrixCommandProperties {
      */
     public static enum ExecutionIsolationStrategy {
         THREAD, SEMAPHORE
+    }
+
+    /**
+     * Strategy for executing fallback logic.
+     * <p>
+     * <ul>
+     * <li>SYNCHRONOUS: Execute fallback on the current thread (default legacy behavior)</li>
+     * <li>ASYNC_SCHEDULED: Execute fallback asynchronously on a separate scheduler to prevent blocking the caller</li>
+     * </ul>
+     */
+    public static enum FallbackExecutionMode {
+        SYNCHRONOUS, ASYNC_SCHEDULED
     }
 
     protected HystrixCommandProperties(HystrixCommandKey key) {
@@ -133,6 +147,7 @@ public abstract class HystrixCommandProperties {
         this.fallbackEnabled = getProperty(propertyPrefix, key, "fallback.enabled", builder.getFallbackEnabled(), default_fallbackEnabled);
         this.fallbackChainingEnabled = getProperty(propertyPrefix, key, "fallback.chaining.enabled", builder.getFallbackChainingEnabled(), default_fallbackChainingEnabled);
         this.fallbackMaxChainDepth = getProperty(propertyPrefix, key, "fallback.maxChainDepth", builder.getFallbackMaxChainDepth(), default_fallbackMaxChainDepth);
+        this.fallbackExecutionMode = getProperty(propertyPrefix, key, "fallback.execution.mode", builder.getFallbackExecutionMode(), default_fallbackExecutionMode);
         this.metricsRollingStatisticalWindowInMilliseconds = getProperty(propertyPrefix, key, "metrics.rollingStats.timeInMilliseconds", builder.getMetricsRollingStatisticalWindowInMilliseconds(), default_metricsRollingStatisticalWindow);
         this.metricsRollingStatisticalWindowBuckets = getProperty(propertyPrefix, key, "metrics.rollingStats.numBuckets", builder.getMetricsRollingStatisticalWindowBuckets(), default_metricsRollingStatisticalWindowBuckets);
         this.metricsRollingPercentileEnabled = getProperty(propertyPrefix, key, "metrics.rollingPercentile.enabled", builder.getMetricsRollingPercentileEnabled(), default_metricsRollingPercentileEnabled);
@@ -360,6 +375,18 @@ public abstract class HystrixCommandProperties {
     }
 
     /**
+     * Execution mode for fallback logic.
+     * <p>
+     * When set to SYNCHRONOUS, fallbacks execute on the calling thread (legacy behavior).
+     * When set to ASYNC_SCHEDULED, fallbacks execute asynchronously on a separate scheduler to avoid blocking the caller.
+     *
+     * @return {@code HystrixProperty<FallbackExecutionMode>}
+     */
+    public HystrixProperty<FallbackExecutionMode> fallbackExecutionMode() {
+        return fallbackExecutionMode;
+    }
+
+    /**
      * Time in milliseconds to wait between allowing health snapshots to be taken that calculate success and error percentages and affect {@link HystrixCircuitBreaker#isOpen()} status.
      * <p>
      * On high-volume circuits the continual calculation of error percentage can become CPU intensive thus this controls how often it is calculated.
@@ -479,6 +506,11 @@ public abstract class HystrixCommandProperties {
 
     }
 
+    private static HystrixProperty<FallbackExecutionMode> getProperty(final String propertyPrefix, final HystrixCommandKey key, final String instanceProperty, final FallbackExecutionMode builderOverrideValue, final FallbackExecutionMode defaultValue) {
+        return new FallbackExecutionModeHystrixProperty(builderOverrideValue, key, propertyPrefix, defaultValue, instanceProperty);
+
+    }
+
     /**
      * HystrixProperty that converts a String to ExecutionIsolationStrategy so we remain TypeSafe.
      */
@@ -523,6 +555,56 @@ public abstract class HystrixCommandProperties {
                 value = ExecutionIsolationStrategy.valueOf(property.get());
             } catch (Exception e) {
                 logger.error("Unable to derive ExecutionIsolationStrategy from property value: " + property.get(), e);
+                // use the default value
+                value = defaultValue;
+            }
+        }
+    }
+
+    /**
+     * HystrixProperty that converts a String to FallbackExecutionMode so we remain TypeSafe.
+     */
+    private static final class FallbackExecutionModeHystrixProperty implements HystrixProperty<FallbackExecutionMode> {
+        private final HystrixDynamicProperty<String> property;
+        private volatile FallbackExecutionMode value;
+        private final FallbackExecutionMode defaultValue;
+
+        private FallbackExecutionModeHystrixProperty(FallbackExecutionMode builderOverrideValue, HystrixCommandKey key, String propertyPrefix, FallbackExecutionMode defaultValue, String instanceProperty) {
+            this.defaultValue = defaultValue;
+            String overrideValue = null;
+            if (builderOverrideValue != null) {
+                overrideValue = builderOverrideValue.name();
+            }
+            property = forString()
+                    .add(propertyPrefix + ".command." + key.name() + "." + instanceProperty, overrideValue)
+                    .add(propertyPrefix + ".command.default." + instanceProperty, defaultValue.name())
+                    .build();
+
+            // initialize the enum value from the property
+            parseProperty();
+
+            // use a callback to handle changes so we only handle the parse cost on updates rather than every fetch
+            property.addCallback(new Runnable() {
+
+                @Override
+                public void run() {
+                    // when the property value changes we'll update the value
+                    parseProperty();
+                }
+
+            });
+        }
+
+        @Override
+        public FallbackExecutionMode get() {
+            return value;
+        }
+
+        private void parseProperty() {
+            try {
+                value = FallbackExecutionMode.valueOf(property.get());
+            } catch (Exception e) {
+                logger.error("Unable to derive FallbackExecutionMode from property value: " + property.get(), e);
                 // use the default value
                 value = defaultValue;
             }
@@ -578,6 +660,7 @@ public abstract class HystrixCommandProperties {
         private Boolean fallbackEnabled = null;
         private Boolean fallbackChainingEnabled = null;
         private Integer fallbackMaxChainDepth = null;
+        private FallbackExecutionMode fallbackExecutionMode = null;
         private Integer metricsHealthSnapshotIntervalInMilliseconds = null;
         private Integer metricsRollingPercentileBucketSize = null;
         private Boolean metricsRollingPercentileEnabled = null;
@@ -662,6 +745,10 @@ public abstract class HystrixCommandProperties {
 
         public Integer getFallbackMaxChainDepth() {
             return fallbackMaxChainDepth;
+        }
+
+        public FallbackExecutionMode getFallbackExecutionMode() {
+            return fallbackExecutionMode;
         }
 
         public Integer getMetricsHealthSnapshotIntervalInMilliseconds() {
@@ -786,6 +873,11 @@ public abstract class HystrixCommandProperties {
 
         public Setter withFallbackMaxChainDepth(int value) {
             this.fallbackMaxChainDepth = value;
+            return this;
+        }
+
+        public Setter withFallbackExecutionMode(FallbackExecutionMode value) {
+            this.fallbackExecutionMode = value;
             return this;
         }
 
